@@ -58,7 +58,7 @@ Public Class TaskPane
         head.SetColumnSpan(title, 2)
 
         ' Workbook
-        head.Controls.Add(Caption("Workbook (active in Excel)"), 0, 1)
+        head.Controls.Add(Caption("Workbook (used by the steps)"), 0, 1)
         head.SetColumnSpan(head.GetControlFromPosition(0, 1), 2)
         wbLabel = New Label()
         wbLabel.AutoSize = True
@@ -173,9 +173,9 @@ Public Class TaskPane
     End Sub
 
     Public Sub RefreshWorkbook()
-        Dim wb As Object = ExcelLink.ActiveWorkbook()
+        Dim wb As Object = ExcelLink.StepsWorkbook()
         If wb Is Nothing Then
-            wbLabel.Text = "(none open)"
+            wbLabel.Text = ExcelLink.WillAskText()
         Else
             Try
                 wbLabel.Text = CStr(wb.Name)

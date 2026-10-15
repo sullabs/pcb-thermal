@@ -12,8 +12,8 @@ Branch `addin-mvp`. The VBA macros in `../src/` stay the reference: every step h
   - 1 to 8 run the workflow steps (Prepare Workbook, Import STEP, Build Board, Build Spreader, Sync CAD to Excel,
     Run Thermal Study, Run Flow Sim, Read Results). Same behaviour, workbook cells and messages as the VBA macros.
   - **Check Model** counts components, solid bodies, faces and triangles in the open model and times it.
-  - **Check Workbook** finds the open Excel workbook and checks the numbered tabs the steps need.
-- **Task pane "NTIS thermal simulation"**: active workbook, the 8 steps with their last status (double-click to run),
+  - **Check Workbook** checks the workbook the steps will use (the last one used, if open in Excel) for the numbered tabs.
+- **Task pane "NTIS thermal simulation"**: the workbook the steps will use ("(will ask)" if the last one is not open), the 8 steps with their last status (double-click to run),
   what the selected step does and when to use it, a log.
   Tick **Run the VBA macros (.swp) instead** to run the old macros from a macro project (for comparison only).
 - Every button has a full tooltip: what it does, then when to use it (`CommandHelp` in `src/AddIn.vb`).

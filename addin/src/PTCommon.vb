@@ -45,11 +45,9 @@ Public Module PTCommon
     ' needSheets ("Tab one|Tab two"). Returns Nothing if the user cancels or a check fails (the user has been told why).
     ' Shares the "last workbook" setting with the VBA macros (GetSetting/SaveSetting, same registry key).
     Public Function PT_PickWorkbook(ByVal xl As Object, ByVal macroName As String, ByVal needSheets As String) As Object
-        Dim wbk As Object = Nothing
-        Dim lastF As String = GetSetting(PT_APP, "Common", "Workbook", "")
-        If lastF = "" Then lastF = GetSetting(PT_APP, "ImportStep", "Workbook", "")
+        Dim lastF As String = PT_LastWorkbookFile()
         ' the workbook used last time is still open in Excel: use it without asking (close it to pick another one)
-        If lastF <> "" Then wbk = FindOpenWorkbook(xl, lastF)
+        Dim wbk As Object = PT_CurrentWorkbook(xl)
         If wbk Is Nothing Then
             Dim f As String = SwGetOpenFileName("Pick the project workbook (a copy of PCB_thermal_TEMPLATE)", lastF,
                                                 "Excel workbook (*.xlsx;*.xlsm)|*.xlsx;*.xlsm||")
@@ -75,7 +73,28 @@ Public Module PTCommon
             Return Nothing
         End If
         SaveSetting(PT_APP, "Common", "Workbook", full)
+        Log.Write("Using " & CStr(wbk.Name))
         Return wbk
+    End Function
+
+    ' Full path of the workbook used last (shared with the VBA macros), or "".
+    Public Function PT_LastWorkbookFile() As String
+        Dim lastF As String = GetSetting(PT_APP, "Common", "Workbook", "")
+        If lastF = "" Then lastF = GetSetting(PT_APP, "ImportStep", "Workbook", "")
+        Return lastF
+    End Function
+
+    ' The workbook the steps will use without asking: the last one used, if it is open in Excel. Else Nothing.
+    ' The task pane and Check use this, so they show the same file as the steps.
+    Public Function PT_CurrentWorkbook(ByVal xl As Object) As Object
+        If xl Is Nothing Then Return Nothing
+        Dim lastF As String = PT_LastWorkbookFile()
+        If lastF = "" Then Return Nothing
+        Try
+            Return FindOpenWorkbook(xl, lastF)
+        Catch
+            Return Nothing
+        End Try
     End Function
 
     Private Function FindOpenWorkbook(ByVal xl As Object, ByVal fullName As String) As Object

@@ -31,6 +31,24 @@ Public Module ExcelLink
         End Try
     End Function
 
+    ' The workbook the steps will write to (PT_CurrentWorkbook), or Nothing when they will ask for one.
+    Public Function StepsWorkbook() As Object
+        Return PTCommon.PT_CurrentWorkbook(GetExcel())
+    End Function
+
+    ' Text for the task pane and Check when the steps will ask: names the active workbook so it is not mistaken for the used one.
+    Public Function WillAskText() As String
+        Dim s As String = "(will ask)"
+        Dim act As Object = ActiveWorkbook()
+        If act IsNot Nothing Then
+            Try
+                s &= ", active in Excel: " & CStr(act.Name)
+            Catch
+            End Try
+        End If
+        Return s
+    End Function
+
     ' Same rule as PT_TabBase in PTCommon.bas: drop the step number ("7", "7b") and tidy spaces.
     Public Function TabBase(ByVal tabName As String) As String
         Dim s As String = tabName.Replace(ChrW(160), " ").Replace(vbTab, " ")
@@ -48,9 +66,9 @@ Public Module ExcelLink
     End Function
 
     Public Sub CheckWorkbook()
-        Dim wb As Object = ActiveWorkbook()
+        Dim wb As Object = StepsWorkbook()
         If wb Is Nothing Then
-            Log.Write("Check workbook: no open workbook. Open the board workbook in Excel.")
+            Log.Write("Check workbook: " & WillAskText() & ". The next step asks which workbook to use.")
             Return
         End If
         Log.Write("Check workbook: " & CStr(wb.Name))

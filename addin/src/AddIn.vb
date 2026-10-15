@@ -55,7 +55,7 @@ Public Class AddIn
             "Right after Run Thermal Study has solved."},
         New String() {"Counts components, solid bodies, faces and triangles in the open model and times the count. The result goes to the log in the task pane. Changes nothing.",
             "Before Import STEP on a big model, to see how heavy it is, or to check that the model loaded fully."},
-        New String() {"Finds the open Excel workbook and checks that it has the numbered tabs the steps need. Missing tabs are listed in the log in the task pane. Changes nothing.",
+        New String() {"Checks the workbook the steps will use (the last one used, if it is open in Excel) for the numbered tabs the steps need. Missing tabs are listed in the log in the task pane. If that workbook is not open, the next step asks which one to use. Changes nothing.",
             "When a step cannot find its workbook or a tab. If tabs are missing, run Prepare Workbook."}}
 
     Public Shared Function HelpText(ByVal i As Integer) As String
