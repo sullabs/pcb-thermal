@@ -20,7 +20,7 @@ This is an experiment on branch `addin-mvp`. The VBA macros in `../src/` are sti
 
 Build (needs only Windows and a SolidWorks install for the API files):
 
-    powershell -ExecutionPolicy Bypass -File addinuild.ps1
+    powershell -ExecutionPolicy Bypass -File addin\build.ps1
 
 Output: `addin\dist\PCBThermal_Setup_<version>.exe`, one file with everything inside: the add-in, the SolidWorks
 interop DLLs, icons, the Excel template and, if `addin\macros\PCBThermal.swp` exists, the macro project.
