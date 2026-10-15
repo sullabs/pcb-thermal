@@ -79,6 +79,7 @@ Public Function PT_PickWorkbook(ByVal xl As Object, ByVal macroName As String, B
     Next
     If missing <> "" Then
         MsgBox "That workbook is missing these tabs:" & missing & vbCrLf & vbCrLf & _
+               "Tabs found in " & PT_PickWorkbook.Name & ":" & PT_TabList(PT_PickWorkbook) & vbCrLf & vbCrLf & _
                "Pick a copy of PCB_thermal_TEMPLATE.xlsx.", vbExclamation, macroName
         Set PT_PickWorkbook = Nothing: Exit Function
     End If
@@ -139,19 +140,50 @@ Public Function PT_HasSheet(ByVal wb As Object, ByVal sheetName As String) As Bo
 End Function
 
 ' Tab by its base name. The template puts a step number in front ("7 Spreader"), older copies
-' do not ("Spreader"). Both are found. Returns Nothing if there is no such tab.
+' do not ("Spreader"). Also accepted: "7. Spreader", "07_Spreader", "7-Spreader", "7)Spreader",
+' a non-breaking space, double or trailing spaces, any letter case. Returns Nothing if there is no such tab.
 Public Function PT_Sheet(ByVal wb As Object, ByVal baseName As String) As Object
-    Dim ws As Object, nm As String, p As Long
+    Dim ws As Object, want As String
     On Error Resume Next
     Set PT_Sheet = wb.Worksheets(baseName)
     On Error GoTo 0
     If Not PT_Sheet Is Nothing Then Exit Function
+    want = PT_TabBase(baseName)
     For Each ws In wb.Worksheets
-        nm = ws.Name
-        p = InStr(nm, " ")
-        If p > 1 And Left(nm, 1) Like "[0-9]" Then
-            If StrComp(Mid(nm, p + 1), baseName, vbTextCompare) = 0 Then Set PT_Sheet = ws: Exit Function
-        End If
+        If StrComp(PT_TabBase(ws.Name), want, vbTextCompare) = 0 Then Set PT_Sheet = ws: Exit Function
+    Next
+End Function
+
+' Tab name without its leading step number and separators, spaces cleaned up.
+Public Function PT_TabBase(ByVal tabName As String) As String
+    Dim s As String, k As Long, ch As String
+    s = Replace(tabName, Chr(160), " ")
+    s = Replace(s, vbTab, " ")
+    Do While InStr(s, "  ") > 0
+        s = Replace(s, "  ", " ")
+    Loop
+    s = Trim(s)
+    k = 1
+    Do While k <= Len(s)
+        If Not (Mid(s, k, 1) Like "[0-9]") Then Exit Do
+        k = k + 1
+    Loop
+    If k > 1 Then
+        Do While k <= Len(s)
+            ch = Mid(s, k, 1)
+            If ch <> " " And ch <> "." And ch <> "-" And ch <> "_" And ch <> ")" Then Exit Do
+            k = k + 1
+        Loop
+        s = Mid(s, k)
+    End If
+    PT_TabBase = s
+End Function
+
+' Names of all tabs, one per line, for error messages.
+Public Function PT_TabList(ByVal wb As Object) As String
+    Dim ws As Object
+    For Each ws In wb.Worksheets
+        PT_TabList = PT_TabList & vbCrLf & "  [" & ws.Name & "]"
     Next
 End Function
 
