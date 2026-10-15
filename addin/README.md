@@ -43,6 +43,12 @@ Steps 1 to 8 still run the VBA modules from `PCBThermal.swp`. Plan: port one mod
 check each against the VBA result on the reference board, then switch its button to the native code. When all are
 ported the setup no longer needs the `.swp`.
 
+Done so far: `src/PTCommon.vb` part 1 (Excel and workbook, values, keys, change log, files; VBA lines up to
+`PT_MakeDirs`). Same names as the VBA. Checked on a copy of the reference workbook: the ported `PT_Key` gives the
+same body keys as ImportStep wrote (19 of 19), and a change log row lands as the VBA writes it.
+.NET gotcha: Excel error cells (`#N/A`) arrive as Int32 codes, so `PT_IsNum`/`PT_Num`/`PT_Str` treat Int32 as an error.
+Next: PTCommon part 2 (SolidWorks helpers) together with SetupWorkbook and ImportStep.
+
 ## How it loads without admin
 
 SolidWorks 2023 reads its add-in list only from `HKLM` (tested: the `HKCU\Software\SolidWorks\AddIns` key is ignored).

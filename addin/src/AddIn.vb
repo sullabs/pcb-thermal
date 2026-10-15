@@ -42,6 +42,7 @@ Public Class AddIn
     Public Function ConnectToSW(ByVal ThisSW As Object, ByVal Cookie As Integer) As Boolean Implements ISwAddin.ConnectToSW
         swApp = CType(ThisSW, SldWorks)
         addinCookie = Cookie
+        PTCommon.swApp = swApp
         swApp.SetAddinCallbackInfo2(0, Me, addinCookie)
         Try
             AddTaskPane()
@@ -70,6 +71,7 @@ Public Class AddIn
         pane = Nothing
         paneView = Nothing
         cmdMgr = Nothing
+        PTCommon.swApp = Nothing
         swApp = Nothing
         GC.Collect()
         GC.WaitForPendingFinalizers()
