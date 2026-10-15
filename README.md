@@ -4,7 +4,7 @@ Turns a PCB STEP file into a thermal model, with an optional heat spreader on on
 SolidWorks thermal simulation and writes the results back to Excel. You need SolidWorks 2023 (with Simulation
 for the thermal study, Flow Simulation for the flow study) and Excel.
 
-## What is in this zip
+## What is in this repo
 
 - `macros\` : 9 `.bas` files (one shared module, 8 macros)
 - `icons\` : button icons (16 and 32 px)
@@ -13,7 +13,7 @@ for the thermal study, Flow Simulation for the flow study) and Excel.
 
 ## 1. Install (once, about 10 minutes)
 
-1. Unzip to a folder with a short path that will not move, for example `C:\PCBThermal\`.
+1. Download or clone to a folder with a short path that will not move, for example `C:\PCBThermal\`.
 2. SolidWorks: Tools > Macro > New. Save it as `C:\PCBThermal\PCBThermal.swp`.
 3. In the VBA editor: File > Import File (Ctrl+M). Import every file in `macros\`
    (`PTCommon.bas` plus the 8 others). Delete the empty `Module1`.

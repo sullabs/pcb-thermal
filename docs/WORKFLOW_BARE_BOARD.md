@@ -4,8 +4,7 @@ Goal: build the board, simulate it with no spreader, compare with the hand calcu
 Nothing in this list needs the spreader. SetupSim makes a "bare board study" on its own when the assembly has no
 unsuppressed spreader.
 
-**Status 2026-10-14: stages A and B are done on the fresh RPi4 copy (`workbook\RPi4_fresh.xlsx`). The next step is stages C to G:
-the bare board simulation and its comparison with the hand calculation. Build the spreader only after that.**
+**Build the spreader only after the bare board simulation has been compared with the hand calculation (stages C to G).**
 
 Macros are in the toolbar order of `HOWTO_TOOLBAR.md`. Each step says what to check before moving on.
 
@@ -90,16 +89,7 @@ Macros are in the toolbar order of `HOWTO_TOOLBAR.md`. Each step says what to ch
 
 ## Risks to keep in mind
 
-- Import and build were run on the Raspberry Pi 4 on 2026-10-01 (TEST_REPORT.md) and again on 2026-10-14 on a fresh copy (`TEST_PLAN.md` section F):
-  compiled, run, colours working, re-import and re-build stable. Rotation checks R2, R4, R6 are still open.
 - Convection on PCB top and bottom covers the whole face, also under parts (small error).
 - A heat part left at Include = No gets no heat. The total applied heat check catches it.
-- SetupSim and ReadResults passed on 2026-10-01. The M8 two-resistor layers have never been run.
-
-## Needs a test run (2026-10-14)
-- Energy balance: resolved 2026-10-14. The in-against-out formula gave 49 % on a healthy run. `ReadResults` now compares the net flow
-  out of the model with the register total (5.695 W against 5.696 W, 0 %) and lists the raw flows (5.89 W in, 11.59 W out) in the message.
-- Colours (HOWTO_COLOURS.md): confirmed 2026-10-14 after the `PT_ApplyColor` fix (the old call stored nothing).
-- The Raspberry Pi 4 overlap (Display Connector and Wi-Fi cover, 0.12 mm) still makes SyncFromCAD report failed checks. Decide on an
-  override or Include = No for one body in `RaspberryPi4.xlsx`; it is not changed here.
 - Include on CAD geometry applies to parts. The PCB size comes from the Used column (Length X, Width Y, Thickness Z) and has no Include.
+- The M8 two-resistor chip model has not been run yet.

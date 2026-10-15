@@ -26,14 +26,14 @@ Run it, pick the workbook.
 - Later: updates the same assembly and logs every change on the Change log tab.
 - Writes `<prefix>BuildBoard_report.txt` next to the assembly: failures, skipped rows, overlapping boxes.
 
-Acceptance (RPi4): PCB + 20 parts (18 imported + L1, L2). Run it again straight away: "Nothing changed."
+Check: the PCB plus one part per included body. Run it again straight away: "Nothing changed."
 Overlaps listed are only connectors going into the PCB (and anything the report explains).
 
-## BuildSpreader (2026-10-14: you draw the outline, the macro completes the part)
+## BuildSpreader (you draw the outline, the macro completes the part)
 Run it after BuildBoard, and after the bare board simulation has been compared with the hand calculation.
 
 1. In SolidWorks, in the thermal assembly: Insert > Component > New Part. Put `Spreader` in its name
-   (for example `RPi4_Spreader`). Pick the **Front Plane** of the assembly (or a face parallel to it, such as the PCB top face).
+   (for example `MyBoard_Spreader`). Pick the **Front Plane** of the assembly (or a face parallel to it, such as the PCB top face).
 2. Sketch the plate outline: a rectangle or any closed shape, arcs included. Exit the sketch and **name it `Outline`**
    (a part with only one sketch works without renaming). Leave edit mode, then save the part as a file
    (right-click it in the tree, Save Part (in External File)) next to the assembly.
@@ -53,7 +53,7 @@ Rules and messages:
 - Two spreader parts that are not suppressed: select the one to complete in the tree and run again.
 - `PT_Under`, `PT_Plate`, `Clear_*`, `Ped_*` belong to the macro. Change their numbers on the Spreader tab, not in SolidWorks.
 
-Acceptance (RPi4, all U chips covered, outline of any shape that covers them):
+Checks (all heat chips covered, outline of any shape that covers them):
 - The plate follows your outline, its underside is at the Spreader tab value, thickness as set.
 - Every covered chip: chip top, TIM and pedestal bottom touch (Tools > Evaluate > Measure: distance 0).
 - Tools > Evaluate > Interference Detection on the assembly: nothing between the spreader and any part.
@@ -62,7 +62,7 @@ Acceptance (RPi4, all U chips covered, outline of any shape that covers them):
 ## If something fails
 Send the highlighted line and message (compile errors), the text of the message box, and the report file.
 
-## Added 2026-10-14
+## Notes
 - BuildBoard colours the PCB green and each part with its own colour (HOWTO_COLOURS.md).
 - If no row has Include = Yes, BuildBoard asks before building only the PCB.
 - The summary box lists RefDes that have heat in the register but no built part (RefDes and Include = Yes on CAD geometry).
@@ -74,15 +74,15 @@ Send the highlighted line and message (compile errors), the text of the message 
 
 ## Which plane is the board in?
 The thermal assembly is built by BuildBoard in the board frame: board X and Y in the **Front Plane**, Z up through the board, whatever
-way the STEP had the board. The RPi4 STEP itself lies parallel to the Top Plane (`2 STEP import`, Frame: Board Z = model +Y);
-ImportStep maps it, so in the thermal assembly it stands up in the default isometric view. Use the Front view to see the board from the
+way the STEP had the board. A STEP with its board parallel to the Top Plane (`2 STEP import`, Frame: Board Z = model +Y)
+is mapped by ImportStep, so in the thermal assembly it stands up in the default isometric view. Use the Front view to see the board from the
 component side, and draw the spreader Outline on the Front Plane (or on a face parallel to it, such as the PCB top face).
 An Outline on the Top or Right Plane is refused with a message.
 
 ## Two spreaders: one on each side of the PCB
 For chips on both sides (CAD geometry column Side = Top or Bottom):
 - Top plate: part with `Spreader` in its name, tab `7 Spreader`. Bottom plate: part with `Spreader` and `Bottom` in its name
-  (for example `RPi4_Spreader_Bottom`), tab `7b Spreader bottom`. Draw each Outline on the Front Plane (or a face parallel to it).
+  (for example `MyBoard_Spreader_Bottom`), tab `7b Spreader bottom`. Draw each Outline on the Front Plane (or a face parallel to it).
 - On each tab set Covered = Yes only for chips of that side. The Check column says "chip is on the bottom side" or "chip is on the top side"
   when a chip is on the wrong tab. The bottom tab lists the same RefDes as the top tab.
 - Heights are board Z in mm. Top plate: face toward the board = tallest covered chip top + TIM. Bottom plate: face toward the board = lowest covered chip
