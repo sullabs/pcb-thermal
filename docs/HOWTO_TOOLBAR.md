@@ -48,7 +48,7 @@ Fields in the Customize Macro Button box:
 | 7 | Run Flow Simulation | `RunFlow.main` | `7_RunFlowSim_32.bmp` | Sets heat sources and ambient on your Flow Simulation project, solves it and writes the goals to Sim results. |
 | 8 | Read Results | `ReadResults.main` | `8_ReadResults_32.bmp` | Reads the solved thermal study and writes temperatures to Sim results and Thermal solution column AF. |
 
-Icons: green sheet = the Excel workbook, blue cube = CAD, green board = the PCB, orange = heat or a run. Sources in `addiniconssvg`; `addiniconsender.ps1` remakes these bitmaps.
+Icons: green sheet = the Excel workbook, blue cube = CAD, green board = the PCB, orange = heat or a run. Sources in `addin\icons\svg\`; `addin\icons\render.ps1` remakes these bitmaps.
 
 ## Notes
 
