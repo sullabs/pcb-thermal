@@ -6,20 +6,26 @@ for the thermal study, Flow Simulation for the flow study) and Excel.
 
 ## What is in this repo
 
-- `macros\` : 9 `.bas` files (one shared module, 8 macros)
-- `icons\` : button icons (16 and 32 px)
-- `PCB_thermal_TEMPLATE.xlsx` : the workbook. Make one copy per board and keep the template clean.
-- `docs\` : the workflow and the spreader notes
+What you need to use it:
+
+- `src\` : 9 `.bas` files (one shared module, 8 macros) and `src\icons\` (button icons, 16 and 32 px)
+- `workbook\PCB_thermal_TEMPLATE.xlsx` : the workbook. Make one copy per board and keep the template clean.
+- `docs\` : the workflow and how-to notes (`WORKFLOW_BARE_BOARD.md`, `HOWTO_*.md`)
+
+Development only (not needed to run the macros):
+
+- `example\RaspberryPi4\` : the reference board: STEP file and filled workbooks
+- `tests\`, `tools\`, `PLAN.md`, `CLAUDE.md`, `docs\TEST_*.md` : test macros, scripts, spec and test records
 
 ## 1. Install (once, about 10 minutes)
 
 1. Download or clone to a folder with a short path that will not move, for example `C:\PCBThermal\`.
 2. SolidWorks: Tools > Macro > New. Save it as `C:\PCBThermal\PCBThermal.swp`.
-3. In the VBA editor: File > Import File (Ctrl+M). Import every file in `macros\`
+3. In the VBA editor: File > Import File (Ctrl+M). Import every `.bas` file in `src\`
    (`PTCommon.bas` plus the 8 others). Delete the empty `Module1`.
 4. Debug > Compile VBAProject. Nothing should appear. Press Ctrl+S, then close the editor.
 
-If a compile error appears, send me the highlighted line and the message.
+If a compile error appears, note the highlighted line and the message and report it as an issue.
 
 ## 2. Make the toolbar tab (optional but easier)
 
@@ -28,7 +34,7 @@ If a compile error appears, send me the highlighted line and the message.
    Repeat for each row. Macro = `C:\PCBThermal\PCBThermal.swp` for all of them.
 3. Right-click the tab > Copy Tab to Assembly, so it also shows in assemblies.
 
-| # | Tooltip | Method | Icon (in `icons\`) |
+| # | Tooltip | Method | Icon (in `src\icons\`) |
 |---|---|---|---|
 | 1 | Prepare Workbook | `SetupWorkbook.main` | `1_PrepareWorkbook_32.bmp` |
 | 2 | Import STEP | `ImportStep.main` | `2_ImportStep_32.bmp` |
@@ -43,7 +49,7 @@ No tab? Run any macro with Tools > Macro > Run, pick `PCBThermal.swp`, then the 
 
 ## 3. Use
 
-1. Copy `PCB_thermal_TEMPLATE.xlsx` to a new name, for example `MyBoard.xlsx`, and open it in Excel.
+1. Copy `workbook\PCB_thermal_TEMPLATE.xlsx` to a new name, for example `MyBoard.xlsx`, and open it in Excel.
 2. Fill the `1 Component register` tab (RefDes, heat, theta values). Blue cells are inputs.
 3. Run the macros in order. Each one asks for the workbook the first time.
    - **Import STEP**: open the board STEP (or the open model). Writes the bodies to the CAD geometry tab.

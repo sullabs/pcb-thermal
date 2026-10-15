@@ -1,4 +1,9 @@
+# Office and SolidWorks lock files
 ~$*
+# Compiled macro projects (binary, rebuilt from src/*.bas)
 *.swp
 *.sldreg
+# Macro output: built parts, studies, reports, daily workbook copies
 CAD/
+backup/
+*.bak_*
