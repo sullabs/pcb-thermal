@@ -16,21 +16,32 @@ This is an experiment on branch `addin-mvp`. The VBA macros in `../src/` are sti
   their last status (double-click to run), and a log.
 - Settings and a log file live in `%APPDATA%\PCBThermal\` (`settings.txt`, `log.txt`).
 
-## Build and install
+## Build, install, share
 
-Close SolidWorks, then in a normal (not admin) PowerShell window:
+Build (needs only Windows and a SolidWorks install for the API files):
 
-    cd addin
-    powershell -ExecutionPolicy Bypass -File .\build.ps1
-    powershell -ExecutionPolicy Bypass -File .\install.ps1
+    powershell -ExecutionPolicy Bypass -File addinuild.ps1
 
-`install.ps1` copies `bin\` to `%LOCALAPPDATA%\PCBThermal\` and registers the add-in for the current user only
-(`HKCU\Software\Classes\CLSID\...` and `HKCU\Software\SolidWorks\AddIns\...`). Remove it with `uninstall.ps1`.
+Output: `addin\dist\PCBThermal_Setup_<version>.exe`, one file with everything inside: the add-in, the SolidWorks
+interop DLLs, icons, the Excel template and, if `addin\macros\PCBThermal.swp` exists, the macro project.
+That exe is what you share. Raise the version in `src/AssemblyInfo.vb` for every build you hand out.
 
-Then start SolidWorks, open the board assembly, and look for the **PCB Thermal** tab. In the task pane press
-**Browse** and pick the `.swp` that holds the macro modules.
+Install on any PC (close SolidWorks first; no admin rights, installs for the Windows user who runs it):
 
-To ship to another PC: copy `bin\` and `install.ps1` / `uninstall.ps1` (the compiler is not needed there).
+- Double-click the setup exe, press **Install**. Running a newer setup upgrades in place.
+- Silent: `PCBThermal_Setup_<version>.exe /silent`
+- Remove: Windows Settings > Apps > Installed apps > **PCB Thermal for SolidWorks**, or `/uninstall` (`/uninstall /silent`).
+
+Files go to `%LOCALAPPDATA%\PCBThermal\`, registry entries to `HKCU` only. Settings and log stay in `%APPDATA%\PCBThermal\`.
+
+Then start SolidWorks, open a part or assembly, and look for the **PCB Thermal** tab.
+
+## Porting the macros
+
+Steps 1 to 8 still run the VBA modules from `PCBThermal.swp`. Plan: port one module at a time to `src/*.vb`
+(PTCommon first, then SetupWorkbook, ImportStep, BuildBoard, BuildSpreader, SyncFromCAD, SetupSim, ReadResults, RunFlow),
+check each against the VBA result on the reference board, then switch its button to the native code. When all are
+ported the setup no longer needs the `.swp`.
 
 ## Known limits
 
@@ -49,5 +60,6 @@ To ship to another PC: copy `bin\` and `install.ps1` / `uninstall.ps1` (the comp
 | `src/ExcelLink.vb` | Excel by late binding, tab lookup like `PT_TabBase` |
 | `src/ModelCheck.vb` | Body, face, triangle count with timing |
 | `src/Support.vb` | Settings file and log |
-| `build.ps1` | Compiles with `vbc.exe`, copies the SolidWorks interop DLLs, makes the icon strips |
-| `install.ps1`, `uninstall.ps1` | Per-user registration |
+| `build.ps1` | Compiles the add-in and the setup exe with `vbc.exe`, makes the icon strips |
+| `src/AssemblyInfo.vb` | Version number |
+| `setup/Setup.vb`, `setup/setup.manifest` | The setup exe: unpacks the embedded files, per-user registration, uninstall entry |

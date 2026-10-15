@@ -9,3 +9,5 @@ backup/
 *.bak_*
 # Add-in build output
 addin/bin/
+addin/obj/
+addin/dist/

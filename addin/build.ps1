@@ -33,7 +33,9 @@ $outDll = Join-Path $bin "PCBThermal.dll"
 $rsp = @("/nologo", "/target:library", "/platform:anycpu", "/optimize+", "/debug:pdbonly",
     "/imports:Microsoft.VisualBasic,System", "/rootnamespace:PCBThermal", "`"/out:$outDll`"") +
     ($refs | ForEach-Object { "`"$_`"" }) + ($sources | ForEach-Object { "`"$_`"" })
-$rspFile = Join-Path $bin "build.rsp"
+$obj = Join-Path $here "obj"
+New-Item -ItemType Directory -Force $obj | Out-Null
+$rspFile = Join-Path $obj "addin.rsp"
 Set-Content -Path $rspFile -Value $rsp -Encoding ASCII
 & $vbc "@$rspFile"
 if ($LASTEXITCODE -ne 0) { throw "Compile failed." }
@@ -82,4 +84,36 @@ foreach ($size in 20, 32, 40, 64, 96, 128) {
 foreach ($im in $images) { $im.Dispose() }
 $main.Dispose()
 
-Write-Host "Built $bin\PCBThermal.dll ($($stepIcons.Count) step icons). Next: install.ps1"
+# ---------------- Setup exe: one file with everything inside ----------------
+$version = [System.Reflection.AssemblyName]::GetAssemblyName($outDll).Version
+$ver3 = "$($version.Major).$($version.Minor).$($version.Build)"
+$dist = Join-Path $here "dist"
+New-Item -ItemType Directory -Force $dist | Out-Null
+
+# Payload: add-in files, the template workbook, and the macro project if present (until all steps are ported).
+$payload = @{}
+Get-ChildItem $bin -Recurse -File | Where-Object { $_.Extension -ne ".pdb" } | ForEach-Object {
+    $payload[$_.FullName.Substring($bin.Length + 1).Replace("\", "/")] = $_.FullName }
+$template = Join-Path (Split-Path -Parent $here) "workbook\PCB_thermal_TEMPLATE.xlsx"
+if (Test-Path $template) { $payload["template/PCB_thermal_TEMPLATE.xlsx"] = $template }
+$swp = Join-Path $here "macros\PCBThermal.swp"
+if (Test-Path $swp) { $payload["PCBThermal.swp"] = $swp } else { Write-Host "Note: addin\macros\PCBThermal.swp not found, setup will not contain the macros." }
+
+$verFile = Join-Path $obj "SetupVersion.vb"
+Set-Content -Path $verFile -Encoding ASCII -Value @(
+    "<Assembly: System.Reflection.AssemblyVersion(""$version"")>",
+    "<Assembly: System.Reflection.AssemblyFileVersion(""$version"")>",
+    "<Assembly: System.Reflection.AssemblyProduct(""PCB Thermal"")>",
+    "<Assembly: System.Reflection.AssemblyTitle(""PCB Thermal setup"")>")
+$setupExe = Join-Path $dist "PCBThermal_Setup_$ver3.exe"
+$rsp2 = @("/nologo", "/target:winexe", "/platform:anycpu", "/optimize+", "/main:Setup",
+    "/imports:Microsoft.VisualBasic,System", "/reference:System.dll", "/reference:System.Drawing.dll",
+    "/reference:System.Windows.Forms.dll", "`"/win32manifest:$(Join-Path $here 'setup\setup.manifest')`"",
+    "`"/out:$setupExe`"", "`"$(Join-Path $here 'setup\Setup.vb')`"", "`"$verFile`"") +
+    ($payload.Keys | Sort-Object | ForEach-Object { "`"/resource:$($payload[$_]),payload/$_`"" })
+$rspFile2 = Join-Path $obj "setup.rsp"
+Set-Content -Path $rspFile2 -Value $rsp2 -Encoding ASCII
+& $vbc "@$rspFile2"
+if ($LASTEXITCODE -ne 0) { throw "Setup compile failed." }
+
+Write-Host "Built $outDll and $setupExe ($($payload.Count) files inside). Share the setup exe."
