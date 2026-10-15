@@ -9,7 +9,7 @@ Imports System.Reflection
 Imports System.Windows.Forms
 Imports Microsoft.Win32
 
-' One-file installer for the PCB Thermal add-in. All files are embedded as resources named "payload/<relative path>".
+' One-file installer for the add-in. All files are embedded as resources named "payload/<relative path>".
 ' Installs for the current Windows user only (no admin): files to %LOCALAPPDATA%\PCBThermal, registry under HKCU.
 '   PCBThermal_Setup.exe              window with Install / Uninstall
 '   PCBThermal_Setup.exe /silent      install without questions
@@ -24,7 +24,11 @@ Public Module Setup
     Private Const PayloadPrefix As String = "payload/"
     Private Const RunKey As String = "Software\Microsoft\Windows\CurrentVersion\Run"
     Private Const RunValue As String = "PCBThermalLoader"
-    Private Const ShortcutName As String = "Load PCB Thermal into SolidWorks.lnk"
+    Public Const AppName As String = "NTIS thermal similation"
+    Public Const DllName As String = "NTIS_thermal_similation.dll"
+    Private Const OldDllName As String = "PCBThermal.dll"
+    Private Const ShortcutName As String = "Load NTIS thermal similation into SolidWorks.lnk"
+    Private Const OldShortcutName As String = "Load PCB Thermal into SolidWorks.lnk"
 
     Private Function InstallDir() As String
         Return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PCBThermal")
@@ -53,7 +57,7 @@ Public Module Setup
         End If
         Application.EnableVisualStyles()
         If loadNow Then
-            MessageBox.Show(Loader.LoadOnce(), "PCB Thermal", MessageBoxButtons.OK, MessageBoxIcon.Information)
+            MessageBox.Show(Loader.LoadOnce(), AppName, MessageBoxButtons.OK, MessageBoxIcon.Information)
             Return 0
         End If
         If silent Then
@@ -66,7 +70,7 @@ Public Module Setup
             End Try
         End If
         If remove Then
-            If MessageBox.Show("Remove PCB Thermal for " & Environment.UserName & "?", "PCB Thermal",
+            If MessageBox.Show("Remove " & AppName & " for " & Environment.UserName & "?", AppName,
                                MessageBoxButtons.YesNo, MessageBoxIcon.Question) <> DialogResult.Yes Then Return 0
             Return RunWithMessage(False)
         End If
@@ -78,10 +82,10 @@ Public Module Setup
         Try
             Dim msg As String
             If install Then msg = DoInstall() Else msg = DoUninstall()
-            MessageBox.Show(msg, "PCB Thermal", MessageBoxButtons.OK, MessageBoxIcon.Information)
+            MessageBox.Show(msg, AppName, MessageBoxButtons.OK, MessageBoxIcon.Information)
             Return 0
         Catch ex As Exception
-            MessageBox.Show(ex.Message, "PCB Thermal", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            MessageBox.Show(ex.Message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning)
             Return 1
         End Try
     End Function
@@ -119,13 +123,21 @@ Public Module Setup
             File.Copy(asm.Location, selfCopy, True)
         End If
 
-        Dim dll As String = Path.Combine(dest, "PCBThermal.dll")
-        If Not File.Exists(dll) Then Throw New FileNotFoundException("Setup is incomplete: PCBThermal.dll missing.")
+        ' Before 0.2.1 the add-in was called PCB Thermal: remove its DLL and shortcut
+        Try
+            File.Delete(Path.Combine(dest, OldDllName))
+            File.Delete(Path.Combine(Path.GetDirectoryName(ShortcutPath()), OldShortcutName))
+        Catch
+        End Try
+
+        Dim dll As String = Path.Combine(dest, DllName)
+        If Not File.Exists(dll) Then Throw New FileNotFoundException("Setup is incomplete: " & DllName & " missing.")
         Dim an As AssemblyName = AssemblyName.GetAssemblyName(dll)
         Dim codeBase As String = New Uri(dll).AbsoluteUri
 
         ' COM class, per user
         Dim clsid As String = "Software\Classes\CLSID\" & AddInGuid
+        Registry.CurrentUser.DeleteSubKeyTree(clsid, False)   ' drop entries of older versions
         SetValues(clsid, "", ClassName)
         For Each sub1 As String In New String() {clsid & "\InprocServer32", clsid & "\InprocServer32\" & an.Version.ToString()}
             Using k As RegistryKey = Registry.CurrentUser.CreateSubKey(sub1)
@@ -147,7 +159,7 @@ Public Module Setup
         ' SolidWorks add-in list, loaded at startup
         Using k As RegistryKey = Registry.CurrentUser.CreateSubKey("Software\SolidWorks\AddIns\" & AddInGuid)
             k.SetValue("", 1, RegistryValueKind.DWord)
-            k.SetValue("Title", "PCB Thermal")
+            k.SetValue("Title", AppName)
             k.SetValue("Description", "PCB thermal workflow: ribbon tab and task pane")
         End Using
         ' Start Up tick in Tools > Add-Ins. Keep the user's choice on upgrade.
@@ -167,9 +179,9 @@ Public Module Setup
 
         ' Windows "Installed apps" entry, per user
         Using k As RegistryKey = Registry.CurrentUser.CreateSubKey(UninstallKey)
-            k.SetValue("DisplayName", "PCB Thermal for SolidWorks")
+            k.SetValue("DisplayName", AppName & " for SolidWorks")
             k.SetValue("DisplayVersion", Version())
-            k.SetValue("Publisher", "PCB Thermal")
+            k.SetValue("Publisher", AppName)
             k.SetValue("InstallLocation", dest)
             k.SetValue("DisplayIcon", selfCopy)
             k.SetValue("UninstallString", """" & selfCopy & """ /uninstall")
@@ -178,9 +190,9 @@ Public Module Setup
             k.SetValue("NoRepair", 1, RegistryValueKind.DWord)
         End Using
 
-        Return "PCB Thermal " & Version() & " installed for " & Environment.UserName & " (" & count.ToString() & " files)." &
+        Return AppName & " " & Version() & " installed for " & Environment.UserName & " (" & count.ToString() & " files)." &
                Environment.NewLine & "Folder: " & dest & Environment.NewLine &
-               "Start SolidWorks and open a part or assembly: look for the PCB Thermal tab." & Environment.NewLine &
+               "Start SolidWorks and open a part or assembly: look for the " & AppName & " tab." & Environment.NewLine &
                "If it is missing: Start menu > " & Path.GetFileNameWithoutExtension(ShortcutName) & "."
     End Function
 
@@ -195,6 +207,7 @@ Public Module Setup
         End Try
         Try
             File.Delete(ShortcutPath())
+            File.Delete(Path.Combine(Path.GetDirectoryName(ShortcutPath()), OldShortcutName))
         Catch
         End Try
         For Each keyPath As String In New String() {
@@ -228,7 +241,7 @@ Public Module Setup
                 End Try
             End If
         End If
-        Return "PCB Thermal removed for " & Environment.UserName & "." & Environment.NewLine &
+        Return AppName & " removed for " & Environment.UserName & "." & Environment.NewLine &
                "Your settings and log in %APPDATA%\PCBThermal were kept."
     End Function
 
@@ -243,7 +256,7 @@ Public Module Setup
             Dim lnk As Object = CallByName(sh, "CreateShortcut", CallType.Method, ShortcutPath())
             CallByName(lnk, "TargetPath", CallType.Let, exePath)
             CallByName(lnk, "Arguments", CallType.Let, "/load")
-            CallByName(lnk, "Description", CallType.Let, "Load the PCB Thermal add-in into the running SolidWorks")
+            CallByName(lnk, "Description", CallType.Let, "Load the " & AppName & " add-in into the running SolidWorks")
             CallByName(lnk, "IconLocation", CallType.Let, exePath & ",0")
             CallByName(lnk, "Save", CallType.Method)
         Catch
@@ -274,7 +287,7 @@ Public Class SetupForm
     Inherits Form
 
     Public Sub New()
-        Me.Text = "PCB Thermal setup " & Setup.SetupVersion()
+        Me.Text = Setup.AppName & " setup " & Setup.SetupVersion()
         Me.FormBorderStyle = FormBorderStyle.FixedDialog
         Me.MaximizeBox = False
         Me.MinimizeBox = False
@@ -286,7 +299,7 @@ Public Class SetupForm
         Dim info As New Label()
         info.AutoSize = False
         info.SetBounds(16, 14, 388, 90)
-        Dim t As String = "PCB Thermal add-in for SolidWorks, version " & Setup.SetupVersion() & "." & Environment.NewLine &
+        Dim t As String = Setup.AppName & " add-in for SolidWorks, version " & Setup.SetupVersion() & "." & Environment.NewLine &
                           "Installs for " & Environment.UserName & " only. No admin rights needed." & Environment.NewLine & Environment.NewLine
         If installed = "" Then
             t &= "Not installed yet."

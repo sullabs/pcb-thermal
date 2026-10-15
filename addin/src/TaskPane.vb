@@ -6,7 +6,7 @@ Imports System.Drawing
 Imports System.IO
 Imports System.Windows.Forms
 
-' The PCB Thermal task pane: workbook, macro project, workflow steps with status, and a log.
+' The task pane: workbook, macro project, workflow steps with status, and a log.
 ' Built in code (no designer files), shown in SolidWorks by DisplayWindowFromHandlex64.
 Public Class TaskPane
     Inherits UserControl
@@ -47,7 +47,7 @@ Public Class TaskPane
         Me.Controls.Add(head)
 
         Dim title As New Label()
-        title.Text = "PCB Thermal"
+        title.Text = AddIn.TabTitle
         title.Font = New Font("Segoe UI", 12.0F, FontStyle.Bold)
         title.AutoSize = True
         head.Controls.Add(title, 0, 0)

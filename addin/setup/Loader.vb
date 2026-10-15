@@ -23,7 +23,7 @@ Public Module Loader
     Private Const PollMs As Integer = 3000
 
     Public Function DllPath() As String
-        Return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PCBThermal\PCBThermal.dll")
+        Return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PCBThermal", Setup.DllName)
     End Function
 
     Private Sub Log(ByVal msg As String)
@@ -35,7 +35,7 @@ Public Module Loader
         End Try
     End Sub
 
-    ' True unless the user unticked Start Up for PCB Thermal in Tools > Add-Ins.
+    ' True unless the user unticked Start Up for the add-in in Tools > Add-Ins.
     Public Function StartupEnabled() As Boolean
         Try
             Using k As RegistryKey = Registry.CurrentUser.OpenSubKey("Software\SolidWorks\AddInsStartup\" & AddInGuid)
@@ -89,7 +89,7 @@ Public Module Loader
 
     ' /load: once, into the running SolidWorks. Returns a message for the user.
     Public Function LoadOnce() As String
-        If Not File.Exists(DllPath()) Then Return "PCB Thermal is not installed for " & Environment.UserName & "."
+        If Not File.Exists(DllPath()) Then Return Setup.AppName & " is not installed for " & Environment.UserName & "."
         Dim sw As Object = GetSolidWorks()
         If sw Is Nothing Then Return "SolidWorks is not running. Start it, then try again."
         Try
@@ -101,10 +101,10 @@ Public Module Loader
             Next
             Log("load: " & res)
             Select Case res
-                Case "loaded" : Return "PCB Thermal loaded. Open a part or assembly and look for the PCB Thermal tab."
-                Case "already" : Return "PCB Thermal is already loaded in SolidWorks."
+                Case "loaded" : Return Setup.AppName & " loaded. Open a part or assembly and look for the " & Setup.AppName & " tab."
+                Case "already" : Return Setup.AppName & " is already loaded in SolidWorks."
                 Case "busy" : Return "SolidWorks is still busy. Try again in a moment."
-                Case Else : Return "Could not load PCB Thermal: " & res
+                Case Else : Return "Could not load " & Setup.AppName & ": " & res
             End Select
         Finally
             ReleaseCom(sw)

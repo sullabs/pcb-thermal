@@ -43,7 +43,7 @@ Public Module VbaCompat
             Log.Write("  (quiet answer: " & ans.ToString() & ")")
             Return ans
         End If
-        Return Interaction.MsgBox(text, buttons, If(title Is Nothing, "PCB Thermal", CStr(title)))
+        Return Interaction.MsgBox(text, buttons, If(title Is Nothing, AddIn.TabTitle, CStr(title)))
     End Function
 
     ' ---------------------------------------------------------------- values
