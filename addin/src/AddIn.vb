@@ -105,7 +105,7 @@ Public Class AddIn
         Dim idx(n - 1) As Integer
         For i As Integer = 0 To StepTitles.Length - 1
             Dim tip As String = (i + 1).ToString() & " " & StepTitles(i)
-            idx(i) = grp.AddCommandItem2(tip, -1, "Runs macro " & StepModules(i) & ".main", tip, i, "OnStep" & (i + 1).ToString(), "", i + 1, opts)
+            idx(i) = grp.AddCommandItem2(tip, -1, "Runs step " & StepModules(i), tip, i, "OnStep" & (i + 1).ToString(), "", i + 1, opts)
         Next
         idx(n - 2) = grp.AddCommandItem2("Check Model", -1, "Counts bodies and triangles in the open model", "Check Model", n - 2, "OnCheckModel", "", 101, opts)
         idx(n - 1) = grp.AddCommandItem2("Check Workbook", -1, "Checks the open Excel workbook", "Check Workbook", n - 1, "OnCheckWorkbook", "", 102, opts)
@@ -191,9 +191,84 @@ Public Class AddIn
         End Try
     End Sub
 
-    ' Runs one existing VBA macro and reports the result in the pane.
+    ' Runs one workflow step: the built-in (ported) code, or the VBA macro when the pane says so.
     Public Sub RunStep(ByVal i As Integer)
         ShowPane()
+        If Settings.UseVba Then
+            RunVbaStep(i)
+            Return
+        End If
+        RunNative(i)
+    End Sub
+
+    ' The ported macro of step i (index into StepModules).
+    Private Shared Sub CallStep(ByVal i As Integer)
+        Select Case StepModules(i)
+            Case "SetupWorkbook" : SetupWorkbook.Main()
+            Case "ImportStep" : ImportStep.Main()
+            Case "BuildBoard" : BuildBoard.Main()
+            Case "BuildSpreader" : BuildSpreader.Main()
+            Case "SyncFromCAD" : SyncFromCAD.Main()
+            Case "SetupSim" : SetupSim.Main()
+            Case "RunFlow" : RunFlow.Main()
+            Case "ReadResults" : ReadResults.Main()
+        End Select
+    End Sub
+
+    Private Function RunNative(ByVal i As Integer) As Boolean
+        Dim stepName As String = (i + 1).ToString() & " " & StepTitles(i)
+        Log.Write(stepName & ": started.")
+        If pane IsNot Nothing Then pane.SetStepStatus(i, "running")
+        Dim t0 As DateTime = DateTime.Now
+        Dim ok As Boolean = True
+        Try
+            CallStep(i)
+        Catch ex As Exception
+            ok = False
+            Try
+                Dim xl As Object = ExcelLink.GetExcel()
+                If xl IsNot Nothing Then xl.ScreenUpdating = True
+            Catch
+            End Try
+            VbaCompat.MsgBox(StepModules(i) & " stopped: " & ex.Message & vbCrLf & "Send this message with the log file %APPDATA%\PCBThermal\log.txt.",
+                             MsgBoxStyle.Exclamation, StepModules(i))
+            Log.Write(ex.ToString())
+        End Try
+        Dim secs As String = (DateTime.Now - t0).TotalSeconds.ToString("0.0")
+        Log.Write(stepName & ": " & If(ok, "done", "failed") & " in " & secs & " s.")
+        If pane IsNot Nothing Then pane.SetStepStatus(i, If(ok, "done ", "failed ") & DateTime.Now.ToString("HH:mm"))
+        Return ok
+    End Function
+
+    ' For automated tests (VBScript: sw.GetAddInObject("PCBThermal.AddIn").TestRun("ImportStep", "Y")).
+    ' Runs a ported step with no dialogs: message boxes are answered from answers ("Y", "N", "C", "O", comma separated,
+    ' default Yes / OK). Returns every message the step showed, separated by lines of "-----".
+    Public Function TestRun(ByVal moduleName As String, ByVal answers As String) As String
+        Dim i As Integer = Array.IndexOf(StepModules, moduleName)
+        If i < 0 Then Return "unknown step " & moduleName
+        PT_Messages.Clear()
+        PT_Answers.Clear()
+        For Each a As String In answers.Split(","c)
+            Select Case a.Trim().ToUpperInvariant()
+                Case "Y" : PT_Answers.Enqueue(MsgBoxResult.Yes)
+                Case "N" : PT_Answers.Enqueue(MsgBoxResult.No)
+                Case "C" : PT_Answers.Enqueue(MsgBoxResult.Cancel)
+                Case "O" : PT_Answers.Enqueue(MsgBoxResult.Ok)
+            End Select
+        Next
+        PT_Quiet = True
+        Dim t0 As DateTime = DateTime.Now
+        Try
+            RunNative(i)
+        Finally
+            PT_Quiet = False
+        End Try
+        Return "time " & (DateTime.Now - t0).TotalSeconds.ToString("0.0") & " s" & vbCrLf & "-----" & vbCrLf &
+               String.Join(vbCrLf & "-----" & vbCrLf, PT_Messages.ToArray())
+    End Function
+
+    ' Runs one VBA macro (module.main) from the macro project and reports the result in the pane.
+    Private Sub RunVbaStep(ByVal i As Integer)
         Dim swpFile As String = Settings.MacroProject
         If swpFile = "" OrElse Not File.Exists(swpFile) Then
             Log.Write("Pick the macro project (.swp) in the PCB Thermal pane first.")

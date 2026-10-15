@@ -51,9 +51,8 @@ Public Module PTCommon
         ' the workbook used last time is still open in Excel: use it without asking (close it to pick another one)
         If lastF <> "" Then wbk = FindOpenWorkbook(xl, lastF)
         If wbk Is Nothing Then
-            Dim opt As Integer = 0, cfg As String = "", disp As String = ""
-            Dim f As String = swApp.GetOpenFileName("Pick the project workbook (a copy of PCB_thermal_TEMPLATE)", lastF,
-                                                    "Excel workbook (*.xlsx;*.xlsm)|*.xlsx;*.xlsm||", opt, cfg, disp)
+            Dim f As String = SwGetOpenFileName("Pick the project workbook (a copy of PCB_thermal_TEMPLATE)", lastF,
+                                                "Excel workbook (*.xlsx;*.xlsm)|*.xlsx;*.xlsm||")
             If String.IsNullOrEmpty(f) Then Return Nothing
             wbk = FindOpenWorkbook(xl, f)
             If wbk Is Nothing Then wbk = xl.Workbooks.Open(f)
@@ -110,8 +109,8 @@ Public Module PTCommon
 
     ' Keys ("key|text") of the Change log rows whose Change column is changeText and whose Checked cell is not Yes.
     ' SyncFromCAD uses it so a check that failed before and is still unchecked is not logged a second time.
-    Public Function PT_OpenLogKeys(ByVal wb As Object, ByVal changeText As String) As Dictionary(Of String, Integer)
-        Dim d As New Dictionary(Of String, Integer)()
+    Public Function PT_OpenLogKeys(ByVal wb As Object, ByVal changeText As String) As Dict
+        Dim d As New Dict()
         Dim hdr As Object = PT_Rng(wb, "Log_Header")
         If hdr Is Nothing Then Return d
         Dim ws As Object = hdr.Worksheet
@@ -121,7 +120,7 @@ Public Module PTCommon
         For r As Integer = 1 To v.GetUpperBound(0)
             If PT_Str(v(r, 6)) = changeText AndAlso PT_Str(v(r, 11)).ToUpperInvariant() <> "YES" Then
                 Dim k As String = PT_Str(v(r, 3)) & "|" & PT_Str(v(r, 7))
-                If Not d.ContainsKey(k) Then d.Add(k, 1)
+                If Not d.Exists(k) Then d.Add(k, 1)
             End If
         Next
         Return d
@@ -331,17 +330,17 @@ Public Module PTCommon
         Return key
     End Function
 
-    ' Returns k, or k plus "_d2", "_d3" ... if k is already in the set. Adds the result.
-    Public Function PT_UniqueKey(ByVal used As HashSet(Of String), ByVal k As String) As String
+    ' Returns k, or k plus "_d2", "_d3" ... if k is already in the dictionary. Adds the result.
+    Public Function PT_UniqueKey(ByVal used As Dict, ByVal k As String) As String
         Dim s As String = k
-        If used.Contains(s) Then
+        If used.Exists(s) Then
             Dim i As Integer = 2
-            Do While used.Contains(k & "_d" & i.ToString())
+            Do While used.Exists(k & "_d" & i.ToString())
                 i += 1
             Loop
             s = k & "_d" & i.ToString()
         End If
-        used.Add(s)
+        used.Add(s, 1)
         Return s
     End Function
 

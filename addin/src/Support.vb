@@ -58,6 +58,16 @@ Public Module Settings
         End Set
     End Property
 
+    ' True = steps 1 to 8 run the VBA macros from MacroProject instead of the built-in code (for comparison).
+    Public Property UseVba As Boolean
+        Get
+            Return GetValue("UseVba") = "1"
+        End Get
+        Set(ByVal value As Boolean)
+            SetValue("UseVba", If(value, "1", "0"))
+        End Set
+    End Property
+
 End Module
 
 ' Messages go to the task pane log and to %APPDATA%\PCBThermal\log.txt.

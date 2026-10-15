@@ -14,6 +14,7 @@ Public Class TaskPane
     Private ReadOnly owner As AddIn
     Private wbLabel As Label
     Private swpBox As TextBox
+    Private vbaBox As CheckBox
     Private stepList As ListView
     Private logBox As TextBox
 
@@ -61,13 +62,20 @@ Public Class TaskPane
         head.Controls.Add(wbLabel, 0, 2)
         head.Controls.Add(MakeButton("Check", AddressOf OnCheckWorkbook), 1, 2)
 
-        ' Macro project
-        head.Controls.Add(Caption("Macro project (.swp)"), 0, 3)
-        head.SetColumnSpan(head.GetControlFromPosition(0, 3), 2)
+        ' Macro project (only used when the VBA macros run instead of the built-in steps)
+        vbaBox = New CheckBox()
+        vbaBox.Text = "Run the VBA macros (.swp) instead"
+        vbaBox.AutoSize = True
+        vbaBox.Margin = New Padding(3, 8, 3, 0)
+        vbaBox.Checked = Settings.UseVba
+        AddHandler vbaBox.CheckedChanged, AddressOf OnVbaChanged
+        head.Controls.Add(vbaBox, 0, 3)
+        head.SetColumnSpan(vbaBox, 2)
         swpBox = New TextBox()
         swpBox.ReadOnly = True
         swpBox.Dock = DockStyle.Fill
         swpBox.Text = Settings.MacroProject
+        swpBox.Enabled = Settings.UseVba
         head.Controls.Add(swpBox, 0, 4)
         head.Controls.Add(MakeButton("Browse", AddressOf OnBrowse), 1, 4)
 
@@ -125,6 +133,7 @@ Public Class TaskPane
     Public Sub AppendLog(ByVal line As String)
         If logBox Is Nothing Then Return
         logBox.AppendText(line & Environment.NewLine)
+        logBox.Refresh()
     End Sub
 
     Public Sub SetStepStatus(ByVal i As Integer, ByVal status As String)
@@ -172,6 +181,12 @@ Public Class TaskPane
                 Log.Write("Macro project set: " & dlg.FileName)
             End If
         End Using
+    End Sub
+
+    Private Sub OnVbaChanged(ByVal sender As Object, ByVal e As EventArgs)
+        Settings.UseVba = vbaBox.Checked
+        swpBox.Enabled = vbaBox.Checked
+        Log.Write(If(vbaBox.Checked, "Steps run the VBA macros from the .swp.", "Steps run the built-in code."))
     End Sub
 
     Private Sub OnStepDoubleClick(ByVal sender As Object, ByVal e As EventArgs)

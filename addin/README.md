@@ -1,20 +1,22 @@
-# PCB Thermal add-in (MVP)
+# PCB Thermal add-in
 
-A SolidWorks add-in that puts the PCB thermal workflow on its own ribbon tab and task pane.
-Built with the VB compiler that ships with Windows (.NET Framework 4). No Visual Studio, no Python, no admin rights.
+A SolidWorks add-in that runs the whole PCB thermal workflow from its own ribbon tab and task pane.
+Built with the VB compiler that ships with Windows (.NET Framework 4). No Visual Studio, no Python, no admin rights,
+no macro project (`.swp`) needed.
 
-This is an experiment on branch `addin-mvp`. The VBA macros in `../src/` are still the product.
+Branch `addin-mvp`. The VBA macros in `../src/` stay the reference: every step here is a port of one of them.
 
-## What the MVP does
+## What it does
 
 - **Ribbon tab "PCB Thermal"** (parts and assemblies) and a **PCB Thermal menu**: 10 buttons.
-  - 1 to 8 run the existing VBA macros (`SetupWorkbook.main` ... `ReadResults.main`) from the macro project you pick.
-  - **Check Model** counts components, solid bodies, faces and triangles in the open model and times it
-    (same kind of work as ImportStep, so it shows in-process API speed).
-  - **Check Workbook** finds the open Excel workbook and checks the numbered tabs the macros need.
-- **Task pane "PCB Thermal"** (right side panel): active workbook, macro project path (Browse), the 8 steps with
-  their last status (double-click to run), and a log.
-- Settings and a log file live in `%APPDATA%\PCBThermal\` (`settings.txt`, `log.txt`).
+  - 1 to 8 run the workflow steps (Prepare Workbook, Import STEP, Build Board, Build Spreader, Sync CAD to Excel,
+    Run Thermal Study, Run Flow Sim, Read Results). Same behaviour, workbook cells and messages as the VBA macros.
+  - **Check Model** counts components, solid bodies, faces and triangles in the open model and times it.
+  - **Check Workbook** finds the open Excel workbook and checks the numbered tabs the steps need.
+- **Task pane "PCB Thermal"**: active workbook, the 8 steps with their last status (double-click to run), a log.
+  Tick **Run the VBA macros (.swp) instead** to run the old macros from a macro project (for comparison only).
+- Every message box text also goes to the log. Settings and log live in `%APPDATA%\PCBThermal\`
+  (`settings.txt`, `log.txt`, `loader.log`).
 
 ## Build, install, share
 
@@ -23,8 +25,8 @@ Build (needs only Windows and a SolidWorks install for the API files):
     powershell -ExecutionPolicy Bypass -File addin\build.ps1
 
 Output: `addin\dist\PCBThermal_Setup_<version>.exe`, one file with everything inside: the add-in, the SolidWorks
-interop DLLs, icons, the Excel template and, if `addin\macros\PCBThermal.swp` exists, the macro project.
-That exe is what you share. Raise the version in `src/AssemblyInfo.vb` for every build you hand out.
+interop DLLs (sldworks, swconst, swpublished, cosworks), icons and the Excel template. That exe is what you share.
+Raise the version in `src/AssemblyInfo.vb` for every build you hand out.
 
 Install on any PC (close SolidWorks first; no admin rights, installs for the Windows user who runs it):
 
@@ -32,30 +34,16 @@ Install on any PC (close SolidWorks first; no admin rights, installs for the Win
 - Silent: `PCBThermal_Setup_<version>.exe /silent`
 - Remove: Windows Settings > Apps > Installed apps > **PCB Thermal for SolidWorks**, or `/uninstall` (`/uninstall /silent`).
 
-Files go to `%LOCALAPPDATA%\PCBThermal\`, registry entries to `HKCU` only. Settings and log stay in `%APPDATA%\PCBThermal\`.
-
-Then start SolidWorks, open a part or assembly, and look for the **PCB Thermal** tab.
-
-## Porting the macros
-
-Steps 1 to 8 still run the VBA modules from `PCBThermal.swp`. Plan: port one module at a time to `src/*.vb`
-(PTCommon first, then SetupWorkbook, ImportStep, BuildBoard, BuildSpreader, SyncFromCAD, SetupSim, ReadResults, RunFlow),
-check each against the VBA result on the reference board, then switch its button to the native code. When all are
-ported the setup no longer needs the `.swp`.
-
-Done so far: `src/PTCommon.vb` part 1 (Excel and workbook, values, keys, change log, files; VBA lines up to
-`PT_MakeDirs`). Same names as the VBA. Checked on a copy of the reference workbook: the ported `PT_Key` gives the
-same body keys as ImportStep wrote (19 of 19), and a change log row lands as the VBA writes it.
-.NET gotcha: Excel error cells (`#N/A`) arrive as Int32 codes, so `PT_IsNum`/`PT_Num`/`PT_Str` treat Int32 as an error.
-Next: PTCommon part 2 (SolidWorks helpers) together with SetupWorkbook and ImportStep.
+Files go to `%LOCALAPPDATA%\PCBThermal\`, registry entries to `HKCU` only. Then start SolidWorks normally and look
+for the **PCB Thermal** tab.
 
 ## How it loads without admin
 
 SolidWorks 2023 reads its add-in list only from `HKLM` (tested: the `HKCU\Software\SolidWorks\AddIns` key is ignored).
 But `ISldWorks.LoadAddIn("<path>\PCBThermal.dll")` works with the per-user COM registration. So setup adds a small
 loader, `PCBThermal_Setup.exe /watch`, to `HKCU\...\CurrentVersion\Run`. It starts at Windows logon, waits for each
-SolidWorks start (polls every 3 s, waits for `StartupProcessCompleted`) and calls LoadAddIn. Tested: the tab shows
-about 15 s after SolidWorks starts. Log: `%APPDATA%\PCBThermal\loader.log`.
+SolidWorks start (polls every 3 s, waits for `StartupProcessCompleted`) and calls LoadAddIn. The tab shows about
+15 s after SolidWorks starts.
 
 - Untick **Start Up** for PCBThermal in Tools > Add-Ins and the loader stops loading it.
 - Start menu > **Load PCB Thermal into SolidWorks** (`/load`) loads it once into the running SolidWorks.
@@ -63,19 +51,60 @@ about 15 s after SolidWorks starts. Log: `%APPDATA%\PCBThermal\loader.log`.
 - Scripted install: `Start-Process ... -Wait` also waits for the loader and never returns. Use `-PassThru` and
   `$p.WaitForExit()` instead.
 
+## The port
+
+`src/Macros/*.vb` holds one module per VBA macro, `src/PTCommon.vb` and `src/PTCommon2.vb` hold PTCommon. Same
+procedure names, same order, same comments, so a change in a `.bas` file can be carried over line by line.
+`src/VbaCompat.vb` keeps the VBA idioms working (`MsgBox`, `Arr` for `Array`, `IsEmpty`, `Round`, `Dict` for
+`Scripting.Dictionary`, `NewTable` for 1-based arrays).
+
+Rules learned while porting (apply them to any new code):
+
+- SolidWorks rejects late-bound `ByRef` Integer, String and Boolean arguments from .NET ("Type mismatch"; they arrive
+  as `VARIANT*`). Every call with such an argument is typed: `SwOpenDoc6`, `SwSaveAs`, `SwSave3`, `SwGetOpenFileName`,
+  `SwLoadFile4`, `ActivateDoc3`, `CustomPropertyManager.Get6`, and every Simulation call with an `ErrorCode` (cosworks interop).
+- `obj.GetType` on an `Object` is .NET's `Object.GetType`. Use `SwDocType(md)` for the SolidWorks document type.
+- Excel error cells (`#N/A`) arrive as Int32 codes; `PT_IsNum`, `PT_Num`, `PT_Str` treat them as errors.
+- SolidWorks returns VT_NULL (DBNull) where VBA saw Empty; `IsEmpty` treats both as empty.
+- Pass `NullDisp` where the VBA passed `Nothing` to a late-bound SolidWorks call.
+
+## Test result (2026-10-15, Raspberry Pi 4 reference)
+
+Each step was run with `AddIn.TestRun` (quiet, scripted answers) on copies of the reference workbooks and a Pack and Go
+copy of the VBA-built assemblies, and compared with what the VBA macros had produced:
+
+| Step | Check | Result |
+|---|---|---|
+| ImportStep | re-import of the same STEP into the VBA-imported workbook | 109 rows, all values equal by key, 0 change log rows |
+| BuildBoard | update on the VBA assembly; create in a new folder | nothing changed; all 15 PCB, part and TIM boxes equal |
+| BuildSpreader | update on the VBA assembly (top and bottom plate); create | 0 changes, report equal to VBA; rectangle plate made |
+| SyncFromCAD | on the VBA assembly | 0 overrides, 0 differences, 0 failed checks |
+| SetupSim + ReadResults | new study on the VBA assembly | report equal; every temperature equal to VBA to 0.01 C |
+| RunFlow | read the last Flow results | every value equal to the VBA row |
+| SetupWorkbook | template path; full refresh path | both run without errors |
+
+Times on this PC: ImportStep 274 s (109 bodies, almost all inside SolidWorks' `GetTessTriangles`), BuildBoard
+update 6 s, create 57 s, BuildSpreader 32 s, SetupSim 194 s (mesh and solve), ReadResults 3 s.
+
 ## Known limits
 
 - Per-user COM registration is ignored by processes running **as administrator**. Start SolidWorks normally.
-- Steps 1 to 8 still run the VBA code. Porting a step means moving its module into a `.vb` file here.
+- ImportStep is slow on boards with many small multi-face bodies (about 38 ms per face in SolidWorks). The VBA macro
+  makes the same calls.
+- Row order on STEP import follows the order SolidWorks lists the components, which can differ between sessions.
+  Inputs follow their body by key, so nothing is lost.
 
 ## Files
 
 | File | What it is |
 |---|---|
-| `src/AddIn.vb` | Add-in entry (ISwAddin): ribbon, menu, task pane, button callbacks, runs the macros |
+| `src/AddIn.vb` | Add-in entry (ISwAddin): ribbon, menu, task pane, runs the steps, `TestRun` for scripted tests |
 | `src/TaskPane.vb` | Task pane UI (WinForms, built in code) |
-| `src/ExcelLink.vb` | Excel by late binding, tab lookup like `PT_TabBase` |
-| `src/ModelCheck.vb` | Body, face, triangle count with timing |
+| `src/PTCommon.vb`, `src/PTCommon2.vb` | Port of PTCommon.bas (workbook helpers; SolidWorks helpers and typed calls) |
+| `src/VbaCompat.vb` | VBA idioms for the port, message boxes with a quiet mode |
+| `src/Macros/*.vb` | Port of each macro: SetupWorkbook, ImportStep, BuildBoard, BuildSpreader, SyncFromCAD, SetupSim, ReadResults, RunFlow |
+| `src/ExcelLink.vb` | Check Workbook |
+| `src/ModelCheck.vb` | Check Model |
 | `src/Support.vb` | Settings file and log |
 | `build.ps1` | Compiles the add-in and the setup exe with `vbc.exe`, makes the icon strips |
 | `src/AssemblyInfo.vb` | Version number |

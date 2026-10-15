@@ -22,11 +22,12 @@ if (-not (Test-Path (Join-Path $redist "SolidWorks.Interop.sldworks.dll"))) { th
 
 New-Item -ItemType Directory -Force $bin | Out-Null
 New-Item -ItemType Directory -Force (Join-Path $bin "icons") | Out-Null
-$interops = @("SolidWorks.Interop.sldworks.dll", "SolidWorks.Interop.swconst.dll", "SolidWorks.Interop.swpublished.dll")
+$interops = @("SolidWorks.Interop.sldworks.dll", "SolidWorks.Interop.swconst.dll", "SolidWorks.Interop.swpublished.dll",
+    "SolidWorks.Interop.cosworks.dll")
 foreach ($d in $interops) { Copy-Item (Join-Path $redist $d) $bin -Force }
 
 # Compile
-$sources = Get-ChildItem (Join-Path $here "src") -Filter *.vb | ForEach-Object { $_.FullName }
+$sources = Get-ChildItem (Join-Path $here "src") -Filter *.vb -Recurse | ForEach-Object { $_.FullName }
 $refs = ($interops | ForEach-Object { "/reference:" + (Join-Path $bin $_) }) + @(
     "/reference:System.dll", "/reference:System.Drawing.dll", "/reference:System.Windows.Forms.dll")
 $outDll = Join-Path $bin "PCBThermal.dll"
