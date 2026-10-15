@@ -109,7 +109,8 @@ $setupExe = Join-Path $dist "PCBThermal_Setup_$ver3.exe"
 $rsp2 = @("/nologo", "/target:winexe", "/platform:anycpu", "/optimize+", "/main:Setup",
     "/imports:Microsoft.VisualBasic,System", "/reference:System.dll", "/reference:System.Drawing.dll",
     "/reference:System.Windows.Forms.dll", "`"/win32manifest:$(Join-Path $here 'setup\setup.manifest')`"",
-    "`"/out:$setupExe`"", "`"$(Join-Path $here 'setup\Setup.vb')`"", "`"$verFile`"") +
+    "`"/out:$setupExe`"", "`"$(Join-Path $here 'setup\Setup.vb')`"",
+    "`"$(Join-Path $here 'setup\Loader.vb')`"", "`"$verFile`"") +
     ($payload.Keys | Sort-Object | ForEach-Object { "`"/resource:$($payload[$_]),payload/$_`"" })
 $rspFile2 = Join-Path $obj "setup.rsp"
 Set-Content -Path $rspFile2 -Value $rsp2 -Encoding ASCII

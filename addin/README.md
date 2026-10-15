@@ -43,12 +43,23 @@ Steps 1 to 8 still run the VBA modules from `PCBThermal.swp`. Plan: port one mod
 check each against the VBA result on the reference board, then switch its button to the native code. When all are
 ported the setup no longer needs the `.swp`.
 
+## How it loads without admin
+
+SolidWorks 2023 reads its add-in list only from `HKLM` (tested: the `HKCU\Software\SolidWorks\AddIns` key is ignored).
+But `ISldWorks.LoadAddIn("<path>\PCBThermal.dll")` works with the per-user COM registration. So setup adds a small
+loader, `PCBThermal_Setup.exe /watch`, to `HKCU\...\CurrentVersion\Run`. It starts at Windows logon, waits for each
+SolidWorks start (polls every 3 s, waits for `StartupProcessCompleted`) and calls LoadAddIn. Tested: the tab shows
+about 15 s after SolidWorks starts. Log: `%APPDATA%\PCBThermal\loader.log`.
+
+- Untick **Start Up** for PCBThermal in Tools > Add-Ins and the loader stops loading it.
+- Start menu > **Load PCB Thermal into SolidWorks** (`/load`) loads it once into the running SolidWorks.
+- In Tools > Add-Ins it shows under Other Add-ins as "PCBThermal".
+- Scripted install: `Start-Process ... -Wait` also waits for the loader and never returns. Use `-PassThru` and
+  `$p.WaitForExit()` instead.
+
 ## Known limits
 
 - Per-user COM registration is ignored by processes running **as administrator**. Start SolidWorks normally.
-- Not yet confirmed: that SolidWorks 2023 reads the per-user add-in list (`HKCU\Software\SolidWorks\AddIns`).
-  If the tab does not appear, check Tools > Add-Ins. If PCB Thermal is not listed, that key is not read and
-  the add-in needs the machine-wide key once (admin), or a macro stub that calls `swApp.LoadAddIn`.
 - Steps 1 to 8 still run the VBA code. Porting a step means moving its module into a `.vb` file here.
 
 ## Files
@@ -63,3 +74,4 @@ ported the setup no longer needs the `.swp`.
 | `build.ps1` | Compiles the add-in and the setup exe with `vbc.exe`, makes the icon strips |
 | `src/AssemblyInfo.vb` | Version number |
 | `setup/Setup.vb`, `setup/setup.manifest` | The setup exe: unpacks the embedded files, per-user registration, uninstall entry |
+| `setup/Loader.vb` | `/watch` and `/load`: loads the add-in into SolidWorks with LoadAddIn |

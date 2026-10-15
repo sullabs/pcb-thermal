@@ -14,14 +14,17 @@ Imports Microsoft.Win32
 '   PCBThermal_Setup.exe              window with Install / Uninstall
 '   PCBThermal_Setup.exe /silent      install without questions
 '   PCBThermal_Setup.exe /uninstall   remove (used by Windows "Installed apps")
+'   PCBThermal_Setup.exe /watch       loader: loads the add-in at each SolidWorks start (see Loader.vb)
+'   PCBThermal_Setup.exe /load        loader: loads the add-in into the running SolidWorks once
 Public Module Setup
 
-    Private Const AddInGuid As String = "{F7AF128D-DEE1-4BEB-A464-4FE0B17337DF}"
-    Private Const ProgId As String = "PCBThermal.AddIn"
     Private Const ClassName As String = "PCBThermal.AddIn"
     Private Const CatSwAddin As String = "{62C8FE65-4EBB-45e7-B440-6E39B2CDBF29}"
     Private Const UninstallKey As String = "Software\Microsoft\Windows\CurrentVersion\Uninstall\PCBThermal"
     Private Const PayloadPrefix As String = "payload/"
+    Private Const RunKey As String = "Software\Microsoft\Windows\CurrentVersion\Run"
+    Private Const RunValue As String = "PCBThermalLoader"
+    Private Const ShortcutName As String = "Load PCB Thermal into SolidWorks.lnk"
 
     Private Function InstallDir() As String
         Return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PCBThermal")
@@ -35,12 +38,24 @@ Public Module Setup
     Public Function Main(ByVal args As String()) As Integer
         Dim silent As Boolean = False
         Dim remove As Boolean = False
+        Dim watch As Boolean = False
+        Dim loadNow As Boolean = False
         For Each a As String In args
             Dim s As String = a.Trim().TrimStart("/"c, "-"c).ToLowerInvariant()
             If s = "silent" OrElse s = "s" OrElse s = "quiet" Then silent = True
             If s = "uninstall" OrElse s = "u" Then remove = True
+            If s = "watch" Then watch = True
+            If s = "load" Then loadNow = True
         Next
+        If watch Then
+            Loader.Watch()
+            Return 0
+        End If
         Application.EnableVisualStyles()
+        If loadNow Then
+            MessageBox.Show(Loader.LoadOnce(), "PCB Thermal", MessageBoxButtons.OK, MessageBoxIcon.Information)
+            Return 0
+        End If
         If silent Then
             Try
                 If remove Then DoUninstall() Else DoInstall()
@@ -97,8 +112,9 @@ Public Module Setup
             End Using
             count += 1
         Next
-        ' Keep a copy of setup itself for "Installed apps" > Uninstall
+        ' Keep a copy of setup itself for "Installed apps" > Uninstall and as the loader
         Dim selfCopy As String = Path.Combine(dest, "PCBThermal_Setup.exe")
+        Loader.StopWatchers(selfCopy)
         If Not String.Equals(asm.Location, selfCopy, StringComparison.OrdinalIgnoreCase) Then
             File.Copy(asm.Location, selfCopy, True)
         End If
@@ -134,9 +150,20 @@ Public Module Setup
             k.SetValue("Title", "PCB Thermal")
             k.SetValue("Description", "PCB thermal workflow: ribbon tab and task pane")
         End Using
+        ' Start Up tick in Tools > Add-Ins. Keep the user's choice on upgrade.
         Using k As RegistryKey = Registry.CurrentUser.CreateSubKey("Software\SolidWorks\AddInsStartup\" & AddInGuid)
-            k.SetValue("", 1, RegistryValueKind.DWord)
+            If k.GetValue("") Is Nothing Then k.SetValue("", 1, RegistryValueKind.DWord)
         End Using
+
+        ' SolidWorks reads the add-in list above only from HKLM (admin). The loader calls LoadAddIn at each SolidWorks start.
+        Using k As RegistryKey = Registry.CurrentUser.CreateSubKey(RunKey)
+            k.SetValue(RunValue, """" & selfCopy & """ /watch")
+        End Using
+        CreateShortcut(selfCopy)
+        Dim psi As New ProcessStartInfo(selfCopy, "/watch")
+        psi.UseShellExecute = False
+        psi.CreateNoWindow = True
+        Process.Start(psi)
 
         ' Windows "Installed apps" entry, per user
         Using k As RegistryKey = Registry.CurrentUser.CreateSubKey(UninstallKey)
@@ -153,11 +180,23 @@ Public Module Setup
 
         Return "PCB Thermal " & Version() & " installed for " & Environment.UserName & " (" & count.ToString() & " files)." &
                Environment.NewLine & "Folder: " & dest & Environment.NewLine &
-               "Start SolidWorks and open a part or assembly: look for the PCB Thermal tab."
+               "Start SolidWorks and open a part or assembly: look for the PCB Thermal tab." & Environment.NewLine &
+               "If it is missing: Start menu > " & Path.GetFileNameWithoutExtension(ShortcutName) & "."
     End Function
 
     Public Function DoUninstall() As String
         CheckSolidWorksClosed()
+        Loader.StopWatchers(Path.Combine(InstallDir(), "PCBThermal_Setup.exe"))
+        Try
+            Using k As RegistryKey = Registry.CurrentUser.OpenSubKey(RunKey, True)
+                If k IsNot Nothing Then k.DeleteValue(RunValue, False)
+            End Using
+        Catch
+        End Try
+        Try
+            File.Delete(ShortcutPath())
+        Catch
+        End Try
         For Each keyPath As String In New String() {
                 "Software\Classes\CLSID\" & AddInGuid, "Software\Classes\" & ProgId,
                 "Software\SolidWorks\AddIns\" & AddInGuid, "Software\SolidWorks\AddInsStartup\" & AddInGuid, UninstallKey}
@@ -192,6 +231,24 @@ Public Module Setup
         Return "PCB Thermal removed for " & Environment.UserName & "." & Environment.NewLine &
                "Your settings and log in %APPDATA%\PCBThermal were kept."
     End Function
+
+    Private Function ShortcutPath() As String
+        Return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), ShortcutName)
+    End Function
+
+    ' Start menu shortcut that loads the add-in into the running SolidWorks (if the watcher is off or missed it).
+    Private Sub CreateShortcut(ByVal exePath As String)
+        Try
+            Dim sh As Object = Interaction.CreateObject("WScript.Shell")
+            Dim lnk As Object = CallByName(sh, "CreateShortcut", CallType.Method, ShortcutPath())
+            CallByName(lnk, "TargetPath", CallType.Let, exePath)
+            CallByName(lnk, "Arguments", CallType.Let, "/load")
+            CallByName(lnk, "Description", CallType.Let, "Load the PCB Thermal add-in into the running SolidWorks")
+            CallByName(lnk, "IconLocation", CallType.Let, exePath & ",0")
+            CallByName(lnk, "Save", CallType.Method)
+        Catch
+        End Try
+    End Sub
 
     Private Sub SetValues(ByVal keyPath As String, ByVal valueName As String, ByVal value As String)
         Using k As RegistryKey = Registry.CurrentUser.CreateSubKey(keyPath)
