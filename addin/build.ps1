@@ -80,7 +80,12 @@ Get-ChildItem $bin -File | Where-Object { $_.BaseName -ne [IO.Path]::GetFileName
 Get-ChildItem $bin -Recurse -File | Where-Object { $_.Extension -ne ".pdb" } | ForEach-Object {
     $payload[$_.FullName.Substring($bin.Length + 1).Replace("\", "/")] = $_.FullName }
 $template = Join-Path (Split-Path -Parent $here) "workbook\PCB_thermal_TEMPLATE.xlsx"
-if (Test-Path $template) { $payload["template/PCB_thermal_TEMPLATE.xlsx"] = $template }
+if (Test-Path $template) {
+    # Embed a copy: vbc cannot open the template while Excel has it open.
+    $tplCopy = Join-Path $obj "PCB_thermal_TEMPLATE.xlsx"
+    Copy-Item $template $tplCopy -Force
+    $payload["template/PCB_thermal_TEMPLATE.xlsx"] = $tplCopy
+}
 $swp = Join-Path $here "macros\PCBThermal.swp"
 if (Test-Path $swp) { $payload["PCBThermal.swp"] = $swp } else { Write-Host "Note: addin\macros\PCBThermal.swp not found, setup will not contain the macros." }
 

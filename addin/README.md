@@ -13,8 +13,10 @@ Branch `addin-mvp`. The VBA macros in `../src/` stay the reference: every step h
     Run Thermal Study, Run Flow Sim, Read Results). Same behaviour, workbook cells and messages as the VBA macros.
   - **Check Model** counts components, solid bodies, faces and triangles in the open model and times it.
   - **Check Workbook** finds the open Excel workbook and checks the numbered tabs the steps need.
-- **Task pane "NTIS thermal simulation"**: active workbook, the 8 steps with their last status (double-click to run), a log.
+- **Task pane "NTIS thermal simulation"**: active workbook, the 8 steps with their last status (double-click to run),
+  what the selected step does and when to use it, a log.
   Tick **Run the VBA macros (.swp) instead** to run the old macros from a macro project (for comparison only).
+- Every button has a full tooltip: what it does, then when to use it (`CommandHelp` in `src/AddIn.vb`).
 - Every message box text also goes to the log. Settings and log live in `%APPDATA%\PCBThermal\`
   (`settings.txt`, `log.txt`, `loader.log`).
 

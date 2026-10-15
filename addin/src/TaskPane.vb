@@ -17,6 +17,8 @@ Public Class TaskPane
     Private vbaBox As CheckBox
     Private stepList As ListView
     Private logBox As TextBox
+    Private helpBox As TextBox
+    Private tips As ToolTip
 
     Public Sub New(ByVal addInObj As AddIn)
         owner = addInObj
@@ -28,6 +30,8 @@ Public Class TaskPane
         Me.BackColor = SystemColors.Window
         Me.Font = New Font("Segoe UI", 9.0F)
         Me.Padding = New Padding(6)
+        tips = New ToolTip()
+        tips.AutoPopDelay = 30000
 
         ' Log fills what is left, so add it first (docking order is reversed).
         logBox = New TextBox()
@@ -60,7 +64,9 @@ Public Class TaskPane
         wbLabel.AutoSize = True
         wbLabel.Margin = New Padding(3, 3, 3, 6)
         head.Controls.Add(wbLabel, 0, 2)
-        head.Controls.Add(MakeButton("Check", AddressOf OnCheckWorkbook), 1, 2)
+        Dim checkWb As Button = MakeButton("Check", AddressOf OnCheckWorkbook)
+        tips.SetToolTip(checkWb, AddIn.HelpText(AddIn.StepTitles.Length + 1))
+        head.Controls.Add(checkWb, 1, 2)
 
         ' Macro project (only used when the VBA macros run instead of the built-in steps)
         vbaBox = New CheckBox()
@@ -93,22 +99,46 @@ Public Class TaskPane
         For i As Integer = 0 To AddIn.StepTitles.Length - 1
             Dim it As New ListViewItem((i + 1).ToString() & "  " & AddIn.StepTitles(i))
             it.SubItems.Add("")
+            it.ToolTipText = AddIn.HelpText(i)
             stepList.Items.Add(it)
         Next
+        stepList.ShowItemToolTips = True
         AddHandler stepList.DoubleClick, AddressOf OnStepDoubleClick
+        AddHandler stepList.SelectedIndexChanged, AddressOf OnStepSelected
         head.Controls.Add(stepList, 0, 6)
         head.SetColumnSpan(stepList, 2)
+
+        ' What the selected step does and when to use it
+        helpBox = New TextBox()
+        helpBox.Multiline = True
+        helpBox.ReadOnly = True
+        helpBox.WordWrap = True
+        helpBox.ScrollBars = ScrollBars.Vertical
+        helpBox.Height = 130
+        helpBox.Dock = DockStyle.Fill
+        helpBox.BackColor = SystemColors.Info
+        helpBox.Text = "Select a step to see what it does and when to use it."
+        head.Controls.Add(helpBox, 0, 7)
+        head.SetColumnSpan(helpBox, 2)
 
         ' Checks
         Dim checks As New FlowLayoutPanel()
         checks.AutoSize = True
         checks.Dock = DockStyle.Fill
-        checks.Controls.Add(MakeButton("Check model", AddressOf OnCheckModel))
+        Dim checkModel As Button = MakeButton("Check model", AddressOf OnCheckModel)
+        tips.SetToolTip(checkModel, AddIn.HelpText(AddIn.StepTitles.Length))
+        checks.Controls.Add(checkModel)
         checks.Controls.Add(MakeButton("Clear log", AddressOf OnClearLog))
-        head.Controls.Add(checks, 0, 7)
+        head.Controls.Add(checks, 0, 8)
         head.SetColumnSpan(checks, 2)
 
-        head.Controls.Add(Caption("Log"), 0, 8)
+        head.Controls.Add(Caption("Log"), 0, 9)
+    End Sub
+
+    Private Sub OnStepSelected(ByVal sender As Object, ByVal e As EventArgs)
+        If stepList.SelectedIndices.Count = 0 Then Return
+        Dim i As Integer = stepList.SelectedIndices(0)
+        helpBox.Text = AddIn.StepTitles(i) & Environment.NewLine & AddIn.HelpText(i)
     End Sub
 
     Private Function Caption(ByVal text As String) As Label

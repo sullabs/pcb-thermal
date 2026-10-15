@@ -34,6 +34,34 @@ Public Class AddIn
         "SetupWorkbook", "ImportStep", "BuildBoard", "BuildSpreader",
         "SyncFromCAD", "SetupSim", "RunFlow", "ReadResults"}
 
+    ' Full help per ribbon button (8 steps, Check Model, Check Workbook): what it does, then when to use it.
+    ' Shown in the ribbon tooltip, the status bar and the task pane.
+    Public Shared ReadOnly CommandHelp As String()() = {
+        New String() {"Gets a workbook ready for the other steps. On a copy of PCB_thermal_TEMPLATE it fills the empty chip lists from the RefDes column. On an older workbook it adds the missing tabs (Settings, Change log, Spreader, Sim setup, Sim results), columns and named cells. Values you typed in blue cells are never overwritten.",
+            "Once per new board workbook, and after a template update. Safe to run again."},
+        New String() {"Reads the board STEP file (or the model open in SolidWorks) and writes every solid body to the STEP import tab: size, position and rotation in mm, in a board frame (origin at a PCB corner, Z out of the side with most parts). New bodies get Include = No.",
+            "First step on a new board, and again when the STEP file changes. Then set Include = Yes on CAD geometry for the parts to model. Takes minutes on a big board."},
+        New String() {"Builds the simplified thermal assembly from the CAD geometry tab: one box for the PCB and one box per included part, at its used size and position, with named faces for the later steps. If the assembly exists, it updates it: moves and resizes changed parts, adds new ones, suppresses parts no longer included. Every change goes to the Change log tab.",
+            "After Import STEP and choosing the parts, and after any change on CAD geometry. Check all Change log rows first."},
+        New String() {"Builds the heat spreader plate from the Spreader tab (top plate) and the Spreader bottom tab (plate under the PCB): extrudes your Outline sketch to the plate thickness, cuts clearance for tall parts, adds a pedestal per covered chip and a TIM part between each chip and the plate. With no spreader part it offers a plate the size of the PCB. Features you added yourself are never touched.",
+            "After Build Board, when the design has a spreader. First insert a part with Spreader in its name and sketch its outline in a sketch named Outline. Run again after changing the tab or the outline."},
+        New String() {"Reads the thermal assembly and writes what you changed in SolidWorks back to the workbook. Changed part sizes and positions become overrides on CAD geometry (CAD wins). Spreader area, volume, mass, pedestal and TIM heights go to the Spreader tab. Differences and failed checks (missing contact face, TIM not touching, missing cut, interference) go to the Change log. No CAD file is changed.",
+            "After you edit parts or the spreader by hand in SolidWorks, and before running a study."},
+        New String() {"Makes a new SolidWorks Simulation steady-state thermal study from the Sim setup tab: materials, heat per chip from the Component register, contact resistances, convection and radiation, mesh. Then meshes and solves it. Each run is a new study named PT_date_time; older studies are kept. Runs a bare board study when there is no spreader.",
+            "When the model and workbook are ready (after Build Board, Build Spreader and Sync CAD to Excel). Takes a few minutes. Then press Read Results."},
+        New String() {"Updates your SolidWorks Flow Simulation project: sets every volume heat source from the Component register (the source name must contain the RefDes) and the initial temperature from the ambient on Sim setup, solves, then writes the goals to Sim results and to Thermal solution column AF, like Read Results.",
+            "For an air flow (CFD) result instead of film coefficients. Make the Flow Simulation project once by hand on the thermal assembly and put the RefDes in each heat source and goal name."},
+        New String() {"Reads the solved thermal study named on Sim setup and writes the results to the workbook: one new row on Sim results (peak and average per RefDes, spreader and PCB max and min, energy balance) and the peak of each chip in Thermal solution column AF, so column AG compares hand calculation and simulation. Saves a picture of the first plot in CAD\results.",
+            "Right after Run Thermal Study has solved."},
+        New String() {"Counts components, solid bodies, faces and triangles in the open model and times the count. The result goes to the log in the task pane. Changes nothing.",
+            "Before Import STEP on a big model, to see how heavy it is, or to check that the model loaded fully."},
+        New String() {"Finds the open Excel workbook and checks that it has the numbered tabs the steps need. Missing tabs are listed in the log in the task pane. Changes nothing.",
+            "When a step cannot find its workbook or a tab. If tabs are missing, run Prepare Workbook."}}
+
+    Public Shared Function HelpText(ByVal i As Integer) As String
+        Return CommandHelp(i)(0) & vbCrLf & vbCrLf & "When to use: " & CommandHelp(i)(1)
+    End Function
+
     Public ReadOnly Property App As SldWorks
         Get
             Return swApp
@@ -106,10 +134,10 @@ Public Class AddIn
         Dim idx(n - 1) As Integer
         For i As Integer = 0 To StepTitles.Length - 1
             Dim tip As String = (i + 1).ToString() & " " & StepTitles(i)
-            idx(i) = grp.AddCommandItem2(tip, -1, "Runs step " & StepModules(i), tip, i, "OnStep" & (i + 1).ToString(), "", i + 1, opts)
+            idx(i) = grp.AddCommandItem2(tip, -1, HelpText(i), tip, i, "OnStep" & (i + 1).ToString(), "", i + 1, opts)
         Next
-        idx(n - 2) = grp.AddCommandItem2("Check Model", -1, "Counts bodies and triangles in the open model", "Check Model", n - 2, "OnCheckModel", "", 101, opts)
-        idx(n - 1) = grp.AddCommandItem2("Check Workbook", -1, "Checks the open Excel workbook", "Check Workbook", n - 1, "OnCheckWorkbook", "", 102, opts)
+        idx(n - 2) = grp.AddCommandItem2("Check Model", -1, HelpText(n - 2), "Check Model", n - 2, "OnCheckModel", "", 101, opts)
+        idx(n - 1) = grp.AddCommandItem2("Check Workbook", -1, HelpText(n - 1), "Check Workbook", n - 1, "OnCheckWorkbook", "", 102, opts)
         grp.HasToolbar = True
         grp.HasMenu = True
         grp.Activate()
