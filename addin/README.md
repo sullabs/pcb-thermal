@@ -1,4 +1,4 @@
-# NTIS thermal similation add-in
+# NTIS thermal simulation add-in
 
 A SolidWorks add-in that runs the whole PCB thermal workflow from its own ribbon tab and task pane.
 Built with the VB compiler that ships with Windows (.NET Framework 4). No Visual Studio, no Python, no admin rights,
@@ -8,12 +8,12 @@ Branch `addin-mvp`. The VBA macros in `../src/` stay the reference: every step h
 
 ## What it does
 
-- **Ribbon tab "NTIS thermal similation"** (parts and assemblies) and a menu of the same name: 10 buttons.
+- **Ribbon tab "NTIS thermal simulation"** (parts and assemblies) and a menu of the same name: 10 buttons.
   - 1 to 8 run the workflow steps (Prepare Workbook, Import STEP, Build Board, Build Spreader, Sync CAD to Excel,
     Run Thermal Study, Run Flow Sim, Read Results). Same behaviour, workbook cells and messages as the VBA macros.
   - **Check Model** counts components, solid bodies, faces and triangles in the open model and times it.
   - **Check Workbook** finds the open Excel workbook and checks the numbered tabs the steps need.
-- **Task pane "NTIS thermal similation"**: active workbook, the 8 steps with their last status (double-click to run), a log.
+- **Task pane "NTIS thermal simulation"**: active workbook, the 8 steps with their last status (double-click to run), a log.
   Tick **Run the VBA macros (.swp) instead** to run the old macros from a macro project (for comparison only).
 - Every message box text also goes to the log. Settings and log live in `%APPDATA%\PCBThermal\`
   (`settings.txt`, `log.txt`, `loader.log`).
@@ -24,29 +24,29 @@ Build (needs only Windows and a SolidWorks install for the API files):
 
     powershell -ExecutionPolicy Bypass -File addin\build.ps1
 
-Output: `addin\dist\NTIS_thermal_similation_Setup_<version>.exe`, one file with everything inside: the add-in, the SolidWorks
+Output: `addin\dist\NTIS_thermal_simulation_Setup_<version>.exe`, one file with everything inside: the add-in, the SolidWorks
 interop DLLs (sldworks, swconst, swpublished, cosworks), icons and the Excel template. That exe is what you share.
 Raise the version in `src/AssemblyInfo.vb` for every build you hand out.
 
 Install on any PC (close SolidWorks first; no admin rights, installs for the Windows user who runs it):
 
 - Double-click the setup exe, press **Install**. Running a newer setup upgrades in place.
-- Silent: `NTIS_thermal_similation_Setup_<version>.exe /silent`
-- Remove: Windows Settings > Apps > Installed apps > **NTIS thermal similation for SolidWorks**, or `/uninstall` (`/uninstall /silent`).
+- Silent: `NTIS_thermal_simulation_Setup_<version>.exe /silent`
+- Remove: Windows Settings > Apps > Installed apps > **NTIS thermal simulation for SolidWorks**, or `/uninstall` (`/uninstall /silent`).
 
 Files go to `%LOCALAPPDATA%\PCBThermal\`, registry entries to `HKCU` only. Then start SolidWorks normally and look
-for the **NTIS thermal similation** tab.
+for the **NTIS thermal simulation** tab.
 
 ## How it loads without admin
 
 SolidWorks 2023 reads its add-in list only from `HKLM` (tested: the `HKCU\Software\SolidWorks\AddIns` key is ignored).
-But `ISldWorks.LoadAddIn("<path>\NTIS_thermal_similation.dll")` works with the per-user COM registration. So setup adds a small
+But `ISldWorks.LoadAddIn("<path>\NTIS_thermal_simulation.dll")` works with the per-user COM registration. So setup adds a small
 loader, `PCBThermal_Setup.exe /watch`, to `HKCU\...\CurrentVersion\Run`. It starts at Windows logon, waits for each
 SolidWorks start (polls every 3 s, waits for `StartupProcessCompleted`) and calls LoadAddIn. The tab shows about
 15 s after SolidWorks starts.
 
 - Untick **Start Up** for the add-in in Tools > Add-Ins and the loader stops loading it.
-- Start menu > **Load NTIS thermal similation into SolidWorks** (`/load`) loads it once into the running SolidWorks.
+- Start menu > **Load NTIS thermal simulation into SolidWorks** (`/load`) loads it once into the running SolidWorks.
 - In Tools > Add-Ins it shows under Other Add-ins.
 - Scripted install: `Start-Process ... -Wait` also waits for the loader and never returns. Use `-PassThru` and
   `$p.WaitForExit()` instead.
@@ -113,8 +113,8 @@ update 6 s, create 57 s, BuildSpreader 32 s, SetupSim 194 s (mesh and solve), Re
 
 ## Names
 
-Shown to the user: **NTIS thermal similation** (ribbon tab, menu, task pane, message boxes, setup, Installed apps).
+Shown to the user: **NTIS thermal simulation** (ribbon tab, menu, task pane, message boxes, setup, Installed apps).
 Internal names stay as before so upgrades and settings carry over: install folder `%LOCALAPPDATA%\PCBThermal`,
-settings `%APPDATA%\PCBThermal`, COM class `PCBThermal.AddIn`, same GUID. The DLL is `NTIS_thermal_similation.dll`:
-no spaces, because COM could not load a DLL with spaces in its name (file not found). Setup 0.2.1 removes the old
-`PCBThermal.dll`, the old Start menu shortcut and the old COM entries.
+settings `%APPDATA%\PCBThermal`, COM class `PCBThermal.AddIn`, same GUID. The DLL is `NTIS_thermal_simulation.dll`:
+no spaces, because COM could not load a DLL with spaces in its name (file not found). Setup removes the old
+`PCBThermal.dll` and `NTIS_thermal_similation.dll`, the old Start menu shortcuts and the old COM entries.

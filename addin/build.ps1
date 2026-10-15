@@ -1,5 +1,5 @@
-# Builds the NTIS thermal similation add-in with the VB compiler that ships with Windows (.NET Framework 4).
-# Output: addin\bin\ (NTIS_thermal_similation.dll, interop DLLs, icons\). Then run install.ps1.
+# Builds the NTIS thermal simulation add-in with the VB compiler that ships with Windows (.NET Framework 4).
+# Output: addin\bin\ (NTIS_thermal_simulation.dll, interop DLLs, icons\). Then run install.ps1.
 param(
     [string]$SwDir = ""
 )
@@ -30,7 +30,7 @@ foreach ($d in $interops) { Copy-Item (Join-Path $redist $d) $bin -Force }
 $sources = Get-ChildItem (Join-Path $here "src") -Filter *.vb -Recurse | ForEach-Object { $_.FullName }
 $refs = ($interops | ForEach-Object { "/reference:" + (Join-Path $bin $_) }) + @(
     "/reference:System.dll", "/reference:System.Drawing.dll", "/reference:System.Windows.Forms.dll")
-$outDll = Join-Path $bin "NTIS_thermal_similation.dll"
+$outDll = Join-Path $bin "NTIS_thermal_simulation.dll"
 $rsp = @("/nologo", "/target:library", "/platform:anycpu", "/optimize+", "/debug:pdbonly",
     "/imports:Microsoft.VisualBasic,System", "/rootnamespace:PCBThermal", "`"/out:$outDll`"") +
     ($refs | ForEach-Object { "`"$_`"" }) + ($sources | ForEach-Object { "`"$_`"" })
@@ -105,9 +105,9 @@ $verFile = Join-Path $obj "SetupVersion.vb"
 Set-Content -Path $verFile -Encoding ASCII -Value @(
     "<Assembly: System.Reflection.AssemblyVersion(""$version"")>",
     "<Assembly: System.Reflection.AssemblyFileVersion(""$version"")>",
-    "<Assembly: System.Reflection.AssemblyProduct(""NTIS thermal similation"")>",
-    "<Assembly: System.Reflection.AssemblyTitle(""NTIS thermal similation setup"")>")
-$setupExe = Join-Path $dist "NTIS_thermal_similation_Setup_$ver3.exe"
+    "<Assembly: System.Reflection.AssemblyProduct(""NTIS thermal simulation"")>",
+    "<Assembly: System.Reflection.AssemblyTitle(""NTIS thermal simulation setup"")>")
+$setupExe = Join-Path $dist "NTIS_thermal_simulation_Setup_$ver3.exe"
 $rsp2 = @("/nologo", "/target:winexe", "/platform:anycpu", "/optimize+", "/main:Setup",
     "/imports:Microsoft.VisualBasic,System", "/reference:System.dll", "/reference:System.Drawing.dll",
     "/reference:System.Windows.Forms.dll", "`"/win32manifest:$(Join-Path $here 'setup\setup.manifest')`"",

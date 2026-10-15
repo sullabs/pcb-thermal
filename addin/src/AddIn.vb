@@ -8,15 +8,15 @@ Imports SolidWorks.Interop.sldworks
 Imports SolidWorks.Interop.swconst
 Imports SolidWorks.Interop.swpublished
 
-' SolidWorks add-in entry point. Builds the "NTIS thermal similation" ribbon tab, the menu and the task pane.
+' SolidWorks add-in entry point. Builds the "NTIS thermal simulation" ribbon tab, the menu and the task pane.
 ' Registered per user by install.ps1 (no admin rights).
 <ComVisible(True), Guid(AddIn.AddInGuid), ProgId("PCBThermal.AddIn")>
 Public Class AddIn
     Implements ISwAddin
 
     Public Const AddInGuid As String = "F7AF128D-DEE1-4BEB-A464-4FE0B17337DF"
-    Public Const TabTitle As String = "NTIS thermal similation"
-    Private Const OldTabTitle As String = "PCB Thermal"
+    Public Const TabTitle As String = "NTIS thermal simulation"
+    Private Shared ReadOnly OldTabTitles As String() = {"PCB Thermal", "NTIS thermal similation"}
     Private Const GroupId As Integer = 7301
 
     Private swApp As SldWorks
@@ -121,8 +121,10 @@ Public Class AddIn
             styles(i) = CInt(swCommandTabButtonTextDisplay_e.swCommandTabButton_TextBelow)
         Next
         For Each docType As Integer In New Integer() {CInt(swDocumentTypes_e.swDocPART), CInt(swDocumentTypes_e.swDocASSEMBLY)}
-            Dim oldTab As CommandTab = cmdMgr.GetCommandTab(docType, OldTabTitle)
-            If oldTab IsNot Nothing Then cmdMgr.RemoveCommandTab(oldTab)
+            For Each t As String In OldTabTitles
+                Dim oldTab As CommandTab = cmdMgr.GetCommandTab(docType, t)
+                If oldTab IsNot Nothing Then cmdMgr.RemoveCommandTab(oldTab)
+            Next
             Dim cmdTab As CommandTab = cmdMgr.GetCommandTab(docType, TabTitle)
             If cmdTab IsNot Nothing Then cmdMgr.RemoveCommandTab(cmdTab)
             cmdTab = cmdMgr.AddCommandTab(docType, TabTitle)
@@ -134,8 +136,10 @@ Public Class AddIn
     Private Sub RemoveCommands()
         If cmdMgr Is Nothing Then Return
         For Each docType As Integer In New Integer() {CInt(swDocumentTypes_e.swDocPART), CInt(swDocumentTypes_e.swDocASSEMBLY)}
-            Dim oldTab As CommandTab = cmdMgr.GetCommandTab(docType, OldTabTitle)
-            If oldTab IsNot Nothing Then cmdMgr.RemoveCommandTab(oldTab)
+            For Each t As String In OldTabTitles
+                Dim oldTab As CommandTab = cmdMgr.GetCommandTab(docType, t)
+                If oldTab IsNot Nothing Then cmdMgr.RemoveCommandTab(oldTab)
+            Next
             Dim cmdTab As CommandTab = cmdMgr.GetCommandTab(docType, TabTitle)
             If cmdTab IsNot Nothing Then cmdMgr.RemoveCommandTab(cmdTab)
         Next

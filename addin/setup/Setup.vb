@@ -24,11 +24,11 @@ Public Module Setup
     Private Const PayloadPrefix As String = "payload/"
     Private Const RunKey As String = "Software\Microsoft\Windows\CurrentVersion\Run"
     Private Const RunValue As String = "PCBThermalLoader"
-    Public Const AppName As String = "NTIS thermal similation"
-    Public Const DllName As String = "NTIS_thermal_similation.dll"
-    Private Const OldDllName As String = "PCBThermal.dll"
-    Private Const ShortcutName As String = "Load NTIS thermal similation into SolidWorks.lnk"
-    Private Const OldShortcutName As String = "Load PCB Thermal into SolidWorks.lnk"
+    Public Const AppName As String = "NTIS thermal simulation"
+    Public Const DllName As String = "NTIS_thermal_simulation.dll"
+    Private ReadOnly OldDllNames As String() = {"PCBThermal.dll", "NTIS_thermal_similation.dll"}
+    Private Const ShortcutName As String = "Load NTIS thermal simulation into SolidWorks.lnk"
+    Private ReadOnly OldShortcutNames As String() = {"Load PCB Thermal into SolidWorks.lnk", "Load NTIS thermal similation into SolidWorks.lnk"}
 
     Private Function InstallDir() As String
         Return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PCBThermal")
@@ -123,10 +123,14 @@ Public Module Setup
             File.Copy(asm.Location, selfCopy, True)
         End If
 
-        ' Before 0.2.1 the add-in was called PCB Thermal: remove its DLL and shortcut
+        ' Older versions used other names: remove their DLL and shortcut
         Try
-            File.Delete(Path.Combine(dest, OldDllName))
-            File.Delete(Path.Combine(Path.GetDirectoryName(ShortcutPath()), OldShortcutName))
+            For Each f As String In OldDllNames
+                File.Delete(Path.Combine(dest, f))
+            Next
+            For Each f As String In OldShortcutNames
+                File.Delete(Path.Combine(Path.GetDirectoryName(ShortcutPath()), f))
+            Next
         Catch
         End Try
 
@@ -207,7 +211,9 @@ Public Module Setup
         End Try
         Try
             File.Delete(ShortcutPath())
-            File.Delete(Path.Combine(Path.GetDirectoryName(ShortcutPath()), OldShortcutName))
+            For Each f As String In OldShortcutNames
+                File.Delete(Path.Combine(Path.GetDirectoryName(ShortcutPath()), f))
+            Next
         Catch
         End Try
         For Each keyPath As String In New String() {
