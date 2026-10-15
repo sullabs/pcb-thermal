@@ -42,48 +42,31 @@ Set-Content -Path $rspFile -Value $rsp -Encoding ASCII
 if ($LASTEXITCODE -ne 0) { throw "Compile failed." }
 
 # Icons: one strip per size for the ribbon (8 steps + Check Model + Check Workbook), and a main icon.
+# Made from the PNGs in icons\png (rendered from icons\svg by icons\render.ps1), each size from its own PNG.
 Add-Type -AssemblyName System.Drawing
-$iconDir = Join-Path (Split-Path -Parent $here) "src\icons"
-$stepIcons = Get-ChildItem $iconDir -Filter "*_32.bmp" | Sort-Object Name | ForEach-Object { $_.FullName }
-
-function New-GlyphIcon([string]$text, [System.Drawing.Color]$fill) {
-    $bmp = New-Object System.Drawing.Bitmap 32, 32
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.SmoothingMode = "AntiAlias"; $g.TextRenderingHint = "AntiAliasGridFit"
-    $g.Clear([System.Drawing.Color]::Transparent)
-    $brush = New-Object System.Drawing.SolidBrush $fill
-    $g.FillEllipse($brush, 1, 1, 30, 30)
-    $font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
-    $sf = New-Object System.Drawing.StringFormat; $sf.Alignment = "Center"; $sf.LineAlignment = "Center"
-    $g.DrawString($text, $font, [System.Drawing.Brushes]::White, (New-Object System.Drawing.RectangleF 0, 0, 32, 32), $sf)
-    $g.Dispose()
-    return $bmp
-}
-
-$images = @()
-foreach ($f in $stepIcons) { $images += [System.Drawing.Image]::FromFile($f) }
-$images += New-GlyphIcon "M" ([System.Drawing.Color]::FromArgb(0, 120, 80))
-$images += New-GlyphIcon "W" ([System.Drawing.Color]::FromArgb(30, 110, 60))
-$main = New-GlyphIcon "PT" ([System.Drawing.Color]::FromArgb(200, 70, 30))
-
+$pngDir = Join-Path $here "icons\png"
+$stripNames = @("01-prepare-workbook", "02-import-step", "03-build-board", "04-build-spreader", "05-sync-cad-to-excel",
+    "06-run-thermal-study", "07-run-flow-sim", "08-read-results", "09-check-model", "10-check-workbook")
+$mainName = "11-main"
 foreach ($size in 20, 32, 40, 64, 96, 128) {
-    $strip = New-Object System.Drawing.Bitmap ($size * $images.Count), $size
+    $strip = New-Object System.Drawing.Bitmap ($size * $stripNames.Count), $size, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
     $g = [System.Drawing.Graphics]::FromImage($strip)
-    $g.InterpolationMode = "HighQualityBicubic"
-    for ($i = 0; $i -lt $images.Count; $i++) { $g.DrawImage($images[$i], $i * $size, 0, $size, $size) }
+    $g.Clear([System.Drawing.Color]::Transparent)
+    for ($i = 0; $i -lt $stripNames.Count; $i++) {
+        $f = Join-Path $pngDir "$($stripNames[$i])-$size.png"
+        if (-not (Test-Path $f)) { throw "Icon missing: $f. Run icons\render.ps1." }
+        $im = [System.Drawing.Image]::FromFile($f)
+        if ($im.Width -ne $size -or $im.Height -ne $size) { throw "Icon $f is not $size px." }
+        $g.DrawImage($im, (New-Object System.Drawing.Rectangle ($i * $size), 0, $size, $size))
+        $im.Dispose()
+    }
     $g.Dispose()
     $strip.Save((Join-Path $bin "icons\strip_$size.png"), [System.Drawing.Imaging.ImageFormat]::Png)
     $strip.Dispose()
-    $one = New-Object System.Drawing.Bitmap $size, $size
-    $g = [System.Drawing.Graphics]::FromImage($one)
-    $g.InterpolationMode = "HighQualityBicubic"
-    $g.DrawImage($main, 0, 0, $size, $size)
-    $g.Dispose()
-    $one.Save((Join-Path $bin "icons\main_$size.png"), [System.Drawing.Imaging.ImageFormat]::Png)
-    $one.Dispose()
+    $f = Join-Path $pngDir "$mainName-$size.png"
+    if (-not (Test-Path $f)) { throw "Icon missing: $f. Run icons\render.ps1." }
+    Copy-Item $f (Join-Path $bin "icons\main_$size.png") -Force
 }
-foreach ($im in $images) { $im.Dispose() }
-$main.Dispose()
 
 # ---------------- Setup exe: one file with everything inside ----------------
 $version = [System.Reflection.AssemblyName]::GetAssemblyName($outDll).Version

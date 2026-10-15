@@ -106,7 +106,9 @@ update 6 s, create 57 s, BuildSpreader 32 s, SetupSim 194 s (mesh and solve), Re
 | `src/ExcelLink.vb` | Check Workbook |
 | `src/ModelCheck.vb` | Check Model |
 | `src/Support.vb` | Settings file and log |
-| `build.ps1` | Compiles the add-in and the setup exe with `vbc.exe`, makes the icon strips |
+| `build.ps1` | Compiles the add-in and the setup exe with `vbc.exe`, makes the icon strips from `icons/png/` |
+| `icons/svg/` | Icon sources, one per command in ribbon order (`11-main.svg` is the add-in icon) |
+| `icons/render.ps1` | Renders `icons/svg/` with Edge headless to `icons/png/` (20 to 128 px) and to the VBA toolbar bitmaps in `../src/icons/`. Run it after changing an SVG and commit the output |
 | `src/AssemblyInfo.vb` | Version number |
 | `setup/Setup.vb`, `setup/setup.manifest` | The setup exe: unpacks the embedded files, per-user registration, uninstall entry |
 | `setup/Loader.vb` | `/watch` and `/load`: loads the add-in into SolidWorks with LoadAddIn |
