@@ -7,3 +7,5 @@
 CAD/
 backup/
 *.bak_*
+# Add-in build output
+addin/bin/
