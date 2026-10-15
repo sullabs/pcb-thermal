@@ -169,6 +169,10 @@ Public Function PT_TabBase(ByVal tabName As String) As String
         k = k + 1
     Loop
     If k > 1 Then
+        ' one letter after the number is part of the step ("7b Spreader bottom")
+        If k < Len(s) Then
+            If Mid(s, k, 1) Like "[A-Za-z]" And Mid(s, k + 1, 1) Like "[ ._)-]" Then k = k + 1
+        End If
         Do While k <= Len(s)
             ch = Mid(s, k, 1)
             If ch <> " " And ch <> "." And ch <> "-" And ch <> "_" And ch <> ")" Then Exit Do
