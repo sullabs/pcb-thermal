@@ -13,6 +13,21 @@ Read `PLAN.md` first. It is the spec. This file is the short list of rules that 
   SolidWorks Flow Simulation and Excel.
 - Macros talk to Excel by COM late binding (`GetObject(, "Excel.Application")`, `As Object`). No project references
   beyond the SolidWorks defaults.
+- **Direction since 2026-10-18: a web page replaces the workbook as the user interface.** Spec: `docs/WEBAPP_DESIGN.md`
+  (milestones W1 to W9). The page is one HTML file, `webapp/dist/PCB_Thermal.html`, opened from disk in Chrome or Edge,
+  with every library inside it. It writes only `project.json`; the macros write only `cad.json` and `results.json`. Schemas:
+  `webapp/schema/`. The workbook and the current macros keep working until W7.
+- Node tools in `webapp/` (`npm test`, converter, validator) are for development here only. The user's PC never needs
+  Node, npm or Python: only the built HTML file ships.
+
+## Web app rules
+
+- Every field in the three JSON files is in `webapp/schema/`. Change the schema first, then the code, then rerun
+  `npm test` in `webapp/` (it also checks that `example/RaspberryPi4/*.json` are up to date; `node tools/test_w1.mjs --write`
+  refreshes them).
+- Fixed units in the files: mm, C, W, W/(m K), C/W. Blank values are left out, never `null`.
+- The page reads the RPi4 example as its reference case. Keep board-specific data out of `webapp/src/`, as for `.bas` files.
+- Dark theme by default, light on request. Every value has a hover explanation from the term catalogue.
 
 ## VBA rules (each one cost a failed run already)
 

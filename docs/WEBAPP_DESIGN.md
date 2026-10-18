@@ -65,15 +65,27 @@ Everything the user decides, plus the numbers the macros need, already worked ou
 
 | Section | Holds | Replaces |
 |---|---|---|
-| `board` | name, STEP file name, ambient, enclosure notes | register header, Read me |
-| `parts[]` | per part: id, RefDes, part number, class, package, rail, power method and its inputs (Vin, Iin, Vout, Iout, efficiency, R, measured Pd), Tj max, Rja, Rjc, Rjb, Ta override, notes | 1 Component register (inputs) |
-| `bodies{}` | user choices per imported body, by body key: include, RefDes link, name override, size and position overrides | 3 CAD geometry (blue columns) |
-| `pcbStack` | copper layers, copper thickness, coverage, copper k, dielectric k | 3 CAD geometry PCB stack |
-| `spreader` | top and bottom plate: material, k, density, thickness, clearances, height mode, per chip cover, TIM mode, TIM t, TIM k | 7 and 7b Spreader (inputs) |
-| `simSetup` | study type, mesh sizes, include parts without heat, k of parts without heat, core k, h and emissivity per surface group, contact R per interface, per chip model and k xy | 9 Sim setup (inputs) |
-| `settings` | templates, file prefix, tolerances, flag limits | 12 Settings, register flag limits |
-| `forSolidWorks` | written on every save: heat per RefDes, k z and k xy per chip, two-resistor layer values, PCB k in-plane and through, TIM k and R, list of bodies to build with their used size and position | grey columns the macros read today |
-| `checks` | the user's ticks on change records (by change id) | Change log "Checked" column |
+| `board` | name, STEP file name, ambient, measured board input power, notes (enclosure, load case) | register header, rail budget E35, Read me |
+| `parts[]` | one per RefDes: id, part number, class, package, Tj max, Rja, Rjc, Rjb, Ta override, notes, and `loads[]` | 1 Component register (inputs) |
+| `parts[].loads[]` | one per heat source in the part: label, rail, method override, Vin, Iin, Vout, Iout, efficiency, R, measured Pd. Part Pd = sum of its loads. | register rows (a PMIC with four bucks was four rows) |
+| `bodies{}` | user choices per body, by body key: include, RefDes link, name override, box override. A body typed in by hand (key `m_...`) carries its own name and box. | 3 CAD geometry (blue columns) |
+| `pcbOverride` | PCB L, W, thickness that replace the imported ones | 3 CAD geometry D7:D9 |
+| `pcbStack` | copper layers, copper thickness (mm), coverage, copper k, dielectric k | 3 CAD geometry PCB stack |
+| `spreader` | `top` and `bottom` plate: enabled, material, k, density, thickness, clearances, smallest pedestal, height mode and manual height, per chip: covered, height mode, TIM mode, TIM t, TIM k | 7 and 7b Spreader (inputs) |
+| `handCheck` | surface rise for radiation, run to compare, and the thermal solution inputs (top and bottom: plate, h, faces, per part TIM1, local spreader, TIM2, plate share) | 6 Bare board network, 8 and 8b Thermal solution (inputs) |
+| `simSetup` | study type, mesh sizes, include parts without heat, k of parts without heat, h and emissivity per surface group, contact R per interface, per chip model and k xy | 9 Sim setup (inputs) |
+| `settings` | templates, output folder, file prefix, assembly name, tolerances, Import STEP settings, flag limits | 12 Settings, 2 STEP import M3:M5, register flag limits |
+| `forSolidWorks` | written on every save: ambient, PCB size and k in-plane and through, bodies to build with their used box, heat per RefDes, per chip model, k z, k xy, Rjc, Rjb, per plate face height, material, chips (TIM t, pedestal, TIM mode, k, R) and clearance cuts | grey columns the macros read today |
+| `checks` | the user's ticks on change records, by change id | Change log "Checked" column |
+
+Rules for all three files (fixed in W1, `webapp/schema/`):
+
+- A blank value is left out. `null` is never written. Unknown fields are refused, so a typo cannot hide.
+- Yes/No cells become `true`/`false`. Dates are local time, `2026-10-18T11:20:00`.
+- Change ids are `yyyymmddThhmmss-n` (time of the change, then a counter), so the page can store a tick by id.
+- **Parts by RefDes.** The workbook worked out Tj est per register row, so each buck of a PMIC got its own Tj from
+  its own share of the heat. The page works per part: Tj est uses the part's total Pd. This changes the RPi4 U3
+  numbers on purpose; the W2 tests compare per RefDes.
 
 `forSolidWorks` is the only place the macros read numbers from. The page computes it, so the macros never repeat a
 calculation.
@@ -111,7 +123,10 @@ the user changed them.
 ### 4.1 Layout
 
 - **Top bar:** project name, save state ("Saved 11:20" or "Unsaved changes"), Show formulas switch, Learn mode switch,
-  Help, Export.
+  Dark/light switch, Help, Export.
+- **Colour theme:** dark by default, light on request. The choice is remembered in the browser, not in the project.
+  Status colours (CRITICAL, Watch, OK, locked) are chosen to read the same in both themes. Print and PDF export always
+  use the light theme.
 - **Step tabs** across the top, in workflow order. Each tab shows its state: locked, ready, done, or needs attention.
 - **Main area:** the tab content.
 - **Explain panel** on the right, closed by default. It opens when the user clicks a value's info icon (section 5).
@@ -278,7 +293,8 @@ Per macro:
 - Libraries are put inside the file, at pinned versions: Preact and htm (interface, no build step), ExcelJS (export),
   JSZip (archive), SheetJS read only (importing an old workbook). Drawings and charts are plain SVG.
 - **Old workbooks:** the page can read a filled workbook (read only) and make a `project.json` from it, so the RPi4
-  workbook becomes the example project.
+  workbook becomes the example project. The converter is `webapp/src/io/workbook_import.js` (done in W1); the page
+  uses the same module.
 - **Tests:** a script reads every calculated value from `RaspberryPi4.xlsx` through Excel and saves them as
   `tests/webapp/expected_rpi4.json`. The page's calculation module must match them to 6 significant digits. This runs
   for every change to a formula.
@@ -287,7 +303,7 @@ Per macro:
 
 | # | Milestone | Done when |
 |---|---|---|
-| W1 | File formats: JSON schemas for the three files, with the RPi4 example converted from the workbook | `project.json`, `cad.json`, `results.json` for RPi4 exist and validate |
+| W1 | File formats: JSON schemas for the three files, with the RPi4 example converted from the workbook | `project.json`, `cad.json`, `results.json` for RPi4 exist and validate. **Done 2026-10-18** (`webapp/schema/`, `example/RaspberryPi4/*.json`, `npm test` in `webapp/`) |
 | W2 | Calculation module: register, triage, rail budget, PCB stack, bare board network, spreader checks, thermal solution top and bottom, sim setup k values | matches `expected_rpi4.json` |
 | W3 | Page shell: folder picking, save and reload, tabs with unlock rules and reasons, undo | RPi4 example opens, edits save, a locked tab names its reason |
 | W4 | Term catalogue and Explain panel: hover text, abbreviations, formulas with numbers, trace | every value on every tab has a hover text and, if calculated, a formula |
@@ -309,3 +325,4 @@ The workbook and the current macros keep working until W7 is done.
 4. **Units: fixed, with input helpers.** Values are stored and shown in mm, C, W, W/(m K) and C/W. Some fields accept
    other units as typed text and convert on entry: copper thickness in oz (1 oz = 0.035 mm) or um, lengths in mil,
    power in mW, temperature differences in K, resistance in K/W. The hover text of each field lists what it accepts.
+5. **Theme:** dark by default, with a switch to light (section 4.1).

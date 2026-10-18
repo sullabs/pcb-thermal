@@ -1,0 +1,233 @@
+{
+  "schema": "pcb-thermal/results",
+  "schemaVersion": 1,
+  "savedBy": "convert_workbook 0.1.0",
+  "savedAt": "2026-10-18T12:00:00",
+  "runs": [
+    {
+      "name": "PT_20261001_0001",
+      "date": "2026-10-01T00:09:00",
+      "studyType": "Thermal",
+      "status": "read",
+      "study": "PT_20261001_0001",
+      "spreaderFiles": [
+        "RaspberryPi4_Spreader_r01.SLDPRT"
+      ],
+      "mesh": {
+        "globalMm": 3,
+        "fineMm": 0.5
+      },
+      "inputs": {
+        "summary": {
+          "hSpreaderTop": 10,
+          "hPcbTop": 8,
+          "timModes": "U2 Body, U1 Body, U6 Body, U5 Body, U4 Body, U3 Body, L1 Body, L2 Body"
+        }
+      },
+      "spreader": {
+        "maxC": 72.79,
+        "minC": 64.27
+      },
+      "pcb": {
+        "maxC": 79.68,
+        "minC": 49.89
+      },
+      "energyBalancePct": 0,
+      "plotFile": "C:\\Users\\Sultan\\Desktop\\thermal_similation\\workbook\\CAD\\results\\PT_20261001_0001.png",
+      "parts": {
+        "U1": {
+          "peakC": 76,
+          "avgC": 75.31
+        },
+        "U2": {
+          "peakC": 72.19,
+          "avgC": 70.77
+        },
+        "J1": {
+          "peakC": 69.17,
+          "avgC": 64.62
+        },
+        "U4": {
+          "peakC": 77.4,
+          "avgC": 73.51
+        },
+        "U3": {
+          "peakC": 81.93,
+          "avgC": 80.5
+        },
+        "U5": {
+          "peakC": 73.1,
+          "avgC": 71.54
+        },
+        "U6": {
+          "peakC": 72.95,
+          "avgC": 71.64
+        },
+        "L1": {
+          "peakC": 133.48,
+          "avgC": 115.81
+        },
+        "L2": {
+          "peakC": 79.8,
+          "avgC": 77.08
+        }
+      }
+    },
+    {
+      "name": "FL_20261001_0728",
+      "date": "2026-10-01T07:29:00",
+      "studyType": "Flow",
+      "status": "read",
+      "study": "Flow Project(1)PT_Flow",
+      "inputs": {
+        "summary": {
+          "hSpreaderTop": 10,
+          "hPcbTop": 8,
+          "timModes": "U2 Body, U1 Body, U6 Body, U5 Body, U4 Body, U3 Body, L1 Body, L2 Body"
+        }
+      },
+      "spreader": {
+        "maxC": 484.16,
+        "minC": 468.65
+      },
+      "pcb": {
+        "maxC": 484.15,
+        "minC": 480.53
+      },
+      "parts": {
+        "U1": {
+          "peakC": 484.17,
+          "avgC": 484.08
+        },
+        "U2": {
+          "peakC": 483.55,
+          "avgC": 483.34
+        },
+        "U4": {
+          "peakC": 482.7,
+          "avgC": 482.53
+        },
+        "U3": {
+          "peakC": 484.18,
+          "avgC": 484.15
+        },
+        "U5": {
+          "peakC": 482.73,
+          "avgC": 482.6
+        },
+        "U6": {
+          "peakC": 483.8,
+          "avgC": 483.52
+        },
+        "L1": {
+          "peakC": 484.13,
+          "avgC": 484.09
+        },
+        "L2": {
+          "peakC": -273.15,
+          "avgC": -273.15
+        }
+      }
+    },
+    {
+      "name": "FL_20261001_0739",
+      "date": "2026-10-01T07:39:00",
+      "studyType": "Flow",
+      "status": "read",
+      "study": "Flow Project(1)PT_Flow (last run)",
+      "inputs": {
+        "summary": {
+          "hSpreaderTop": 10,
+          "hPcbTop": 8,
+          "timModes": "U2 Body, U1 Body, U6 Body, U5 Body, U4 Body, U3 Body, L1 Body, L2 Body"
+        }
+      },
+      "spreader": {
+        "maxC": 484.16,
+        "minC": 468.65
+      },
+      "pcb": {
+        "maxC": 484.15,
+        "minC": 480.53
+      },
+      "parts": {
+        "U1": {
+          "peakC": 484.17,
+          "avgC": 484.08
+        },
+        "U2": {
+          "peakC": 483.55,
+          "avgC": 483.34
+        },
+        "U4": {
+          "peakC": 482.7,
+          "avgC": 482.53
+        },
+        "U3": {
+          "peakC": 484.18,
+          "avgC": 484.15
+        },
+        "U5": {
+          "peakC": 482.73,
+          "avgC": 482.6
+        },
+        "U6": {
+          "peakC": 483.8,
+          "avgC": 483.52
+        },
+        "L1": {
+          "peakC": 484.13,
+          "avgC": 484.09
+        }
+      }
+    },
+    {
+      "name": "FL_20261001_0753",
+      "date": "2026-10-01T07:54:00",
+      "studyType": "Flow",
+      "status": "read",
+      "study": "Flow Project(1)PT_Flow",
+      "inputs": {
+        "summary": {
+          "hSpreaderTop": 10,
+          "hPcbTop": 8,
+          "timModes": "U2 Body, U1 Body, U6 Body, U5 Body, U4 Body, U3 Body, L1 Body, L2 Body"
+        }
+      },
+      "spreader": {
+        "maxC": 99.09,
+        "minC": 51.89
+      },
+      "pcb": {
+        "maxC": 99.21,
+        "minC": 47.08
+      },
+      "parts": {
+        "U1": {
+          "peakC": 98.83,
+          "avgC": 98.71
+        },
+        "U2": {
+          "peakC": 97.96,
+          "avgC": 97.87
+        },
+        "U4": {
+          "peakC": 97.39,
+          "avgC": 97.28
+        },
+        "U3": {
+          "peakC": 99.22,
+          "avgC": 99.18
+        },
+        "U5": {
+          "peakC": 97.65,
+          "avgC": 97.61
+        },
+        "U6": {
+          "peakC": 97.37,
+          "avgC": 96.93
+        }
+      }
+    }
+  ]
+}

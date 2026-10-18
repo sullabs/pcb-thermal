@@ -11,3 +11,6 @@ backup/
 addin/bin/
 addin/obj/
 addin/dist/
+
+# Web app development tools
+webapp/node_modules/

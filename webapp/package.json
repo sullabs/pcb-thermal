@@ -1,0 +1,17 @@
+{
+  "name": "pcb-thermal-webapp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PCB thermal page. Development tools only; the shipped page is one HTML file with nothing to install.",
+  "scripts": {
+    "convert": "node tools/convert_workbook.mjs",
+    "validate": "node tools/validate.mjs",
+    "test": "node tools/test_w1.mjs"
+  },
+  "devDependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  }
+}
