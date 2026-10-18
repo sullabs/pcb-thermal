@@ -30,6 +30,7 @@ Reference board: Raspberry Pi 4 Model B (`Raspberry Pi 4 Model B.STEP`).
 | ImportStep: every solid body, rotation of the board and of each body, Include = No by default, tables grow on demand (decisions 29 to 31) | compiled and run 2026-10-14 on a fresh copy (`example/RaspberryPi4/RPi4_fresh.xlsx`): 108 bodies, re-import "none", BuildBoard "Nothing changed", 0 overlaps, parts coloured. Three bugs fixed (see section 9). Rotation checks R2, R4, R6 not done |
 | Bare board simulation compared with the hand calculation (tab 6) | done 2026-10-14 (study run, energy balance 0 %). The hand and sim gap is open and not judged. Then the spreader: user-drawn outline, BuildSpreader, SetupSim and ReadResults with the spreader all run end to end on RPi4_fresh (`docs/TEST_PLAN.md`). Next: a board with heat chips on both sides to test the bottom plate in SetupSim, ReadResults per plate. SyncFromCAD (as built per plate) and tab 8b (hand check, bottom plate) done 2026-10-14 |
 | Workbook template `PCB_thermal_TEMPLATE.xlsx` (numbered tabs in workflow order, notes on every header, new `6 Bare board network`, How to, Read me) | done 2026-10-01, RPi4 data refilled into `RaspberryPi4.xlsx`: 0 differences against the old workbook |
+| Web app (page as the calculator, three JSON files, macros on JSON; milestones W1 to W9) | design agreed in outline 2026-10-18 (`docs/WEBAPP_DESIGN.md`), no code yet. The workbook and current macros stay in use until W7 |
 
 Files in this folder:
 
@@ -421,6 +422,7 @@ board (e.g. thin top and bottom layers with calibrated k, heat applied to the co
 | M7 | Flow Simulation spike, then macros | M6 |
 | M8 | Two-resistor chip model | M6 |
 | - | Hand network changes (section 7) | M4 |
+| W1 to W9 | Web app replacing the workbook as the user interface (`docs/WEBAPP_DESIGN.md`, section 12) | M6 |
 
 Run order for a new board: M2 ImportStep, M3 BuildBoard, then the **bare board** part of M6 (SetupSim, ReadResults) and the
 comparison with `6 Bare board network`, and only then M4 BuildSpreader and a second M6 run with the spreader. The bare board
