@@ -75,6 +75,7 @@ Dim itemsCapped As Boolean
 
 Sub main()
     Set swApp = Application.SldWorks
+    PT_Trace MACRO_NAME & ": started (VBA macro)."
     Set msgs = New Collection
     PT_LogReset
     nSheetBodies = 0: itemsCapped = False
@@ -90,7 +91,7 @@ Sub main()
     Dim upg As String
     upg = UpgradeWorkbook(wb, xl)
     If Left(upg, 4) = "ERR:" Then
-        MsgBox "ImportStep did not run. The workbook could not be prepared for rotation columns:" & vbCrLf & Mid(upg, 5) & vbCrLf & _
+        PT_Msg "ImportStep did not run. The workbook could not be prepared for rotation columns:" & vbCrLf & Mid(upg, 5) & vbCrLf & _
                "Close any cell you are editing in Excel and run again.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
@@ -119,7 +120,7 @@ Sub main()
     CollectItems doc, perBody
     If n = 0 Then
         xl.StatusBar = False
-        MsgBox "No solid bodies found in " & srcName & ". Nothing was written.", vbExclamation, MACRO_NAME: Exit Sub
+        PT_Msg "No solid bodies found in " & srcName & ". Nothing was written.", vbExclamation, MACRO_NAME: Exit Sub
     End If
     If itemsCapped Then msgs.Add "The model has more than " & MAX_ITEMS & " bodies; only the first " & MAX_ITEMS & " were read."
     If nSheetBodies > 0 Then msgs.Add nSheetBodies & " surface (sheet) bodies were not imported. Only solid bodies are."
@@ -246,7 +247,7 @@ Sub main()
     Dim added As Long
     added = EnsureCapacity(wb, xl, cnt - 1)
     If added < 0 Then
-        MsgBox "ImportStep stopped while making room for " & (cnt - 1) & " bodies on the CAD geometry tab:" & vbCrLf & PT_LastErr & vbCrLf & _
+        PT_Msg "ImportStep stopped while making room for " & (cnt - 1) & " bodies on the CAD geometry tab:" & vbCrLf & PT_LastErr & vbCrLf & _
                "Nothing else was written. Close any cell you are editing in Excel and run again.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
@@ -258,7 +259,7 @@ Sub main()
     Set wsG = rGeo.Worksheet
     capRows = BodyCapacity(rGeo)
     If cnt - 1 > capRows Or cnt > rImp.Rows.Count Then
-        MsgBox CStr(cnt - 1) & " bodies to import; CAD geometry holds " & capRows & "." & vbCrLf & "Nothing was written.", vbExclamation, MACRO_NAME
+        PT_Msg CStr(cnt - 1) & " bodies to import; CAD geometry holds " & capRows & "." & vbCrLf & "Nothing was written.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
 
@@ -450,7 +451,7 @@ Sub main()
     If chipRows > 0 Then msgs.Add chipRows & " chip rows written to the Spreader and Sim setup tabs (they were empty)."
     wb.Save
 
-    MsgBox "Written and saved to:" & vbCrLf & wb.FullName & vbCrLf & "(tabs STEP import, CAD geometry, Change log)" & vbCrLf & vbCrLf & _
+    PT_Msg "Written and saved to:" & vbCrLf & wb.FullName & vbCrLf & "(tabs STEP import, CAD geometry, Change log)" & vbCrLf & vbCrLf & _
            "Imported " & (cnt - 1) & " bodies plus the PCB (" & Round(bmax(pcb, 0) - bmin(pcb, 0), 2) & " x " & _
            Round(bmax(pcb, 1) - bmin(pcb, 1), 2) & " x " & Round(tPcb, 2) & " mm), level: " & newLevel & "." & vbCrLf & _
            nTurned & " bodies turned in the board plane." & vbCrLf & _
@@ -461,7 +462,7 @@ Sub main()
 writeFail:
     xl.ScreenUpdating = True
     xl.StatusBar = False
-    MsgBox "Stopped while writing to Excel: " & Err.Description & vbCrLf & _
+    PT_Msg "Stopped while writing to Excel: " & Err.Description & vbCrLf & _
            "The workbook was not saved. Close any cell you are editing in Excel, close the workbook without saving, and run again.", _
            vbExclamation, MACRO_NAME
 End Sub
@@ -592,7 +593,7 @@ Function GetModel(ByRef srcName As String) As Object
     Set act = swApp.ActiveDoc
     If Not act Is Nothing Then
         If act.GetType = swDocASSEMBLY Or act.GetType = swDocPART Then
-            a = MsgBox("Use the model open in SolidWorks?" & vbCrLf & act.GetTitle & vbCrLf & vbCrLf & _
+            a = PT_Msg("Use the model open in SolidWorks?" & vbCrLf & act.GetTitle & vbCrLf & vbCrLf & _
                        "No = pick a STEP file instead.", vbYesNoCancel + vbQuestion, MACRO_NAME)
             If a = vbCancel Then Exit Function
             If a = vbYes Then
@@ -609,7 +610,7 @@ Function GetModel(ByRef srcName As String) As Object
     Set impData = swApp.GetImportFileData(f)
     Set GetModel = swApp.LoadFile4(f, "r", impData, errs)
     If GetModel Is Nothing Then
-        MsgBox "SolidWorks could not open " & f & " (error " & errs & ").", vbExclamation, MACRO_NAME
+        PT_Msg "SolidWorks could not open " & f & " (error " & errs & ").", vbExclamation, MACRO_NAME
         Exit Function
     End If
     srcName = f
@@ -841,45 +842,120 @@ Sub XfPoint(ByVal spMode As Long, ByRef xd() As Double, ByVal x As Double, ByVal
 End Sub
 
 Function ItemVolume(ByVal i As Long) As Double
+    Dim bodies As Variant, info As Variant, vol As Double, leaves As Collection, lc As Variant
     On Error Resume Next
-    Dim bodies As Variant, info As Variant, k As Long, mp As Variant, vol As Double
     If Not srcBody(i) Is Nothing Then
-        bodies = Array(srcBody(i))
+        vol = BodiesVolume(Array(srcBody(i)))
     ElseIf Not srcComp(i) Is Nothing Then
-        bodies = srcComp(i).GetBodies3(swSolidBody, info)
+        Set leaves = New Collection
+        LeafComps srcComp(i), leaves
+        For Each lc In leaves
+            bodies = Empty
+            bodies = lc.GetBodies3(swSolidBody, info)
+            vol = vol + BodiesVolume(bodies)
+        Next
     End If
-    If IsEmpty(bodies) Then Exit Function
-    For k = 0 To UBound(bodies)
-        mp = bodies(k).GetMassProperties(1#)
-        If Not IsEmpty(mp) Then vol = vol + mp(3)
-    Next
     ItemVolume = vol * 1000000000#                           ' m3 -> mm3
 End Function
 
+Function BodiesVolume(ByVal bodies As Variant) As Double
+    Dim k As Long, mp As Variant, vol As Double
+    On Error Resume Next
+    If IsEmpty(bodies) Then Exit Function
+    For k = 0 To UBound(bodies)
+        mp = Empty
+        mp = bodies(k).GetMassProperties(1#)
+        If Not IsEmpty(mp) Then vol = vol + mp(3)
+    Next
+    BodiesVolume = vol
+End Function
+
+' The part components under a component (the component itself when it is a part). A component that is a
+' sub-assembly has no bodies of its own, so its shape comes from these. Suppressed and hidden ones are left out.
+Sub LeafComps(ByVal c As Object, ByVal leaves As Collection)
+    Dim ch As Variant, k As Long
+    If c.IsSuppressed Then Exit Sub
+    If IsLeaf(c) Then
+        leaves.Add c
+        Exit Sub
+    End If
+    ch = c.GetChildren
+    For k = 0 To UBound(ch)
+        If Not ch(k).IsHidden(True) Then LeafComps ch(k), leaves
+    Next
+End Sub
+
 ' ---------------------------------------------------------------- surface points of a body
 ' Points (mm, model space) of an item: 3 numbers per point, returned count is the number of NUMBERS used.
+' A whole component is read part by part, each with its own transform (it can be a sub-assembly).
 Function ItemPoints(ByVal i As Long, ByRef pts() As Double) As Long
-    Dim np As Long, k As Long, bodies As Variant, info As Variant, rb(5) As Double, q As Long
-    Dim dRaw As Double, dAsm As Double, doXf As Boolean, xd(12) As Double, ox As Double, oy As Double, oz As Double
-    Dim npPrev As Long, incomplete As Boolean, sc As Double
+    Dim np As Long, k As Long, q As Long, bodies As Variant, info As Variant, rb(5) As Double, ab(5) As Double
+    Dim xd(12) As Double, md As Long, start As Long, npPrev As Long, cb As Variant, bb As Variant
+    Dim leaves As Collection, lc As Variant
     ReDim pts(3 * 4096 - 1)
-    On Error Resume Next
+    On Error GoTo failed
     If Not srcBody(i) Is Nothing Then
         np = AppendBodyPts(srcBody(i), pts, np)
+        If np < 9 Then Exit Function
+        For q = 0 To 5: rb(q) = rbx(i, q): ab(q) = bx(i, q): Next
+        For q = 0 To 12: xd(q) = srcXf(i, q): Next
+        FixPts pts, 0, np, rb, ab, srcMode(i), xd
     ElseIf Not srcComp(i) Is Nothing Then
-        bodies = srcComp(i).GetBodies3(swSolidBody, info)
-        If Not IsEmpty(bodies) Then
-            For k = 0 To UBound(bodies)
-                npPrev = np
-                np = AppendBodyPts(bodies(k), pts, np)
-                If np = npPrev Then incomplete = True
-            Next
-        End If
+        Set leaves = New Collection
+        LeafComps srcComp(i), leaves
+        For Each lc In leaves
+            bodies = Empty
+            On Error Resume Next
+            bodies = lc.GetBodies3(swSolidBody, info)
+            On Error GoTo failed
+            If Not IsEmpty(bodies) Then
+                cb = Empty
+                On Error Resume Next
+                cb = lc.GetBox(False, False)
+                On Error GoTo failed
+                ReadXf lc, xd
+                md = PickMode(lc, bodies, xd)
+                For q = 0 To 2: rb(q) = 1E+30: rb(3 + q) = -1E+30: Next
+                start = np
+                For k = 0 To UBound(bodies)
+                    bb = Empty
+                    On Error Resume Next
+                    bb = bodies(k).GetBodyBox
+                    On Error GoTo failed
+                    If Not IsEmpty(bb) Then
+                        For q = 0 To 2
+                            If bb(q) * 1000# < rb(q) Then rb(q) = bb(q) * 1000#
+                            If bb(3 + q) * 1000# > rb(3 + q) Then rb(3 + q) = bb(3 + q) * 1000#
+                        Next
+                    End If
+                    npPrev = np
+                    np = AppendBodyPts(bodies(k), pts, np)
+                    If np = npPrev Then Exit Function           ' a body without points would leave a hole in the shape
+                Next
+                If IsEmpty(cb) Then
+                    BoxXf Array(rb(0) / 1000#, rb(1) / 1000#, rb(2) / 1000#, rb(3) / 1000#, rb(4) / 1000#, rb(5) / 1000#), xd, md, ab, True
+                Else
+                    For q = 0 To 5: ab(q) = cb(q) * 1000#: Next
+                End If
+                FixPts pts, start, np, rb, ab, md, xd
+            End If
+        Next
     End If
-    On Error GoTo 0
-    If np < 9 Or incomplete Then Exit Function              ' a body without points would leave a hole in the shape
+    If np < 9 Then Exit Function
+    ItemPoints = np
+    Exit Function
+failed:
+    ItemPoints = 0
+End Function
+
+' Puts the points pts(start .. np-1) of one part into model space (mm). rawBox: the part's body box in its own
+' space (mm), asmBox: its box in the assembly (mm), md and xd: how to turn own-space points (see PickMode, ReadXf).
+Sub FixPts(ByRef pts() As Double, ByVal start As Long, ByVal np As Long, ByRef rawBox() As Double, _
+           ByRef asmBox() As Double, ByVal md As Long, ByRef xd() As Double)
+    Dim rb(5) As Double, dRaw As Double, dAsm As Double, sc As Double, ox As Double, oy As Double, oz As Double
+    Dim k As Long, q As Long
     For q = 0 To 2: rb(q) = 1E+30: rb(3 + q) = -1E+30: Next
-    For k = 0 To np - 3 Step 3
+    For k = start To np - 3 Step 3
         For q = 0 To 2
             If pts(k + q) < rb(q) Then rb(q) = pts(k + q)
             If pts(k + q) > rb(3 + q) Then rb(3 + q) = pts(k + q)
@@ -888,34 +964,29 @@ Function ItemPoints(ByVal i As Long, ByRef pts() As Double) As Long
     ' unit guard: the points must have about the size of the body box (mm). A factor of 1000 means the API returned
     ' millimetres or metres where metres were expected: put it right instead of building the wrong shape.
     dRaw = (rb(3) - rb(0)) + (rb(4) - rb(1)) + (rb(5) - rb(2))
-    dAsm = (rbx(i, 3) - rbx(i, 0)) + (rbx(i, 4) - rbx(i, 1)) + (rbx(i, 5) - rbx(i, 2))
+    dAsm = (rawBox(3) - rawBox(0)) + (rawBox(4) - rawBox(1)) + (rawBox(5) - rawBox(2))
     sc = 1#
     If dRaw > 0 And dAsm > 0 Then
         If dRaw / dAsm > 500 And dRaw / dAsm < 2000 Then sc = 0.001
         If dRaw / dAsm < 0.002 And dRaw / dAsm > 0.0005 Then sc = 1000#
     End If
     If sc <> 1# Then
-        For k = 0 To np - 1: pts(k) = pts(k) * sc: Next
+        For k = start To np - 1: pts(k) = pts(k) * sc: Next
         For q = 0 To 5: rb(q) = rb(q) * sc: Next
     End If
+    If md = 0 Then Exit Sub
+    ' are the points in the part's own space (turn them) or already in the assembly (leave them)?
     dRaw = 0: dAsm = 0
-    If srcMode(i) <> 0 Then
-        ' are the points in the part's own space (turn them) or already in the assembly (leave them)?
-        For q = 0 To 5
-            If Abs(rb(q) - rbx(i, q)) > dRaw Then dRaw = Abs(rb(q) - rbx(i, q))
-            If Abs(rb(q) - bx(i, q)) > dAsm Then dAsm = Abs(rb(q) - bx(i, q))
-        Next
-        doXf = Not (dAsm + 0.0001 < dRaw)
-        If doXf Then
-            For q = 0 To 12: xd(q) = srcXf(i, q): Next
-            For k = 0 To np - 3 Step 3
-                XfPoint srcMode(i), xd, pts(k), pts(k + 1), pts(k + 2), ox, oy, oz
-                pts(k) = ox: pts(k + 1) = oy: pts(k + 2) = oz
-            Next
-        End If
-    End If
-    ItemPoints = np
-End Function
+    For q = 0 To 5
+        If Abs(rb(q) - rawBox(q)) > dRaw Then dRaw = Abs(rb(q) - rawBox(q))
+        If Abs(rb(q) - asmBox(q)) > dAsm Then dAsm = Abs(rb(q) - asmBox(q))
+    Next
+    If dAsm + 0.0001 < dRaw Then Exit Sub
+    For k = start To np - 3 Step 3
+        XfPoint md, xd, pts(k), pts(k + 1), pts(k + 2), ox, oy, oz
+        pts(k) = ox: pts(k + 1) = oy: pts(k + 2) = oz
+    Next
+End Sub
 
 Sub GrowPts(ByRef pts() As Double, ByVal need As Long)
     Dim cap As Long

@@ -36,6 +36,7 @@ Dim chipsFilled As Long
 
 Sub main()
     Set swApp = Application.SldWorks
+    PT_Trace "SetupWorkbook: started (VBA macro)."
     addedTabs = "": chipsFilled = 0
     Dim xl As Object, wb As Object, reg As Object
     Set xl = PT_GetExcel()
@@ -48,7 +49,7 @@ Sub main()
         chipsFilled = PT_FillChipLists(wb)
         If chipsFilled > 0 Then wb.Save
         On Error GoTo 0
-        MsgBox "This workbook comes from PCB_thermal_TEMPLATE (version " & PT_NameStr(wb, "Tpl_Version", "?") & ")." & vbCrLf & _
+        PT_Msg "This workbook comes from PCB_thermal_TEMPLATE (version " & PT_NameStr(wb, "Tpl_Version", "?") & ")." & vbCrLf & _
                "It is already set up. Nothing else to do." & vbCrLf & vbCrLf & _
                IIf(chipsFilled > 0, chipsFilled & " chip rows written to the Spreader and Sim setup tabs of " & wb.Name & ".", _
                    "Chip rows: not changed (already filled, or no RefDes with Include = Yes on CAD geometry yet)."), _
@@ -82,7 +83,7 @@ Sub main()
 
     Dim unchecked As Double
     unchecked = PT_NameNum(wb, "Log_Unchecked", -1)
-    MsgBox "Written and saved to:" & vbCrLf & wb.FullName & vbCrLf & vbCrLf & _
+    PT_Msg "Written and saved to:" & vbCrLf & wb.FullName & vbCrLf & vbCrLf & _
            "Tabs added: " & IIf(addedTabs = "", "none (all were there, labels and formulas refreshed)", Mid(addedTabs, 3)) & vbCrLf & _
            "Workbook names defined: " & wb.Names.Count & vbCrLf & _
            "Chip rows filled from CAD geometry: " & chipsFilled & vbCrLf & _
@@ -92,7 +93,7 @@ Sub main()
     Exit Sub
 fail:
     xl.ScreenUpdating = True
-    MsgBox "SetupWorkbook stopped: " & Err.Description & vbCrLf & _
+    PT_Msg "SetupWorkbook stopped: " & Err.Description & vbCrLf & _
            "The workbook was not saved. Close it without saving, then run again." & vbCrLf & _
            "If it happens again, send this message.", vbExclamation, "SetupWorkbook"
 End Sub

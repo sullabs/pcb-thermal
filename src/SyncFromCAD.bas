@@ -42,6 +42,7 @@ Dim wsSide As Object                     ' Spreader bottom tab (its Spr_ and As_
 
 Sub main()
     Set swApp = Application.SldWorks
+    PT_Trace MACRO_NAME & ": started (VBA macro)."
     PT_LogReset
     Set notes = New Collection
     nOverride = 0: nConflict = 0: nDiffers = 0: nFailed = 0: nRepeat = 0
@@ -62,7 +63,7 @@ Sub main()
     asmPath = PT_AsmPath(wb)
     Set asm = PT_OpenAsm(asmPath)
     If asm Is Nothing Then
-        MsgBox "SyncFromCAD did not run. No thermal assembly at" & vbCrLf & asmPath & vbCrLf & "Run BuildBoard first.", vbExclamation, MACRO_NAME
+        PT_Msg "SyncFromCAD did not run. No thermal assembly at" & vbCrLf & asmPath & vbCrLf & "Run BuildBoard first.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
     PT_ActivateDoc asm
@@ -128,15 +129,15 @@ Sub main()
         If k > 6 Then s = s & "(more notes on the Change log tab)" & vbCrLf: Exit For
         s = s & "- " & it & vbCrLf
     Next
-    MsgBox s, IIf(nFailed > 0 Or nConflict > 0, vbExclamation, vbInformation), MACRO_NAME
+    PT_Msg s, IIf(nFailed > 0 Or nConflict > 0, vbExclamation, vbInformation), MACRO_NAME
     Exit Sub
 
 swFail:
-    MsgBox "SyncFromCAD stopped while reading SolidWorks: " & Err.Description & vbCrLf & "Nothing was written.", vbExclamation, MACRO_NAME
+    PT_Msg "SyncFromCAD stopped while reading SolidWorks: " & Err.Description & vbCrLf & "Nothing was written.", vbExclamation, MACRO_NAME
     Exit Sub
 xlFail:
     xl.ScreenUpdating = True
-    MsgBox "SyncFromCAD stopped while writing to Excel: " & Err.Description & vbCrLf & _
+    PT_Msg "SyncFromCAD stopped while writing to Excel: " & Err.Description & vbCrLf & _
            "The workbook was not saved. Close any cell you are editing, close the workbook without saving, and run again.", _
            vbExclamation, MACRO_NAME
 End Sub

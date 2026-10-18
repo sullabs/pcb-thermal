@@ -46,6 +46,7 @@ Dim reWords As Object
 
 Sub main()
     Set swApp = Application.SldWorks
+    PT_Trace MACRO_NAME & ": started (VBA macro)."
     Set notes = New Collection
     Set lines = New Collection
 
@@ -57,7 +58,7 @@ Sub main()
                             "Reg_TotalQ|Spr_Chips|Set_Prefix|Set_OutputFolder|Set_AsmName", MACRO_NAME) Then Exit Sub
     xl.Calculate
     If UCase(PT_NameStr(wb, "Sim_Type", "Thermal")) <> "FLOW" Then
-        MsgBox "RunFlow did not run. Study type on Sim setup is " & PT_NameStr(wb, "Sim_Type", "") & "." & vbCrLf & _
+        PT_Msg "RunFlow did not run. Study type on Sim setup is " & PT_NameStr(wb, "Sim_Type", "") & "." & vbCrLf & _
                "Set it to Flow and run again.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
@@ -76,7 +77,7 @@ Sub main()
         End If
     Next
     If heat.Count = 0 Then
-        MsgBox "RunFlow did not run. The Component register has no RefDes.", vbExclamation, MACRO_NAME
+        PT_Msg "RunFlow did not run. The Component register has no RefDes.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
 
@@ -85,7 +86,7 @@ Sub main()
     asmPath = PT_AsmPath(wb)
     Set asm = PT_OpenAsm(asmPath)
     If asm Is Nothing Then
-        MsgBox "RunFlow did not run. No thermal assembly at" & vbCrLf & asmPath, vbExclamation, MACRO_NAME
+        PT_Msg "RunFlow did not run. No thermal assembly at" & vbCrLf & asmPath, vbExclamation, MACRO_NAME
         Exit Sub
     End If
     PT_ActivateDoc asm
@@ -93,31 +94,31 @@ Sub main()
     Dim why As String, api As Object, ia As Object, md As Object, fda As Object
     Set api = OpenFlowApi(why)
     If api Is Nothing Then
-        MsgBox "RunFlow did not run. " & why, vbExclamation, MACRO_NAME
+        PT_Msg "RunFlow did not run. " & why, vbExclamation, MACRO_NAME
         Exit Sub
     End If
     On Error GoTo apiFail
     Set ia = AttachFlow(api)
     If ia Is Nothing Then
-        MsgBox "RunFlow did not run. Could not attach to SolidWorks Flow Simulation." & vbCrLf & _
+        PT_Msg "RunFlow did not run. Could not attach to SolidWorks Flow Simulation." & vbCrLf & _
                "Turn on SOLIDWORKS Flow Simulation in Tools > Add-Ins and run again.", vbExclamation, MACRO_NAME
         GoTo done
     End If
     Set md = ia.ActiveDocument
     If md Is Nothing Then
-        MsgBox "RunFlow did not run. Flow Simulation sees no active document." & vbCrLf & _
+        PT_Msg "RunFlow did not run. Flow Simulation sees no active document." & vbCrLf & _
                "Open the thermal assembly and turn on Flow Simulation.", vbExclamation, MACRO_NAME
         GoTo done
     End If
     If StrComp(CStr(md.GetPathName), asmPath, vbTextCompare) <> 0 Then
-        MsgBox "RunFlow did not run. The active document is" & vbCrLf & CStr(md.GetPathName) & vbCrLf & _
+        PT_Msg "RunFlow did not run. The active document is" & vbCrLf & CStr(md.GetPathName) & vbCrLf & _
                "but the thermal assembly is" & vbCrLf & asmPath & vbCrLf & "Make the thermal assembly the active window.", _
                vbExclamation, MACRO_NAME
         GoTo done
     End If
     Set fda = md.GetActiveProject
     If fda Is Nothing Then
-        MsgBox "RunFlow did not run. The thermal assembly has no Flow Simulation project." & vbCrLf & _
+        PT_Msg "RunFlow did not run. The thermal assembly has no Flow Simulation project." & vbCrLf & _
                "Create one once (Flow Simulation > Wizard), add a volume heat source per chip and temperature goals," & vbCrLf & _
                "then run again. See docs\HOWTO_M7.md.", vbExclamation, MACRO_NAME
         GoTo done
@@ -175,26 +176,26 @@ Sub main()
     End If
 
     If nSet = 0 Then
-        MsgBox "RunFlow stopped. No Flow volume heat source was updated." & vbCrLf & vbCrLf & ListNotes(), vbExclamation, MACRO_NAME
+        PT_Msg "RunFlow stopped. No Flow volume heat source was updated." & vbCrLf & vbCrLf & ListNotes(), vbExclamation, MACRO_NAME
         GoTo done
     End If
 
     ' ---------- solve or read ----------
     Dim runName As String, ans As Long, solved As Boolean, rh As Object
     runName = "FL_" & Format(Now, "yyyymmdd_hhnn")
-    ans = MsgBox(nSet & " heat sources set, " & Format(applied, "0.00") & " W of " & Format(PT_NameNum(wb, "Reg_TotalQ", 0), "0.00") & " W in the register." & _
+    ans = PT_Msg(nSet & " heat sources set, " & Format(applied, "0.00") & " W of " & Format(PT_NameNum(wb, "Reg_TotalQ", 0), "0.00") & " W in the register." & _
                  vbCrLf & vbCrLf & "Yes = solve now (can take many minutes) and read the goals" & vbCrLf & _
                  "No = do not solve, read the goals of the last solved run" & vbCrLf & "Cancel = stop here", _
                  vbYesNoCancel + vbQuestion, MACRO_NAME)
     If ans = vbCancel Then
         md.Save
         WriteReport wb, runName, CStr(fda.Name), applied, False
-        MsgBox "Sources updated. Nothing solved, nothing written to Excel." & vbCrLf & "Report: " & ReportPath(wb, runName), vbInformation, MACRO_NAME
+        PT_Msg "Sources updated. Nothing solved, nothing written to Excel." & vbCrLf & "Report: " & ReportPath(wb, runName), vbInformation, MACRO_NAME
         GoTo done
     End If
     If ans = vbYes Then
         If Not IsTrue(fda.Solve2(True, True, True, False)) Then
-            MsgBox "RunFlow stopped. The Flow solver did not finish." & vbCrLf & ListNotes() & _
+            PT_Msg "RunFlow stopped. The Flow solver did not finish." & vbCrLf & ListNotes() & _
                    "Check the project in SolidWorks (Flow Simulation > Run).", vbExclamation, MACRO_NAME
             GoTo done
         End If
@@ -202,7 +203,7 @@ Sub main()
     End If
     Set rh = fda.LoadResults(True)
     If rh Is Nothing Then
-        MsgBox "RunFlow stopped. The project has no results to read. Solve it first (Yes at the question).", vbExclamation, MACRO_NAME
+        PT_Msg "RunFlow stopped. The project has no results to read. Solve it first (Yes at the question).", vbExclamation, MACRO_NAME
         GoTo done
     End If
 
@@ -216,7 +217,7 @@ Sub main()
     Set gres = rh.GetGoalsCalculationResults2
     If Not gres Is Nothing Then Set ge = gres.GetGoalsEnum
     If ge Is Nothing Then
-        MsgBox "RunFlow stopped. The results have no goals. Add temperature goals to the Flow project.", vbExclamation, MACRO_NAME
+        PT_Msg "RunFlow stopped. The results have no goals. Add temperature goals to the Flow project.", vbExclamation, MACRO_NAME
         GoTo done
     End If
     ge.Reset
@@ -261,7 +262,7 @@ Sub main()
         Set gl = ge.Next
     Loop
     If peak.Count = 0 And avg.Count = 0 Then
-        MsgBox "RunFlow stopped. No goal name contains a RefDes. Nothing was written to Excel." & vbCrLf & _
+        PT_Msg "RunFlow stopped. No goal name contains a RefDes. Nothing was written to Excel." & vbCrLf & _
                "Rename the goals, for example 'U1 max' (see docs\HOWTO_M7.md).", vbExclamation, MACRO_NAME
         GoTo done
     End If
@@ -312,16 +313,16 @@ Sub main()
         "Flow project " & CStr(fda.Name) & ": " & nSet & " heat sources set (" & Format(applied, "0.00") & " W), " & _
         peak.Count & " chips with a peak goal, " & nGoals & " goals read." & vbCrLf & _
         "Report: " & ReportPath(wb, runName) & vbCrLf & ListNotes()
-    MsgBox s, vbInformation, MACRO_NAME
+    PT_Msg s, vbInformation, MACRO_NAME
     GoTo done
 
 apiFail:
-    MsgBox "RunFlow stopped in the Flow Simulation API: " & Err.Description & vbCrLf & _
+    PT_Msg "RunFlow stopped in the Flow Simulation API: " & Err.Description & vbCrLf & _
            "Nothing was written to Excel. Check that Flow Simulation is on and the project opens in SolidWorks.", vbExclamation, MACRO_NAME
     GoTo done
 xlFail:
     xl.ScreenUpdating = True
-    MsgBox "RunFlow stopped while writing to Excel: " & Err.Description & vbCrLf & _
+    PT_Msg "RunFlow stopped while writing to Excel: " & Err.Description & vbCrLf & _
            "The workbook was not saved. Close any cell you are editing, close the workbook without saving, and run again.", _
            vbExclamation, MACRO_NAME
 done:

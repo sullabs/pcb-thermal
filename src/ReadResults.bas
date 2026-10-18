@@ -25,6 +25,7 @@ Dim notes As Collection
 
 Sub main()
     Set swApp = Application.SldWorks
+    PT_Trace MACRO_NAME & ": started (VBA macro)."
     Set notes = New Collection
 
     Dim xl As Object, wb As Object
@@ -38,7 +39,7 @@ Sub main()
     Dim runName As String
     runName = PT_NameStr(wb, "Sim_RunName", "")
     If runName = "" Then
-        MsgBox "ReadResults did not run. Sim setup has no run name: run SetupSim first.", vbExclamation, MACRO_NAME
+        PT_Msg "ReadResults did not run. Sim setup has no run name: run SetupSim first.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
 
@@ -47,17 +48,17 @@ Sub main()
     asmPath = PT_AsmPath(wb)
     Set asm = PT_OpenAsm(asmPath)
     If asm Is Nothing Then
-        MsgBox "ReadResults did not run. No thermal assembly at" & vbCrLf & asmPath, vbExclamation, MACRO_NAME
+        PT_Msg "ReadResults did not run. No thermal assembly at" & vbCrLf & asmPath, vbExclamation, MACRO_NAME
         Exit Sub
     End If
     Set simDoc = PT_GetSimDoc(asm)
     If simDoc Is Nothing Then
-        MsgBox "ReadResults did not run. Turn on SOLIDWORKS Simulation (Tools > Add-Ins) and run again.", vbExclamation, MACRO_NAME
+        PT_Msg "ReadResults did not run. Turn on SOLIDWORKS Simulation (Tools > Add-Ins) and run again.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
     Set study = PT_FindStudy(simDoc, runName)
     If study Is Nothing Then
-        MsgBox "ReadResults did not run. The assembly has no study named " & runName & "." & vbCrLf & _
+        PT_Msg "ReadResults did not run. The assembly has no study named " & runName & "." & vbCrLf & _
                "Run SetupSim, or type an existing study name in the run name cell of Sim setup.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
@@ -66,7 +67,7 @@ Sub main()
     On Error GoTo swFail
     Set res = study.Results
     If res Is Nothing Then
-        MsgBox "ReadResults did not run. Study " & runName & " has no results: it was not solved." & vbCrLf & _
+        PT_Msg "ReadResults did not run. Study " & runName & " has no results: it was not solved." & vbCrLf & _
                "Check the SetupSim report, fix what it lists and run SetupSim again.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
@@ -197,15 +198,15 @@ Sub main()
         If n > 5 Then Exit For
         s = s & "- " & q & vbCrLf
     Next
-    MsgBox s, vbInformation, MACRO_NAME
+    PT_Msg s, vbInformation, MACRO_NAME
     Exit Sub
 
 swFail:
-    MsgBox "ReadResults stopped in SolidWorks: " & Err.Description & vbCrLf & "Nothing was written.", vbExclamation, MACRO_NAME
+    PT_Msg "ReadResults stopped in SolidWorks: " & Err.Description & vbCrLf & "Nothing was written.", vbExclamation, MACRO_NAME
     Exit Sub
 xlFail:
     xl.ScreenUpdating = True
-    MsgBox "ReadResults stopped while writing to Excel: " & Err.Description & vbCrLf & _
+    PT_Msg "ReadResults stopped while writing to Excel: " & Err.Description & vbCrLf & _
            "The workbook was not saved. Close any cell you are editing, close the workbook without saving, and run again.", _
            vbExclamation, MACRO_NAME
 End Sub

@@ -46,6 +46,7 @@ Dim noPartHeat As String                 ' RefDes with heat but no included part
 
 Sub main()
     Set swApp = Application.SldWorks
+    PT_Trace MACRO_NAME & ": started (VBA macro)."
     PT_LogReset
     Set skippedRows = New Collection
     Set failMsgs = New Collection
@@ -73,12 +74,12 @@ Sub main()
     pcbT = PT_Num(rp.Cells(3, 1).Value, 0)
     ReadWanted wb, pcbT
     If pcbL <= 0 Or pcbW <= 0 Or pcbT <= 0 Then
-        MsgBox "BuildBoard did not run. The PCB size on CAD geometry (Used column, Length X, Width Y, Thickness Z) is missing." & vbCrLf & _
+        PT_Msg "BuildBoard did not run. The PCB size on CAD geometry (Used column, Length X, Width Y, Thickness Z) is missing." & vbCrLf & _
                "Run ImportStep or type an override there.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
     If nW = 0 Then
-        If MsgBox("No row on CAD geometry has Include = Yes with a size and a key (" & skippedRows.Count & " included rows were skipped)." & vbCrLf & _
+        If PT_Msg("No row on CAD geometry has Include = Yes with a size and a key (" & skippedRows.Count & " included rows were skipped)." & vbCrLf & _
                   "Only the PCB would be built." & vbCrLf & vbCrLf & "Build it anyway?", vbYesNo + vbQuestion, MACRO_NAME) <> vbYes Then Exit Sub
     End If
     noPartHeat = HeatWithoutPart(wb)
@@ -89,7 +90,7 @@ Sub main()
     partTmpl = PT_Template(wb, "Set_PartTemplate", swDefaultTemplatePart)
     asmTmpl = PT_Template(wb, "Set_AsmTemplate", swDefaultTemplateAssembly)
     If partTmpl = "" Or asmTmpl = "" Then
-        MsgBox "BuildBoard did not run. The " & IIf(partTmpl = "", "part", "assembly") & " template was not found." & vbCrLf & _
+        PT_Msg "BuildBoard did not run. The " & IIf(partTmpl = "", "part", "assembly") & " template was not found." & vbCrLf & _
                "Set its full path on the Settings tab.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
@@ -100,18 +101,18 @@ Sub main()
     On Error GoTo swFail
     Set asm = PT_OpenAsm(asmPath)
     If asm Is Nothing And Dir(asmPath) <> "" Then
-        MsgBox "BuildBoard could not open " & asmPath & ". Nothing was changed.", vbExclamation, MACRO_NAME
+        PT_Msg "BuildBoard could not open " & asmPath & ". Nothing was changed.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
     isUpdate = Not asm Is Nothing
     If Not isUpdate Then
         Set asm = swApp.NewDocument(asmTmpl, 0, 0, 0)
         If asm Is Nothing Then
-            MsgBox "SolidWorks could not make a new assembly from" & vbCrLf & asmTmpl, vbExclamation, MACRO_NAME
+            PT_Msg "SolidWorks could not make a new assembly from" & vbCrLf & asmTmpl, vbExclamation, MACRO_NAME
             Exit Sub
         End If
         If Not asm.Extension.SaveAs(asmPath, 0, PT_swSaveSilent, Nothing, errs, warns) Then
-            MsgBox "Could not save the new assembly as" & vbCrLf & asmPath & vbCrLf & "(error " & errs & "). Is the folder writable?", _
+            PT_Msg "Could not save the new assembly as" & vbCrLf & asmPath & vbCrLf & "(error " & errs & "). Is the folder writable?", _
                    vbExclamation, MACRO_NAME
             Exit Sub
         End If
@@ -171,17 +172,17 @@ Sub main()
     If noPartHeat <> "" Then s = s & "Heat in the register but no built part for: " & noPartHeat & ". Set RefDes and Include = Yes on CAD geometry, or they get no heat source." & vbCrLf
     s = s & overlaps.Count & " overlapping pairs of boxes left (listed in the report). Fix them before SetupSim." & vbCrLf & vbCrLf & _
         "Report: " & rptPath
-    MsgBox s, IIf(failMsgs.Count > 0, vbExclamation, vbInformation), MACRO_NAME
+    PT_Msg s, IIf(failMsgs.Count > 0, vbExclamation, vbInformation), MACRO_NAME
     Exit Sub
 
 swFail:
-    MsgBox "BuildBoard stopped in SolidWorks: " & Err.Description & vbCrLf & _
+    PT_Msg "BuildBoard stopped in SolidWorks: " & Err.Description & vbCrLf & _
            "The assembly may be half done and was not saved. Close it without saving, send this message, and run again.", _
            vbExclamation, MACRO_NAME
     Exit Sub
 xlFail:
     xl.ScreenUpdating = True
-    MsgBox "The assembly was saved to " & asmPath & ", but writing the Change log failed: " & Err.Description & vbCrLf & _
+    PT_Msg "The assembly was saved to " & asmPath & ", but writing the Change log failed: " & Err.Description & vbCrLf & _
            "Close any cell you are editing in Excel. The changes are listed in " & rptPath, vbExclamation, MACRO_NAME
 End Sub
 

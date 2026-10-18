@@ -69,6 +69,7 @@ Dim layerFrac As Double, kCore As Double  ' outer layer thickness as a fraction 
 
 Sub main()
     Set swApp = Application.SldWorks
+    PT_Trace MACRO_NAME & ": started (VBA macro)."
     Set problems = New Collection: Set notes = New Collection
 
     ' ---------- workbook ----------
@@ -82,7 +83,7 @@ Sub main()
     If PT_RefuseIfUnchecked(wb, MACRO_NAME) Then Exit Sub
     xl.Calculate
     If UCase(PT_NameStr(wb, "Sim_Type", "Thermal")) <> "THERMAL" Then
-        MsgBox "SetupSim did not run. Study type on Sim setup is " & PT_NameStr(wb, "Sim_Type", "") & _
+        PT_Msg "SetupSim did not run. Study type on Sim setup is " & PT_NameStr(wb, "Sim_Type", "") & _
                ". This macro does SolidWorks Simulation thermal only; Flow Simulation comes later (M7).", vbExclamation, MACRO_NAME
         Exit Sub
     End If
@@ -97,7 +98,7 @@ Sub main()
     layerFrac = PT_NameNum(wb, "Sim_LayerFrac", 0.1)
     kCore = PT_NameNum(wb, "Sim_kCore", 100)
     If layerFrac <= 0 Or layerFrac >= 0.45 Or kCore <= 0 Then
-        MsgBox "SetupSim did not run. On Sim setup the outer layer thickness must be above 0 and below 0.45 (fraction of the chip height) " & _
+        PT_Msg "SetupSim did not run. On Sim setup the outer layer thickness must be above 0 and below 0.45 (fraction of the chip height) " & _
                "and the core k above 0.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
@@ -120,7 +121,7 @@ Sub main()
     pcbT =PT_Num(PT_Rng(wb, "Geo_PCB_Used").Cells(3, 1).Value, 0)
     totalReg = PT_NameNum(wb, "Reg_TotalQ", 0)
     If meshG <= 0 Or meshF <= 0 Or kParts <= 0 Or kPcbXY <= 0 Or kPcbZ <= 0 Or kSpr <= 0 Then
-        MsgBox "SetupSim did not run. Mesh sizes, k of parts without heat, PCB k (CAD geometry D19:D20) and spreader k " & _
+        PT_Msg "SetupSim did not run. Mesh sizes, k of parts without heat, PCB k (CAD geometry D19:D20) and spreader k " & _
                "must all be above 0.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
@@ -133,7 +134,7 @@ Sub main()
     asmPath = PT_AsmPath(wb)
     Set asm = PT_OpenAsm(asmPath)
     If asm Is Nothing Then
-        MsgBox "SetupSim did not run. No thermal assembly at" & vbCrLf & asmPath & vbCrLf & "Run BuildBoard first.", vbExclamation, MACRO_NAME
+        PT_Msg "SetupSim did not run. No thermal assembly at" & vbCrLf & asmPath & vbCrLf & "Run BuildBoard first.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
     PT_ActivateDoc asm
@@ -164,7 +165,7 @@ Sub main()
     Set simDoc = PT_GetSimDoc(asm)
     If simDoc Is Nothing Then
         ProgressEnd
-        MsgBox "SetupSim did not run. SolidWorks Simulation is not available." & vbCrLf & _
+        PT_Msg "SetupSim did not run. SolidWorks Simulation is not available." & vbCrLf & _
                "Turn it on in Tools > Add-Ins > SOLIDWORKS Simulation, then run again.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
@@ -232,17 +233,17 @@ Sub main()
         Next
     End If
     s = s & vbCrLf & "Report: " & rptPath
-    MsgBox s, IIf(ran, vbInformation, vbExclamation), MACRO_NAME
+    PT_Msg s, IIf(ran, vbInformation, vbExclamation), MACRO_NAME
     Exit Sub
 
 swFail:
     ProgressEnd
-    MsgBox "SetupSim stopped in SolidWorks: " & Err.Description & vbCrLf & _
+    PT_Msg "SetupSim stopped in SolidWorks: " & Err.Description & vbCrLf & _
            "A half-made study may be in the Simulation tree: delete it, send this message, and run again.", vbExclamation, MACRO_NAME
     Exit Sub
 xlFail:
     xl.ScreenUpdating = True
-    MsgBox "The study was made, but writing the run name to Excel failed: " & Err.Description, vbExclamation, MACRO_NAME
+    PT_Msg "The study was made, but writing the run name to Excel failed: " & Err.Description, vbExclamation, MACRO_NAME
 End Sub
 
 ' ================================================================= Excel side

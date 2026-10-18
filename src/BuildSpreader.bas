@@ -57,6 +57,7 @@ Dim nFeatAdded As Long, nFeatChanged As Long, nFeatSupp As Long, nTimAdded As Lo
 
 Sub main()
     Set swApp = Application.SldWorks
+    PT_Trace MACRO_NAME & ": started (VBA macro)."
     PT_LogReset
     Set skipped = New Collection: Set failMsgs = New Collection: Set notes = New Collection
     nFeatAdded = 0: nFeatChanged = 0: nFeatSupp = 0: nTimAdded = 0: nTimChanged = 0: nTimSupp = 0
@@ -85,7 +86,7 @@ Sub main()
     prefix = PT_SafeFile(PT_Prefix(wb))
     partTmpl = PT_Template(wb, "Set_PartTemplate", swDefaultTemplatePart)
     If partTmpl = "" Then
-        MsgBox "BuildSpreader did not run. The part template was not found. Set its full path on the Settings tab.", vbExclamation, MACRO_NAME
+        PT_Msg "BuildSpreader did not run. The part template was not found. Set its full path on the Settings tab.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
     asmPath = PT_AsmPath(wb)
@@ -93,7 +94,7 @@ Sub main()
     Set asm = PT_OpenAsm(asmPath)
     If asm Is Nothing Then
         On Error GoTo 0
-        MsgBox "BuildSpreader did not run. The thermal assembly is not there yet:" & vbCrLf & asmPath & vbCrLf & _
+        PT_Msg "BuildSpreader did not run. The thermal assembly is not there yet:" & vbCrLf & asmPath & vbCrLf & _
                "Run BuildBoard first.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
@@ -115,7 +116,7 @@ Sub main()
         nBuilt = nBuilt + res
     Next
     If nBuilt = 0 Then
-        MsgBox "BuildSpreader did nothing: no spreader part and no covered chips." & vbCrLf & _
+        PT_Msg "BuildSpreader did nothing: no spreader part and no covered chips." & vbCrLf & _
                "Mark chips Covered = Yes on the Spreader tab (top) or the Spreader bottom tab, and draw the plate outline.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
@@ -149,21 +150,21 @@ Sub main()
     If notes.Count > 0 Then s = s & notes.Count & " notes (listed in the report)." & vbCrLf
     If failMsgs.Count > 0 Then s = s & failMsgs.Count & " problems (listed in the report)." & vbCrLf
     s = s & vbCrLf & "Report: " & rptPath
-    MsgBox s, IIf(failMsgs.Count > 0, vbExclamation, vbInformation), MACRO_NAME
+    PT_Msg s, IIf(failMsgs.Count > 0, vbExclamation, vbInformation), MACRO_NAME
     Exit Sub
 
 swFail:
     If Err.Number >= vbObjectError + 34 And Err.Number <= vbObjectError + 36 Then
-        MsgBox "BuildSpreader did not run (" & IIf(bottomSide, "bottom", "top") & " spreader): " & Err.Description, vbExclamation, MACRO_NAME
+        PT_Msg "BuildSpreader did not run (" & IIf(bottomSide, "bottom", "top") & " spreader): " & Err.Description, vbExclamation, MACRO_NAME
         Exit Sub
     End If
-    MsgBox "BuildSpreader stopped in SolidWorks (" & IIf(bottomSide, "bottom", "top") & " spreader): " & Err.Description & vbCrLf & _
+    PT_Msg "BuildSpreader stopped in SolidWorks (" & IIf(bottomSide, "bottom", "top") & " spreader): " & Err.Description & vbCrLf & _
            "Nothing was saved. Close the spreader part and the assembly without saving, send this message, and run again.", _
            vbExclamation, MACRO_NAME
     Exit Sub
 xlFail:
     xl.ScreenUpdating = True
-    MsgBox "The spreader was saved, but writing the Change log failed: " & Err.Description & vbCrLf & _
+    PT_Msg "The spreader was saved, but writing the Change log failed: " & Err.Description & vbCrLf & _
            "Close any cell you are editing in Excel. The changes are listed in " & rptPath, vbExclamation, MACRO_NAME
 End Sub
 
@@ -180,7 +181,7 @@ Function DoSide(ByVal wb As Object, ByVal asm As Object, ByVal partTmpl As Strin
     ReadCuts wb
     Set sprComp = FindSpreaderComp(asm, nFound, bottomSide)
     If nFound > 1 Then
-        MsgBox "BuildSpreader did not run. The assembly has " & nFound & " " & LCase(sideTxt) & " spreader parts that are not suppressed." & vbCrLf & _
+        PT_Msg "BuildSpreader did not run. The assembly has " & nFound & " " & LCase(sideTxt) & " spreader parts that are not suppressed." & vbCrLf & _
                "Select the one to complete in the assembly (click it in the tree) and run again.", vbExclamation, MACRO_NAME
         DoSide = -1
         Exit Function
@@ -191,7 +192,7 @@ Function DoSide(ByVal wb As Object, ByVal asm As Object, ByVal partTmpl As Strin
         Exit Function
     End If
     If tPl <= 0 Or (Not bottomSide And zu <= 0) Or (bottomSide And nCh = 0 And zu = 0) Then
-        MsgBox "BuildSpreader did not run (" & LCase(sideTxt) & " spreader). On its tab the plate thickness (" & tPl & ") must be above 0 and " & _
+        PT_Msg "BuildSpreader did not run (" & LCase(sideTxt) & " spreader). On its tab the plate thickness (" & tPl & ") must be above 0 and " & _
                "the face height (" & zu & ") must be set." & vbCrLf & _
                "Mark at least one chip Covered = Yes, or set the face height to Manual.", vbExclamation, MACRO_NAME
         DoSide = -1
@@ -203,7 +204,7 @@ Function DoSide(ByVal wb As Object, ByVal asm As Object, ByVal partTmpl As Strin
             notes.Add "Bottom: " & nCh & " chips are covered but there is no spreader part with Spreader and Bottom in its name. Draw its outline and run again."
             Exit Function
         End If
-        ans = MsgBox("The thermal assembly has no spreader part yet." & vbCrLf & vbCrLf & _
+        ans = PT_Msg("The thermal assembly has no spreader part yet." & vbCrLf & vbCrLf & _
                      "To draw your own: in the assembly choose Insert > Component > New Part, put 'Spreader' in its name, " & _
                      "pick the Front Plane (or a face parallel to it), sketch the outline, exit the sketch, name the sketch Outline, " & _
                      "save the part as a file, then run this macro again." & vbCrLf & vbCrLf & _
@@ -211,7 +212,7 @@ Function DoSide(ByVal wb As Object, ByVal asm As Object, ByVal partTmpl As Strin
                      "No = stop", vbYesNo + vbQuestion, MACRO_NAME)
         If ans <> vbYes Then DoSide = -1: Exit Function
         If pcbL <= 0 Or pcbW <= 0 Then
-            MsgBox "BuildSpreader did not run. CAD geometry has no PCB size.", vbExclamation, MACRO_NAME
+            PT_Msg "BuildSpreader did not run. CAD geometry has no PCB size.", vbExclamation, MACRO_NAME
             DoSide = -1
             Exit Function
         End If
