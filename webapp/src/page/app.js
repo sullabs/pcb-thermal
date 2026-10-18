@@ -9,6 +9,8 @@ import { PAGE_VERSION, isoLocal, newProject, setIn, projectForSave, historyInit,
 import * as F from "./files.js";
 import * as V from "./views.js";
 import { calcProject } from "../calc/index.js";
+import { valueOf } from "../calc/formulas.js";
+import { Explain, Tip, ExplainPanel } from "./explain.js";
 import { workbookToProject } from "../io/workbook_import.js";
 import { validateProject, validateCad, validateResults } from "virtual:validators";
 
@@ -39,6 +41,8 @@ function App() {
   const [problems, setProblems] = useState([]);
   const [last, setLast] = useState(null);         // remembered folder handle
   const [backups, setBackups] = useState([]);
+  const [showFx, setShowFx] = useState(store.get("fx") === "1");
+  const [explain, setExplain] = useState([]);     // stack of { t, k }: the last is shown, Back pops
   const stamps = useRef({});
   const project = hist.present;
   const dirty = !!project && project !== savedRef;
@@ -51,6 +55,7 @@ function App() {
 
   useEffect(() => { document.documentElement.dataset.theme = theme; store.set("theme", theme); }, [theme]);
   useEffect(() => { store.set("tab", String(tab)); }, [tab]);
+  useEffect(() => { store.set("fx", showFx ? "1" : "0"); }, [showFx]);
   useEffect(() => { if (F.folderSupported) F.lastFolder().then(setLast); }, []);
 
   const calc = useMemo(() => {
@@ -59,6 +64,9 @@ function App() {
   }, [project, cad, results]);
   const calcOk = calc && !calc.error ? calc : null;
   const canSave = mode === "folder" || mode === "manual";
+  const fctx = useMemo(() => (calcOk ? { project, cad, results, calc: calcOk } : null), [project, cad, results, calcOk]);
+  const openExplain = useCallback((t, k = "") => setExplain(s => [...s.slice(-30), { t, k }]), []);
+  const explainCtx = useMemo(() => ({ ctx: fctx, open: openExplain, showFx }), [fctx, openExplain, showFx]);
   const states = useMemo(() => tabStates({ project, cad, results, calc: calcOk, canSave }), [project, cad, results, calcOk, canSave]);
 
   // ---------- edits ----------
@@ -273,7 +281,7 @@ function App() {
   </div>`;
   const backupCard = mode === "folder" && backups.length > 0 && html`<p>Open a backup: ${backups.slice(0, 7).map(b => html` <button class="small" onClick=${() => openBackup(b)}>${b.slice(8, 16)}</button>`)}</p>`;
 
-  const ctx = { project, cad, results, calc: calcOk, states, folder: dir?.name, edit, editFn, go: setTab, locked: st.locked, now,
+  const ctx = { project, cad, results, calc: calcOk, states, value: (t, k) => (fctx ? valueOf(fctx, t, k) : undefined), folder: dir?.name, edit, editFn, go: setTab, locked: st.locked, now,
     blocking: calcOk ? blockingProblems(project, calcOk) : [], folderCard, backupCard };
   const View = { project: V.ProjectTab, parts: V.PartsTab, import: V.ImportTab, link: V.LinkTab, triage: V.TriageTab, bare: V.BareTab,
     build: V.BuildTab, spreader: V.SpreaderTab, sim: V.SimTab, results: V.ResultsTab, changes: V.ChangesTab, help: V.HelpTab }[st.id];
@@ -288,6 +296,7 @@ function App() {
       <button onClick=${() => save(false)} disabled=${!project || !canSave} title="Save project.json (Ctrl+S)">Save</button>
       <button onClick=${doUndo} disabled=${!hist.past.length} title=${hist.past.length ? "Undo: " + hist.past[hist.past.length - 1].label + " (Ctrl+Z)" : "Nothing to undo"}>Undo</button>
       <button onClick=${doRedo} disabled=${!hist.future.length} title=${hist.future.length ? "Redo: " + hist.future[0].label + " (Ctrl+Y)" : "Nothing to redo"}>Redo</button>
+      <button aria-pressed=${showFx} class=${showFx ? "on" : ""} onClick=${() => setShowFx(!showFx)} title="Write the formula, with your numbers, under every calculated value">Show formulas</button>
       <button onClick=${() => setTheme(theme === "dark" ? "light" : "dark")} title="Switch between dark and light">${theme === "dark" ? "Light" : "Dark"}</button>
       <button onClick=${() => setTab(11)}>Help</button>
     </header>
@@ -297,6 +306,8 @@ function App() {
         <span class="n">${s.n}</span> ${s.title}${s.locked ? html` <span class="lock" aria-label="locked">🔒</span>` : ""}${s.badge ? html` <span class="badge">${s.badge}</span>` : ""}
       </button>`)}
     </nav>
+    <${Explain.Provider} value=${explainCtx}>
+    <div class=${`layout ${explain.length ? "with-panel" : ""}`}>
     <main>
       <h2>${st.n} ${st.title}</h2>
       ${st.locked && html`<div class="locked-banner" role="note"><b>This step is locked.</b> ${st.reason}
@@ -305,6 +316,11 @@ function App() {
         : needsProject && !calcOk ? html`<${Card} title="The calculation stopped"><p class="warn">${calc?.error}</p><//>`
         : html`<fieldset class="content" disabled=${st.locked}>${View(ctx)}</fieldset>`}
     </main>
+    <${ExplainPanel} at=${explain[explain.length - 1]} ctx=${fctx} onOpen=${openExplain} canBack=${explain.length > 1}
+      onBack=${() => setExplain(s => s.slice(0, -1))} onClose=${() => setExplain([])} onHelp=${() => setTab(11)} />
+    </div>
+    <${Tip} />
+    <//>
     <div class="msgs" aria-live="polite">${msgs.map(m => html`<div class=${`msg ${m.kind}`} key=${m.id}>${m.text}</div>`)}</div>
     <footer>page ${PAGE_VERSION} · ${mode === "folder" ? "saves into the folder" : mode === "manual" ? "files opened by hand: Save downloads project.json" : "no folder"}</footer>`;
 }

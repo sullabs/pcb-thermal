@@ -1,6 +1,6 @@
 # PCB thermal web app: design
 
-Status: design, agreed in outline on 2026-10-18. W1 to W3 are built (schemas, calculation module, page shell). This replaces the Excel workbook as the place where the
+Status: design, agreed in outline on 2026-10-18. W1 to W4 are built (schemas, calculation module, page shell, term catalogue and Explain panel). This replaces the Excel workbook as the place where the
 user works. The SolidWorks macros stay and keep doing the CAD and simulation work.
 
 ## 1. Goal
@@ -223,7 +223,10 @@ A switch in the top bar. Off by default after the first project.
   Tj est = Ta + Pd x Rja = 40 + 1.20 x 35.0 = 82.0 C
   ```
 
-- With the switch off, the same line shows in the Explain panel for the clicked value.
+- With the switch off, the same line shows in the Explain panel for the clicked value. Rules in words (flags, counts,
+  ranks) show only in the Explain panel.
+- Each formula is written once, in `src/calc/formulas.js`, as text plus the arithmetic on its inputs. The test works
+  every formula out from its inputs and compares it with the calculation module, so the text cannot drift from the sum.
 - **Trace:** in the Explain panel each input of the formula is a link. Clicking it shows that value's formula, so the
   user can walk back to the typed inputs.
 - The formulas are the same as the template's. The port is checked against the RPi4 workbook (section 11).
@@ -310,7 +313,7 @@ Per macro:
 | W1 | File formats: JSON schemas for the three files, with the RPi4 example converted from the workbook | `project.json`, `cad.json`, `results.json` for RPi4 exist and validate. **Done 2026-10-18** (`webapp/schema/`, `example/RaspberryPi4/*.json`, `npm test` in `webapp/`) |
 | W2 | Calculation module: register, triage, rail budget, PCB stack, bare board network, spreader checks, thermal solution top and bottom, sim setup k values | matches `expected_rpi4.json`. **Done 2026-10-18** (`webapp/src/calc/`; about 4000 values of both RPi4 workbooks match; `forSolidWorks` is now computed by it) |
 | W3 | Page shell: folder picking, save and reload, tabs with unlock rules and reasons, undo | RPi4 example opens, edits save, a locked tab names its reason. **Done 2026-10-18** (`webapp/src/page/`, `npm run build` makes `dist/PCB_Thermal.html`; `tools/test_w3.mjs` checks the unlock rules, undo and save output; RPi4 opened, edited, saved and reloaded in the browser) |
-| W4 | Term catalogue and Explain panel: hover text, abbreviations, formulas with numbers, trace | every value on every tab has a hover text and, if calculated, a formula |
+| W4 | Term catalogue and Explain panel: hover text, abbreviations, formulas with numbers, trace | every value on every tab has a hover text and, if calculated, a formula. **Done 2026-10-18** (`src/terms/catalogue.js`, about 230 terms, glossary, status words; `src/calc/formulas.js`; `tools/test_w4.mjs` renders every tab for both RPi4 examples and checks each value, label and input has a term, and that every formula, worked out from its inputs, equals the calculated value: about 830 formulas) |
 | W5 | Tabs 1 to 5 complete (parts to bare board hand check), Learn mode texts | a new user can fill a board from a datasheet list without the workbook |
 | W6 | Macros on JSON: `PTJson.bas`, project folder, Import STEP and Build Board read and write JSON | RPi4: import and build from the page give the same model as from the workbook |
 | W7 | Remaining macros on JSON, tabs 6 to 10, SolidWorks cards and file watching | full RPi4 run from the page: build, spreader, study, results |

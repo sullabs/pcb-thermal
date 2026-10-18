@@ -9,7 +9,9 @@ The page that replaces the workbook as the user interface. Design and milestones
 | `schema/` | JSON Schemas of the three project files: `project.json` (page writes), `cad.json` and `results.json` (macros write). `common.schema.json` holds shared parts. |
 | `src/calc/` | The calculation module: register, triage, rail budget, PCB stack, body checks, bare board network, spreader plates, thermal solution, sim k z, and `forSolidWorks`. Pure functions on the three files; the page and the converter both use it. |
 | `src/io/workbook_import.js` | Makes the three files from a filled workbook. Used by the converter below and by the page ("Make it from an old workbook"). |
-| `src/page/` | The page: `app.js` (files, save, undo, tabs), `tabs.js` (unlock rules and reasons), `model.js` (edits, undo history, save output, typed units), `views.js` (tab contents), `files.js` (folder access), `ui.js` (inputs), `page.css`, `index.html`. |
+| `src/terms/catalogue.js` | The term catalogue: label, symbol, unit, kind, hover text, longer text, typical range for every value; the glossary of abbreviations; status words. |
+| `src/calc/formulas.js` | Every value by term id and key (`VALUES`) and the formula of each calculated one (`FORMULAS`), with its inputs, for Show formulas, the Explain panel and the trace. |
+| `src/page/` | The page: `app.js` (files, save, undo, tabs), `tabs.js` (unlock rules and reasons), `model.js` (edits, undo history, save output, typed units), `views.js` (tab contents), `explain.js` (hover, Explain panel, Show formulas, abbreviations), `files.js` (folder access), `ui.js` (inputs), `page.css`, `index.html`. |
 | `tools/` | Development tools (Node). Not shipped. |
 | `dist/` | The built page, `PCB_Thermal.html`. The only file the user gets. Rebuilt by `npm run build` (also by `npm test`). |
 
@@ -18,7 +20,7 @@ The page that replaces the workbook as the user interface. Design and milestones
 ```
 cd webapp
 npm install
-npm test                                                     # W1, W2 and W3 tests (W3 also rebuilds the page)
+npm test                                                     # W1 to W4 tests (W3 also rebuilds the page)
 npm run build                                                # dist/PCB_Thermal.html
 npm run serve                                                # http://localhost:8173/webapp/dist/PCB_Thermal.html
 npm run expected                                             # refresh tests/webapp/expected_*.json from the workbooks, then test
@@ -53,3 +55,14 @@ Other browsers: open the three files by hand; Save downloads `project.json`.
 
 `window.PCBT_DEV` is a development hook (open a folder handle from the browser's private storage, read the state) used for
 browser checks; it changes nothing on its own.
+
+## Explaining values (W4)
+
+Every value on the page is `<V t="term.id" k="key" />` and every label `<L t="term.id" />`. Hover (or keyboard focus)
+shows the catalogue's short text, unit and kind; a click opens the Explain panel: the longer text, the formula with the
+numbers put in, each input as a link (the trace), and what uses the value. Show formulas writes the formula line under
+every calculated value. Abbreviations in texts are marked by `marked(text)`.
+
+`tools/test_w4.mjs` renders every tab for both RPi4 examples (with `preact-render-to-string`) and fails on a number
+without a term, a term missing from the catalogue, a calculated value without its formula, or a formula that does not
+give the calculation module's value.

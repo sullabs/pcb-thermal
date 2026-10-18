@@ -32,7 +32,10 @@ Read `PLAN.md` first. It is the spec. This file is the short list of rules that 
 - Every formula lives once, in `webapp/src/calc/` (pure functions on the three files). Port a template formula exactly;
   `npm test` compares it with `tests/webapp/expected_*.json` (Excel's saved values). After a workbook formula change, open
   and save the example workbook in Excel, then `npm run expected`.
-- Dark theme by default, light on request. Every value has a hover explanation from the term catalogue.
+- Dark theme by default, light on request. Every value has a hover explanation from the term catalogue
+  (`webapp/src/terms/catalogue.js`). A new value on the page needs: a catalogue term, a getter in `VALUES` and, if
+  calculated, a formula in `FORMULAS` (`webapp/src/calc/formulas.js`); show it with `<V>` and label it with `<L>`.
+  `npm test` (W4) fails on a number without a term or a formula that does not give the calculated value.
 
 ## VBA rules (each one cost a failed run already)
 
