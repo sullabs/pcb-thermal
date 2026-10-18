@@ -112,3 +112,7 @@ Do not crawl the whole site; the method reference is already local.
   state the model in and out are equal, so the energy balance error is |model in - model out| / larger of the two.
 - Name clash: VBA is not case sensitive. A parameter `roles` and a local `roleS` is a compile error (duplicate declaration).
   `.claude/skills/solidworks-vba/lint_vba.py` finds these (reserved names, duplicate Dim, missing ByVal, non-ASCII, CRLF).
+- Toolbars and menus cannot be made from a macro (checked 2026-10-18): `AddToolbar5`, `AddToolbarCommand2`, `AddMenuItem5` and
+  `GetCommandManager` all take the add-in cookie from `ISwAddin::ConnectToSW`; `AddToolbar5` "only operates properly when the
+  application is implemented as a .dll"; callbacks are methods of the add-in object. No VBA examples exist. API toolbars also vanish
+  when SolidWorks closes. For macros use manual macro buttons (docs/HOWTO_TOOLBAR.md), saved with the Copy Settings Wizard.
