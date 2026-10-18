@@ -95,7 +95,7 @@ Set-Content -Path $verFile -Encoding ASCII -Value @(
     "<Assembly: System.Reflection.AssemblyFileVersion(""$version"")>",
     "<Assembly: System.Reflection.AssemblyProduct(""NTIS thermal simulation"")>",
     "<Assembly: System.Reflection.AssemblyTitle(""NTIS thermal simulation setup"")>")
-$setupExe = Join-Path $dist "NTIS_thermal_simulation_Setup_$ver3.exe"
+$setupExe = Join-Path $dist "Thermal_Simulation_Plugin_$ver3.exe"
 $rsp2 = @("/nologo", "/target:winexe", "/platform:anycpu", "/optimize+", "/main:Setup",
     "/imports:Microsoft.VisualBasic,System", "/reference:System.dll", "/reference:System.Drawing.dll",
     "/reference:System.Windows.Forms.dll", "`"/win32manifest:$(Join-Path $here 'setup\setup.manifest')`"",

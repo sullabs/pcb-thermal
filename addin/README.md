@@ -26,14 +26,14 @@ Build (needs only Windows and a SolidWorks install for the API files):
 
     powershell -ExecutionPolicy Bypass -File addin\build.ps1
 
-Output: `addin\dist\NTIS_thermal_simulation_Setup_<version>.exe`, one file with everything inside: the add-in, the SolidWorks
+Output: `addin\dist\Thermal_Simulation_Plugin_<version>.exe`, one file with everything inside: the add-in, the SolidWorks
 interop DLLs (sldworks, swconst, swpublished, cosworks), icons and the Excel template. That exe is what you share.
 Raise the version in `src/AssemblyInfo.vb` for every build you hand out.
 
 Install on any PC (close SolidWorks first; no admin rights, installs for the Windows user who runs it):
 
 - Double-click the setup exe, press **Install**. Running a newer setup upgrades in place.
-- Silent: `NTIS_thermal_simulation_Setup_<version>.exe /silent`
+- Silent: `Thermal_Simulation_Plugin_<version>.exe /silent`
 - Remove: Windows Settings > Apps > Installed apps > **NTIS thermal simulation for SolidWorks**, or `/uninstall` (`/uninstall /silent`).
 
 Files go to `%LOCALAPPDATA%\PCBThermal\`, registry entries to `HKCU` only. Then start SolidWorks normally and look
