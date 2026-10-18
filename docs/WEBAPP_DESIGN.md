@@ -299,10 +299,13 @@ Per macro:
 
 The workbook and the current macros keep working until W7 is done.
 
-## 13. Open questions
+## 13. Decisions (answered 2026-10-18)
 
-1. Does the work PC's Chrome or Edge allow File System Access on local files? (Company policy can turn it off.) If
-   not, the page falls back to open and download, which is clumsier.
-2. Should the add-in also get a version on JSON, or only the VBA macros, since the add-in is blocked at work?
-3. One board per project folder, or several boards in one folder?
-4. Which units should the page offer to switch (for example mil for copper thickness, or K vs C)?
+1. **File access:** Chrome or Edge on the work PC can save local files. The page saves straight into the project
+   folder; open and download stays only as a fallback for other browsers.
+2. **Add-in:** the VBA macros move to JSON first. The add-in follows only if it is needed later.
+3. **One board per project folder.** Each board folder stays self-contained, so a later multi-board assembly file can
+   point to several board folders without changing the board format.
+4. **Units: fixed, with input helpers.** Values are stored and shown in mm, C, W, W/(m K) and C/W. Some fields accept
+   other units as typed text and convert on entry: copper thickness in oz (1 oz = 0.035 mm) or um, lengths in mil,
+   power in mW, temperature differences in K, resistance in K/W. The hover text of each field lists what it accepts.
