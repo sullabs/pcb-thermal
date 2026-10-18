@@ -19,7 +19,7 @@ export function fmt(x, d = 2) {
 export const pct = x => (isNum(x) ? (x * 100).toFixed(1) + " %" : "");
 
 // Number with a fixed unit. onCommit(value, key) gets undefined for a blank entry.
-export function NumField({ value, unit, label, onCommit, rule = {}, disabled, title, accepts, width = "6em", id, term, tkey = "" }) {
+export function NumField({ value, unit, label, onCommit, rule = {}, disabled, title, accepts, width = "6em", id, term, tkey = "", cls = "", placeholder }) {
   const range = TERMS[term]?.range;
   const odd = range && isNum(value) && (value < range[0] || value > range[1]);
   const shown = v => (isNum(v) ? String(+v.toPrecision(12)) : "");
@@ -36,9 +36,9 @@ export function NumField({ value, unit, label, onCommit, rule = {}, disabled, ti
     setError(p.error || null);
     if (!p.error && p.value !== value) onCommit(p.value);
   };
-  return html`<span class="field ${error ? "bad" : odd ? "odd" : ""}" data-term=${term} data-key=${tkey}>
+  return html`<span class="field ${error ? "bad" : odd ? "odd" : ""} ${cls}" data-term=${term} data-key=${tkey}>
     <input id=${id} type="text" inputmode="decimal" value=${text} onInput=${onInput} disabled=${disabled}
-      aria-label=${label} aria-invalid=${!!error} title=${error ? label + ": " + error : term ? undefined : title || label} style=${{ width }} />
+      placeholder=${placeholder} aria-label=${label} aria-invalid=${!!error} title=${error ? label + ": " + error : term ? undefined : title || label} style=${{ width }} />
     ${unit && html`<span class="unit">${unitText(unit)}</span>`}
     ${error && html`<span class="err" role="alert">${error}</span>`}
     ${!error && odd && html`<span class="oddtext">typical ${range[0]} to ${range[1]}</span>`}
@@ -47,7 +47,7 @@ export function NumField({ value, unit, label, onCommit, rule = {}, disabled, ti
 const UNIT = { copperMm: "mm", dC: "C", CW: "C/W", W: "W", C: "C", mm: "mm", V: "V", A: "A", ohm: "ohm", WmK: "W/(m K)", frac: "" };
 const unitText = u => UNIT[u] ?? u;
 
-export function TextField({ value, label, onCommit, disabled, required, width = "12em", multiline, title, term, tkey = "" }) {
+export function TextField({ value, label, onCommit, disabled, required, width = "12em", multiline, title, term, tkey = "", placeholder }) {
   const [text, setText] = useState(value ?? "");
   useEffect(() => { if ((value ?? "") !== text.trim()) setText(value ?? ""); }, [value]);
   const bad = required && !text.trim();
@@ -56,7 +56,7 @@ export function TextField({ value, label, onCommit, disabled, required, width = 
     setText(t);
     if (!(required && !t.trim())) onCommit(t.trim() || undefined);
   };
-  const props = { value: text, onInput, disabled, "aria-label": label, title: bad ? label + ": required" : term ? undefined : title || label, style: { width } };
+  const props = { value: text, onInput, disabled, placeholder, "aria-label": label, title: bad ? label + ": required" : term ? undefined : title || label, style: { width } };
   return html`<span class="field ${bad ? "bad" : ""}" data-term=${term} data-key=${tkey}>
     ${multiline ? html`<textarea rows="5" ...${props}></textarea>` : html`<input type="text" ...${props} />`}
     ${bad && html`<span class="err" role="alert">required</span>`}

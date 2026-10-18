@@ -88,15 +88,16 @@ export function marked(text) {
 }
 
 // ---------- a value ----------
-export function V({ t, k = "", v, d, u, cls = "" }) {
+// nofx: no formula line even with Show formulas on (inside a sentence, where it would break the reading).
+export function V({ t, k = "", v, d, u, cls = "", nofx }) {
   const X = useContext(Explain);
   const val = v !== undefined ? v : X.ctx ? valueOf(X.ctx, t, k) : undefined;
   const term = TERMS[t];
   const shown = fmtValue(val, d);
-  const e = X.showFx && term?.kind === "calculated" && X.ctx ? evaluate(X.ctx, t, k) : null;
+  const e = X.showFx && !nofx && term?.kind === "calculated" && X.ctx ? evaluate(X.ctx, t, k) : null;
   const isStatus = typeof val === "string" && STATUS[val];
   const why = t === "part.flag" && X.ctx ? valueOf(X.ctx, "part.why", k) : undefined;
-  return html`<span class=${`v ${term?.kind || ""} ${cls}`} data-term=${t} data-key=${k} data-why=${why} tabindex="0" role="button"
+  return html`<span class=${`v ${term?.kind || ""} ${cls}`} data-term=${t} data-key=${k} data-why=${why} data-nofx=${nofx ? "1" : undefined} tabindex="0" role="button"
       onClick=${ev => { ev.stopPropagation(); X.open(t, k); }} onKeyDown=${ev => { if (ev.key === "Enter") X.open(t, k); }}>${
       isStatus ? html`<span class=${`status ${statusCls(val)}`} data-status=${val}>${val}</span>` : typeof val === "string" ? marked(shown) : shown}${
       u && unitOf(t) && shown !== "" ? html`<span class="unit"> ${unitOf(t)}</span>` : ""}${

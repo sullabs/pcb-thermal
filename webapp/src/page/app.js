@@ -13,6 +13,7 @@ import { valueOf } from "../calc/formulas.js";
 import { Explain, Tip, ExplainPanel } from "./explain.js";
 import { workbookToProject } from "../io/workbook_import.js";
 import { validateProject, validateCad, validateResults } from "virtual:validators";
+import EXAMPLE from "virtual:example";
 
 const store = {
   get: k => { try { return localStorage.getItem("pcbt." + k); } catch { return null; } },
@@ -42,6 +43,7 @@ function App() {
   const [last, setLast] = useState(null);         // remembered folder handle
   const [backups, setBackups] = useState([]);
   const [showFx, setShowFx] = useState(store.get("fx") === "1");
+  const [learn, setLearn] = useState(store.get("learn") !== "0");   // on until the user turns it off
   const [explain, setExplain] = useState([]);     // stack of { t, k }: the last is shown, Back pops
   const stamps = useRef({});
   const project = hist.present;
@@ -56,6 +58,7 @@ function App() {
   useEffect(() => { document.documentElement.dataset.theme = theme; store.set("theme", theme); }, [theme]);
   useEffect(() => { store.set("tab", String(tab)); }, [tab]);
   useEffect(() => { store.set("fx", showFx ? "1" : "0"); }, [showFx]);
+  useEffect(() => { store.set("learn", learn ? "1" : "0"); }, [learn]);
   useEffect(() => { if (F.folderSupported) F.lastFolder().then(setLast); }, []);
 
   const calc = useMemo(() => {
@@ -64,14 +67,15 @@ function App() {
   }, [project, cad, results]);
   const calcOk = calc && !calc.error ? calc : null;
   const canSave = mode === "folder" || mode === "manual";
+  const example = mode === "example";
   const fctx = useMemo(() => (calcOk ? { project, cad, results, calc: calcOk } : null), [project, cad, results, calcOk]);
   const openExplain = useCallback((t, k = "") => setExplain(s => [...s.slice(-30), { t, k }]), []);
   const explainCtx = useMemo(() => ({ ctx: fctx, open: openExplain, showFx }), [fctx, openExplain, showFx]);
-  const states = useMemo(() => tabStates({ project, cad, results, calc: calcOk, canSave }), [project, cad, results, calcOk, canSave]);
+  const states = useMemo(() => tabStates({ project, cad, results, calc: calcOk, canSave: canSave || example }), [project, cad, results, calcOk, canSave, example]);
 
   // ---------- edits ----------
-  const edit = useCallback((label, path, value, key) => setHist(h => commit(h, setIn(h.present, path, value), label, key)), []);
-  const editFn = useCallback((label, fn) => setHist(h => commit(h, fn(h.present), label)), []);
+  const edit = useCallback((label, path, value, key) => { if (live.current.mode !== "example") setHist(h => commit(h, setIn(h.present, path, value), label, key)); }, []);
+  const editFn = useCallback((label, fn, key) => { if (live.current.mode !== "example") setHist(h => commit(h, fn(h.present), label, key)); }, []);
   const doUndo = () => setHist(h => { const n = undo(h); if (n.did) say(n.did); return n; });
   const doRedo = () => setHist(h => { const n = redo(h); if (n.did) say(n.did); return n; });
 
@@ -128,6 +132,15 @@ function App() {
     setDir(null);
     setMode("manual");
     loadFiles(got.project, got.cad, got.results, "files opened by hand");
+  };
+
+  // The Raspberry Pi 4 study, built into the page, read only (design 5.3).
+  const openExample = () => {
+    if (dirty && !confirm("You have unsaved changes. Open the example anyway?")) return;
+    setDir(null);
+    setMode("example");
+    loadFiles(EXAMPLE.project, EXAMPLE.cad, EXAMPLE.results, "the built-in example");
+    say("This is the example study, read only. Look around; to work on your own board, choose its folder on tab 0.");
   };
 
   const startNew = async () => {
@@ -276,12 +289,13 @@ function App() {
       </div>`}`
     : html`<p class="warn">This browser cannot save into a folder. Use Chrome or Edge for that. Here you can open the files by hand, and Save downloads <code>project.json</code>.</p>`}
     <p class="hint">${F.folderSupported ? "Or open the files by hand:" : ""} <label class="button small">Open project.json, cad.json, results.json<input type="file" accept=".json" multiple hidden onChange=${openByHand} /></label></p>
+    <p class="hint">New to this? <button class="small" onClick=${openExample}>Open the example study (Raspberry Pi 4, read only)</button></p>
     ${problems.length > 0 && html`<div class="problems"><p class="warn">Format problems (Save is refused until they are fixed):</p><ul>${problems.map(x => html`<li>${x}</li>`)}</ul></div>`}
     ${calc?.error && html`<p class="warn">The calculation stopped: ${calc.error}</p>`}
   </div>`;
   const backupCard = mode === "folder" && backups.length > 0 && html`<p>Open a backup: ${backups.slice(0, 7).map(b => html` <button class="small" onClick=${() => openBackup(b)}>${b.slice(8, 16)}</button>`)}</p>`;
 
-  const ctx = { project, cad, results, calc: calcOk, states, value: (t, k) => (fctx ? valueOf(fctx, t, k) : undefined), folder: dir?.name, edit, editFn, go: setTab, locked: st.locked, now,
+  const ctx = { project, cad, results, calc: calcOk, states, value: (t, k) => (fctx ? valueOf(fctx, t, k) : undefined), folder: example ? "built-in example (read only)" : dir?.name, edit, editFn, go: setTab, locked: st.locked || example, now, learn, openExample,
     blocking: calcOk ? blockingProblems(project, calcOk) : [], folderCard, backupCard };
   const View = { project: V.ProjectTab, parts: V.PartsTab, import: V.ImportTab, link: V.LinkTab, triage: V.TriageTab, bare: V.BareTab,
     build: V.BuildTab, spreader: V.SpreaderTab, sim: V.SimTab, results: V.ResultsTab, changes: V.ChangesTab, help: V.HelpTab }[st.id];
@@ -296,6 +310,7 @@ function App() {
       <button onClick=${() => save(false)} disabled=${!project || !canSave} title="Save project.json (Ctrl+S)">Save</button>
       <button onClick=${doUndo} disabled=${!hist.past.length} title=${hist.past.length ? "Undo: " + hist.past[hist.past.length - 1].label + " (Ctrl+Z)" : "Nothing to undo"}>Undo</button>
       <button onClick=${doRedo} disabled=${!hist.future.length} title=${hist.future.length ? "Redo: " + hist.future[0].label + " (Ctrl+Y)" : "Nothing to redo"}>Redo</button>
+      <button aria-pressed=${learn} class=${learn ? "on" : ""} onClick=${() => setLearn(!learn)} title="Show what each step is for, what to look at, and a plain reading of the results">Learn</button>
       <button aria-pressed=${showFx} class=${showFx ? "on" : ""} onClick=${() => setShowFx(!showFx)} title="Write the formula, with your numbers, under every calculated value">Show formulas</button>
       <button onClick=${() => setTheme(theme === "dark" ? "light" : "dark")} title="Switch between dark and light">${theme === "dark" ? "Light" : "Dark"}</button>
       <button onClick=${() => setTab(11)}>Help</button>
@@ -312,9 +327,11 @@ function App() {
       <h2>${st.n} ${st.title}</h2>
       ${st.locked && html`<div class="locked-banner" role="note"><b>This step is locked.</b> ${st.reason}
         ${st.fixTab !== undefined && html` <button onClick=${() => setTab(st.fixTab)}>Go to tab ${st.fixTab}</button>`}</div>`}
+      ${example && html`<div class="example-banner" role="note"><b>Example study, read only.</b> Edits are off and nothing is saved. <button class="small" onClick=${() => setTab(0)}>Choose your own folder</button></div>`}
+      ${learn && html`<${V.LearnBox} id=${st.id} />`}
       ${needsProject && !project ? html`<p class="hint">Open a project on tab 0 first.</p>`
         : needsProject && !calcOk ? html`<${Card} title="The calculation stopped"><p class="warn">${calc?.error}</p><//>`
-        : html`<fieldset class="content" disabled=${st.locked}>${View(ctx)}</fieldset>`}
+        : html`<fieldset class="content" disabled=${st.locked || example}>${View(ctx)}</fieldset>`}
     </main>
     <${ExplainPanel} at=${explain[explain.length - 1]} ctx=${fctx} onOpen=${openExplain} canBack=${explain.length > 1}
       onBack=${() => setExplain(s => s.slice(0, -1))} onClose=${() => setExplain([])} onHelp=${() => setTab(11)} />
@@ -322,7 +339,7 @@ function App() {
     <${Tip} />
     <//>
     <div class="msgs" aria-live="polite">${msgs.map(m => html`<div class=${`msg ${m.kind}`} key=${m.id}>${m.text}</div>`)}</div>
-    <footer>page ${PAGE_VERSION} · ${mode === "folder" ? "saves into the folder" : mode === "manual" ? "files opened by hand: Save downloads project.json" : "no folder"}</footer>`;
+    <footer>page ${PAGE_VERSION} · ${mode === "folder" ? "saves into the folder" : mode === "manual" ? "files opened by hand: Save downloads project.json" : example ? "example study, read only" : "no folder"}</footer>`;
 }
 
 export function start(el) {

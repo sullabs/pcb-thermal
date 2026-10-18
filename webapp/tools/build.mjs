@@ -20,11 +20,14 @@ export async function build({ out = path.join(root, "dist", "PCB_Thermal.html"),
   }
   const validators = standalone(ajv, { validateProject: "project.schema.json", validateCad: "cad.schema.json", validateResults: "results.schema.json" });
 
+  // The example study (Help > example, read only). Board data stays in example/, out of src/.
+  const ex = path.join(root, "..", "example", "RaspberryPi4");
+  const example = JSON.stringify(Object.fromEntries(["project", "cad", "results"].map(n => [n, JSON.parse(fs.readFileSync(path.join(ex, n + ".json"), "utf8"))])));
   const virtual = {
     name: "virtual",
     setup(b) {
-      b.onResolve({ filter: /^virtual:validators$/ }, () => ({ path: "validators", namespace: "virtual" }));
-      b.onLoad({ filter: /.*/, namespace: "virtual" }, () => ({ contents: validators, loader: "js", resolveDir: root }));
+      b.onResolve({ filter: /^virtual:(validators|example)$/ }, a => ({ path: a.path.slice(8), namespace: "virtual" }));
+      b.onLoad({ filter: /.*/, namespace: "virtual" }, a => ({ contents: a.path === "example" ? example : validators, loader: a.path === "example" ? "json" : "js", resolveDir: root }));
     },
   };
   const res = await esbuild.build({

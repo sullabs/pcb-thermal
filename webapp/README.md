@@ -20,7 +20,7 @@ The page that replaces the workbook as the user interface. Design and milestones
 ```
 cd webapp
 npm install
-npm test                                                     # W1 to W4 tests (W3 also rebuilds the page)
+npm test                                                     # W1 to W5 tests (W3 also rebuilds the page)
 npm run build                                                # dist/PCB_Thermal.html
 npm run serve                                                # http://localhost:8173/webapp/dist/PCB_Thermal.html
 npm run expected                                             # refresh tests/webapp/expected_*.json from the workbooks, then test
@@ -66,3 +66,17 @@ every calculated value. Abbreviations in texts are marked by `marked(text)`.
 `tools/test_w4.mjs` renders every tab for both RPi4 examples (with `preact-render-to-string`) and fails on a number
 without a term, a term missing from the catalogue, a calculated value without its formula, or a formula that does not
 give the calculation module's value.
+
+## Filling a board and Learn mode (W5)
+
+- Tab 1: Paste a parts list reads cells copied from Excel (or a CSV text): first row the column names, one row per
+  load, rows with the same RefDes make one part. Units may be typed in the cells (mA, mW, K/W, 85 %). Copy the current
+  list gives the layout. Each load says what its power method needs and marks the empty fields.
+- Tab 2: the import settings the macro reads (PCB body name, smallest body, one body per component, tolerances).
+- Tab 3: Link the suggested bodies (a part number word or the RefDes in the body name), a body added by hand, typed
+  sizes and positions over the imported ones, the PCB size and stack, and a check per body.
+- Tab 4: flag limits. Tab 5: air and surfaces, the run to compare with, and the heat paths of one part as a drawing.
+- Learn (top bar): what each step is for and what to look at (`src/terms/learn.js`), and on tabs 4 and 5 a plain
+  reading of the numbers. Help and tab 0 open the RPi4 example study, built into the page from `example/`, read only.
+
+`tools/test_w5.mjs` fills the RPi4 board as a new user would and checks it gives the example's results.

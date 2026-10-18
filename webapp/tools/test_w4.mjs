@@ -3,7 +3,7 @@
 // 1. Every formula, worked out from its inputs, equals the value of the calculation module, for every instance
 //    in both RPi4 examples (RaspberryPi4 and RPi4_fresh, which has a bottom plate).
 // 2. Every catalogue entry is complete; every calculated term has a formula; every term has a value getter.
-// 3. Every tab, rendered for both examples with Show formulas on: every value, label and input carries a term id
+// 3. Every tab, rendered for both examples with Show formulas and Learn mode on: every value, label and input carries a term id
 //    from the catalogue, no number stands without one, and each calculated value with a number shows a formula.
 import fs from "node:fs";
 import path from "node:path";
@@ -91,7 +91,7 @@ const unesc = s => s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/
 for (const [name, f] of Object.entries(examples)) {
   const { project, cad, results, ctx } = f;
   const states = tabStates({ project, cad, results, calc: ctx.calc, canSave: true });
-  const c = { project, cad, results, calc: ctx.calc, states, folder: name, edit() {}, editFn() {}, go() {}, locked: false, now: () => "2026-10-18T12:00:00",
+  const c = { project, cad, results, calc: ctx.calc, states, folder: name, edit() {}, editFn() {}, go() {}, locked: false, learn: true, now: () => "2026-10-18T12:00:00",
     blocking: blockingProblems(project, ctx.calc), folderCard: null, backupCard: null, value: (t, k) => valueOf(ctx, t, k) };
   const tabs = { ProjectTab: 0, PartsTab: 1, ImportTab: 2, LinkTab: 3, TriageTab: 4, BareTab: 5, BuildTab: 6, SpreaderTab: 7, SimTab: 8, ResultsTab: 9, ChangesTab: 10, HelpTab: 11 };
   let values = 0, fx = 0;
@@ -110,7 +110,7 @@ for (const [name, f] of Object.entries(examples)) {
           values++;
           const term = TERMS[t];
           const val = valueOf(ctx, t, x.el.a["data-key"] || "");
-          if (term?.kind === "calculated" && Number.isFinite(val) && evaluate(ctx, t, x.el.a["data-key"] || "")?.fn) {
+          if (term?.kind === "calculated" && !x.el.a["data-nofx"] && Number.isFinite(val) && evaluate(ctx, t, x.el.a["data-key"] || "")?.fn) {
             const has = nodes.some(y => y.el?.a.class === "fx" && y.stack.includes(x.el));
             if (has) fx++; else check(false, `${where}: ${t} ${x.el.a["data-key"]} shows its formula`);
           }

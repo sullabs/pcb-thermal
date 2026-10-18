@@ -138,3 +138,39 @@ abbr.gl { text-decoration: underline dotted; text-underline-offset: 2px; cursor:
 .calcs { font-size: 12px; color: var(--muted); align-self: flex-end; }
 header button.on { border-color: var(--accent); color: var(--accent); }
 @media (max-width: 900px) { .layout.with-panel { display: block; } .explain { position: fixed; inset: auto 8px 30px 8px; max-height: 55vh; margin: 0; z-index: 6; } }
+/* W5: Learn mode, readings, parts list, body editor, network drawing */
+.learn { background: var(--panel2); border-left: 4px solid var(--accent); border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; font-size: 13px; }
+.learn p { margin: 2px 0; }
+.learn ul { margin: 2px 0 2px 18px; padding: 0; }
+.learn-h { margin-top: 6px !important; }
+.card.reading { border-left: 4px solid var(--accent); }
+.card.reading ul { margin: 4px 0 0 18px; padding: 0; }
+.card.reading li { margin: 3px 0; }
+.example-banner { background: var(--panel2); border: 1px dashed var(--accent); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; }
+.toolbar { flex-wrap: wrap; }
+.toolbar button.on, button.small.on { border-color: var(--accent); color: var(--accent); }
+.paste { flex-basis: 100%; margin: 6px 0 0; }
+.paste textarea { width: 100%; font: 12px/1.4 Consolas, "Cascadia Mono", monospace; }
+.field.need input { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.field.unused input { opacity: .45; }
+.needs { display: block; color: var(--muted); font-size: 11px; white-space: normal; max-width: 16em; text-align: left; }
+.form label.grow { flex: 1 1 18em; }
+.grid tr.sel td { background: var(--panel2); }
+.grid tr.edit td { background: var(--panel2); }
+.body-edit { padding: 6px 2px; }
+.body-edit .wide { flex-basis: 100%; margin: 0; }
+button.sugg { border-style: dashed; border-color: var(--accent); color: var(--accent); }
+table.limits { width: auto; }
+.cols.net { grid-template-columns: minmax(320px, 1.2fr) minmax(260px, 1fr); align-items: start; }
+svg.net { width: 100%; max-width: 620px; background: var(--panel2); border-radius: 6px; font-size: 12px; }
+svg.net .node { stroke: var(--text); stroke-width: 3; }
+svg.net .wire { stroke: var(--muted); stroke-width: 1.5; }
+svg.net .res { fill: var(--panel); stroke: var(--accent); stroke-width: 1.5; }
+svg.net .tj { fill: var(--crit); }
+svg.net text { fill: var(--text); }
+svg.net .rl, svg.net .hint-svg { fill: var(--muted); }
+svg.net .nl { font-weight: 600; }
+svg.net .flow { fill: var(--watch); }
+svg.net .nv { fill: var(--accent); cursor: help; font-weight: 600; }
+svg.net .nv:hover, svg.net .nv:focus { text-decoration: underline; outline: none; }
+@media (max-width: 900px) { .cols.net { grid-template-columns: 1fr; } }

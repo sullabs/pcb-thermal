@@ -15,7 +15,28 @@ export function isoLocal(d) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-// Template defaults (12 Settings, 3 CAD geometry PCB stack, register flag limits).
+// Template defaults (12 Settings, 3 CAD geometry PCB stack, register flag limits, 6 Bare board network air and
+// surfaces, 11 Sim setup). Without the surfaces a new board's hand check would have no h.
+export const SIM_DEFAULTS = {
+  studyType: "Thermal", meshGlobalMm: 3, meshFineMm: 0.5, includePartsWithoutHeat: true, kPartsWithoutHeat: 0.5,
+  surfaces: {
+    spreaderTop: { h: 10, emissivity: 0.85 }, spreaderOther: { h: 5, emissivity: 0.85 },
+    pcbTop: { h: 8, emissivity: 0.9 }, pcbBottom: { h: 5, emissivity: 0.9 }, parts: { h: 8, emissivity: 0.9 },
+  },
+  contacts: { partToPcb: 0, chipToTim: 0, timToSpreader: 0 },
+  chips: [],
+};
+// A project made before the page (or by hand) may have no simSetup: give it the template values before an edit.
+export const withSimSetup = p => (p.simSetup ? p : { ...p, simSetup: structuredClone(SIM_DEFAULTS) });
+
+// A body typed in by hand (not in the STEP), key m_<n>. It starts as a 5 x 5 x 1 mm box on the board top.
+export function addManualBody(project, pcbH) {
+  let n = 1;
+  while (project.bodies["m_" + n]) n++;
+  const box = { xMin: 0, yMin: 0, zMin: Number.isFinite(pcbH) ? pcbH : 1.6, l: 5, w: 5, h: 1 };
+  return { project: { ...project, bodies: { ...project.bodies, ["m_" + n]: { include: true, manual: { name: "New body " + n, box, side: "Top" } } } }, key: "m_" + n };
+}
+
 export function newProject(name, now) {
   return {
     schema: "pcb-thermal/project", schemaVersion: 1, savedBy: "page " + PAGE_VERSION, savedAt: now,
@@ -23,6 +44,8 @@ export function newProject(name, now) {
     parts: [],
     bodies: {},
     pcbStack: { copperLayers: 4, copperThicknessMm: 0.035, copperCoverage: 0.6, copperK: 390, dielectricK: 0.3 },
+    handCheck: { surfaceRiseK: 20 },
+    simSetup: structuredClone(SIM_DEFAULTS),
     settings: {
       tolPosMm: 0.05, tolSizeMm: 0.05,
       import: { pcbNameContains: "PCB", minSizeMm: 0, topLevelOnly: true },

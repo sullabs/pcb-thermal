@@ -57,6 +57,7 @@ def("part.rjb", "Junction to board resistance", "Rjb", "C/W", "input", "How many
   "Also written θJB. When given, the part uses the two-resistor model: Rjc to its top, Rjb to the board. Without it, the part is a block with half of Rjc each way.",
   { range: [0.1, 100] });
 def("part.taOverride", "Ta override", "", "C", "input", "Local air temperature for this part, if it sits in a hotter spot than the board ambient. Optional.", undefined, { range: [-40, 125] });
+def("part.notes", "Part notes", "", "", "input", "Where the numbers came from: datasheet page, load case, assumptions. Optional.");
 def("part.pd", "Pd", "Pd", "W", "calculated", "Power the part turns into heat: the sum of its loads.",
   "Pd is the electrical power lost inside the part. For a regulator it is the input power minus what it delivers; for a digital chip it is all the power it draws.");
 def("part.ta", "Ta", "Ta", "C", "calculated", "Air temperature the part sees: its Ta override, else the board ambient.");
@@ -121,9 +122,20 @@ def("import.model", "Model", "", "", "cad", "Name of the STEP model Import STEP 
 def("import.date", "Import date", "", "", "cad", "When Import STEP ran.");
 def("import.bodies", "Bodies", "", "", "cad", "Number of bodies Import STEP found (one per part in the STEP).");
 def("import.frame", "Board frame", "", "", "cad", "How the board's axes sit in the STEP model. X along the board length, Y along its width, Z up from the PCB bottom face.");
+def("set.pcbNameContains", "PCB body name has", "", "", "input", "Import STEP takes the body whose name contains this text as the PCB.",
+  "Most ECAD exports call the board body PCB or Board. Change it if Import STEP picks the wrong body as the board.");
+def("set.minSize", "Smallest body", "", "mm", "input", "Import STEP skips bodies with length and width both under this. 0 keeps every body.",
+  "Raise it (for example to 1 mm) to drop tiny passives from the body list. Skipped bodies are not built and carry no heat.", { range: [0, 10] });
+def("set.topLevelOnly", "One body per component", "", "", "input", "Yes: one body per top-level component of the STEP. No: every solid body.",
+  "Yes suits most ECAD exports, where each part is one component. Use No when parts are split into several solids you want to see.");
+def("set.tolPos", "Move tolerance", "", "mm", "input", "Moves smaller than this are not reported as changes.", undefined, { range: [0, 1] });
+def("set.tolSize", "Size tolerance", "", "mm", "input", "Size changes smaller than this are not reported as changes.", undefined, { range: [0, 1] });
 def("pcb.l", "PCB length", "L", "mm", "cad", "Board size along X, from Import STEP (or the override on tab 3).");
 def("pcb.w", "PCB width", "W", "mm", "cad", "Board size along Y, from Import STEP (or the override on tab 3).");
 def("pcb.h", "PCB thickness", "H", "mm", "cad", "Board thickness, from Import STEP (or the override on tab 3).", undefined, { range: [0.4, 6] });
+def("pcbov.l", "PCB length you typed", "", "mm", "input", "Replaces the imported PCB length. Leave blank to use the STEP.", undefined, { range: [5, 1000] });
+def("pcbov.w", "PCB width you typed", "", "mm", "input", "Replaces the imported PCB width. Leave blank to use the STEP.", undefined, { range: [5, 1000] });
+def("pcbov.h", "PCB thickness you typed", "", "mm", "input", "Replaces the imported PCB thickness. 1.6 mm is the common value.", undefined, { range: [0.4, 6] });
 def("stack.layers", "Copper layers", "", "", "input", "Number of copper layers in the PCB.", undefined, { range: [1, 32] });
 def("stack.cuT", "Copper thickness", "t Cu", "mm", "input", "Thickness of one copper layer. 1 oz = 0.035 mm.", undefined, { range: [0.009, 0.21] });
 def("stack.coverage", "Copper coverage", "", "", "input", "Average share of each layer that is copper (0 to 1). Planes about 0.9, signal layers about 0.2.", undefined, { range: [0.05, 1] });
@@ -146,6 +158,23 @@ def("body.h", "H", "H", "mm", "cad", "Body height along Z.");
 def("body.xMin", "X min", "", "mm", "cad", "Lowest X of the body.");
 def("body.yMin", "Y min", "", "mm", "cad", "Lowest Y of the body.");
 def("body.zMin", "Z min", "", "mm", "cad", "Lowest Z of the body, from the PCB bottom face. A top part starts at the board thickness.");
+def("bodyset.name", "Name you typed", "", "", "input", "Replaces the STEP name of this body on the page and in the model. Leave blank to keep it.");
+def("bodyset.side", "Side", "", "", "input", "Which face of the PCB this body sits on. For a body you added by hand.");
+def("bodyset.l", "L you typed", "", "mm", "input", "Replaces the imported length. Use it when the STEP body is wrong (a placeholder, a body with its leads).", undefined, { range: [0.1, 300] });
+def("bodyset.w", "W you typed", "", "mm", "input", "Replaces the imported width.", undefined, { range: [0.1, 300] });
+def("bodyset.h", "H you typed", "", "mm", "input", "Replaces the imported height.", undefined, { range: [0.05, 100] });
+def("bodyset.xMin", "X min you typed", "", "mm", "input", "Replaces the imported lowest X (its position along the board).");
+def("bodyset.yMin", "Y min you typed", "", "mm", "input", "Replaces the imported lowest Y.");
+def("bodyset.zMin", "Z min you typed", "", "mm", "input", "Replaces the imported lowest Z. A top part sits at the board thickness.");
+def("body.pd", "Pd of the body", "Pd", "W", "calculated", "Heat this body carries: the Pd of its part.");
+def("body.density", "Power density of the body", "", "W/cm²", "calculated", "Pd per cm² of this body's footprint.");
+def("body.check", "Check", "", "", "calculated", "Whether this body is ready for the model: size known, part on the list, linked once, on the board.",
+  "missing geometry: a size or position is blank. RefDes not in register: the part was renamed or deleted. RefDes used twice: two included bodies carry the same part's heat. heat source not included: the body has a part with Pd but is skipped. overhangs board edge: a warning only.");
+def("geo.included", "Bodies included", "", "", "calculated", "Bodies that will be built in the thermal model.");
+def("geo.placed", "Pd placed", "", "W", "calculated", "Heat that has a body to go into: the Pd of every part linked to an included body.");
+def("geo.notPlaced", "Pd with no body", "", "W", "calculated", "Board Pd minus Pd placed. Heat that the model would miss. Should be 0.");
+def("geo.noBody", "Parts without a body", "", "", "calculated", "Parts on tab 1 that no included body carries.");
+def("geo.problems", "Bodies with problems", "", "", "calculated", "Bodies whose check is not OK (an overhang only warns and is not counted).");
 
 // ---------- air and surfaces ----------
 def("surf.pcbTopH", "h, PCB top", "h", "W/(m² K)", "input", "Convection coefficient of the PCB top face.",
@@ -157,6 +186,8 @@ def("surf.partsH", "h, parts", "h", "W/(m² K)", "input", "Convection coefficien
 def("surf.partsEps", "Emissivity, parts", "ε", "", "input", "How well the part surfaces radiate, 0 to 1. Black mould compound about 0.9, bare metal 0.1.", undefined, { range: [0.02, 1] });
 def("hand.surfaceRise", "Surface rise for radiation", "ΔT", "K", "input", "Guess of how much warmer the surfaces are than the air. Radiation h depends on it a little.", undefined, { range: [0, 100] });
 def("simset.kPartsWithoutHeat", "k of parts without Rjc", "k parts", "W/(m K)", "input", "Conductivity given to bodies that have no Rjc. Also used as the block k when a part has no Rjc.", undefined, { range: [0.2, 400] });
+def("hand.compareRun", "Run to compare with", "", "", "input", "Simulation run the hand check is compared with. Blank: the newest run.",
+  "Pick a run without a spreader: the bare board hand check has no plate, so a run with one would not be a fair comparison.");
 
 // ---------- bare board ----------
 def("bb.area", "Board area", "A board", "mm²", "calculated", "L × W of the PCB. Each part gets a share of it.");
@@ -171,6 +202,8 @@ def("bb.rise", "Board rise", "ΔT board", "C", "calculated", "How much the board
 def("bb.boardC", "Board temperature", "T board", "C", "calculated", "Ambient plus the board rise. One number for the whole board: the hand check treats it as one node.",
   "The real board is hotter under the parts and cooler at the edges. The simulation shows that; the hand check gives the average level.");
 def("bb.qBoard", "Heat into the board", "Q board", "W", "calculated", "Of all the Pd, how much goes down into the board (the rest leaves through the part tops).");
+def("bb.boardShare", "Share into the board", "", "", "calculated", "Of all the board's Pd, the share that goes down into the PCB and leaves from its faces.",
+  "High (above about 0.5): the board is the main heatsink, so copper area, thermal vias and board size matter most. Low: most heat leaves from the part tops, so a heatsink or spreader on top helps most.");
 def("bb.fail", "FAIL", "", "", "calculated", "Parts whose hand check Tj is above Tj max.");
 def("bb.tight", "Tight", "", "", "calculated", "Parts with a positive margin below the CRITICAL margin limit.");
 def("bb.compareRun", "Run compared", "", "", "run", "The simulation run the hand check is compared with: the one set on tab 5, else the newest.");
@@ -204,6 +237,8 @@ def("bbp.c", "Back conductance", "C", "W/K", "calculated", "How much heat flows 
 def("bbp.fPd", "f × Pd", "", "W", "calculated", "Heat the part pushes into the board.");
 def("bbp.qBoard", "Into the board", "Q board", "W", "calculated", "Heat this part puts into the board, after the shared board has warmed.");
 def("bbp.qTop", "Out of the top", "Q top", "W", "calculated", "Heat that leaves through the part top.");
+def("bbp.boardShare", "Share into the board", "", "", "calculated", "Share of this part's Pd that goes down into the board. Negative: the board is warmer, so the part takes heat in from its neighbours.");
+def("bbp.topShare", "Share out of the top", "", "", "calculated", "Share of this part's Pd that leaves through its case top into the air.");
 def("bbp.tj", "Tj, hand check", "Tj", "C", "calculated", "Junction temperature from the bare board network.",
   "Better than the Rja estimate because it uses your board size, copper and air. Still a model: compare it with the simulation.");
 def("bbp.margin", "Margin", "", "C", "calculated", "Tj max minus the hand check Tj.");
@@ -290,6 +325,9 @@ def("file.folder", "Folder", "", "", "input", "The project folder. One folder pe
 def("file.project", "project.json", "", "", "input", "Everything you decide. Only this page writes it.");
 def("file.cad", "cad.json", "", "", "cad", "What SolidWorks knows: the import, the build, the changes. Only the macros write it.");
 def("file.results", "results.json", "", "", "run", "The simulation runs. Only the macros write it.");
+
+def("file.partsList", "Parts list", "", "", "input", "A table of parts pasted from Excel or a text file: one row per load, the first row names the columns.",
+  "Columns it reads: RefDes, Part number, Class, Package, Tj max, Rja, Rjc, Rjb, Ta override, Label, Rail, Method, Vin, Iin, Vout, Iout, Efficiency, R, Pd. Other columns are left out. Rows with the same RefDes make one part with several loads. Copy the current list to get the layout.");
 
 export const TERMS = T;
 

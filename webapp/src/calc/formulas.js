@@ -32,6 +32,10 @@ const runOf = (c, name) => (c.results?.runs || []).find(r => r.name === name);
 const runp = (c, key) => { const [run, ref] = key.split("|"); return runOf(c, run)?.parts?.[ref]; };
 const change = (c, id) => (c.cad?.changes || []).find(x => x.id === id);
 const lim = c => c.project.settings.flagLimits;
+const geo = c => c.calc.geometry;
+const geoBody = (c, key) => c.calc.geometry.bodies.find(b => b.key === key);
+const choice = (c, key) => c.project.bodies[key] || {};
+const bodySet = (c, key, f) => { const ch = choice(c, key); return ch.manual ? ch.manual.box?.[f] : ch.override?.[f]; };
 
 // ---------- values ----------
 export const VALUES = {
@@ -58,6 +62,7 @@ export const VALUES = {
   "part.rjc": (c, k) => partOf(c, k)?.rjcCW,
   "part.rjb": (c, k) => partOf(c, k)?.rjbCW,
   "part.taOverride": (c, k) => partOf(c, k)?.taOverrideC,
+  "part.notes": (c, k) => partOf(c, k)?.notes,
   "part.pd": (c, k) => c.calc.register.parts[k]?.pdW,
   "part.ta": (c, k) => c.calc.register.parts[k]?.taC,
   "part.area": (c, k) => c.calc.register.parts[k]?.areaMm2,
@@ -110,6 +115,14 @@ export const VALUES = {
   "import.date": c => c.cad?.import?.date,
   "import.bodies": c => c.cad?.import?.bodies?.length,
   "import.frame": c => c.cad?.import?.frame,
+  "set.pcbNameContains": c => c.project.settings.import?.pcbNameContains,
+  "set.minSize": c => c.project.settings.import?.minSizeMm,
+  "set.topLevelOnly": c => c.project.settings.import?.topLevelOnly,
+  "set.tolPos": c => c.project.settings.tolPosMm,
+  "set.tolSize": c => c.project.settings.tolSizeMm,
+  "pcbov.l": c => c.project.pcbOverride?.l,
+  "pcbov.w": c => c.project.pcbOverride?.w,
+  "pcbov.h": c => c.project.pcbOverride?.h,
   "pcb.l": c => c.calc.pcb.l,
   "pcb.w": c => c.calc.pcb.w,
   "pcb.h": c => c.calc.pcb.h,
@@ -133,6 +146,22 @@ export const VALUES = {
   "body.xMin": (c, k) => bodyRow(c, k)?.box.xMin,
   "body.yMin": (c, k) => bodyRow(c, k)?.box.yMin,
   "body.zMin": (c, k) => bodyRow(c, k)?.box.zMin,
+  "body.pd": (c, k) => geoBody(c, k)?.pdW,
+  "body.density": (c, k) => geoBody(c, k)?.densityWcm2,
+  "body.check": (c, k) => geoBody(c, k)?.check,
+  "bodyset.name": (c, k) => choice(c, k).manual?.name ?? choice(c, k).nameOverride,
+  "bodyset.side": (c, k) => choice(c, k).manual?.side,
+  "bodyset.l": (c, k) => bodySet(c, k, "l"),
+  "bodyset.w": (c, k) => bodySet(c, k, "w"),
+  "bodyset.h": (c, k) => bodySet(c, k, "h"),
+  "bodyset.xMin": (c, k) => bodySet(c, k, "xMin"),
+  "bodyset.yMin": (c, k) => bodySet(c, k, "yMin"),
+  "bodyset.zMin": (c, k) => bodySet(c, k, "zMin"),
+  "geo.included": c => geo(c).included,
+  "geo.placed": c => geo(c).placedPdW,
+  "geo.notPlaced": c => geo(c).notPlacedW,
+  "geo.noBody": c => geo(c).partsWithNoBody,
+  "geo.problems": c => geo(c).problems,
 
   "surf.pcbTopH": c => surf(c).pcbTop?.h,
   "surf.pcbTopEps": c => surf(c).pcbTop?.emissivity,
@@ -141,6 +170,7 @@ export const VALUES = {
   "surf.partsH": c => surf(c).parts?.h,
   "surf.partsEps": c => surf(c).parts?.emissivity,
   "hand.surfaceRise": c => c.project.handCheck?.surfaceRiseK,
+  "hand.compareRun": c => c.project.handCheck?.compareRun,
   "simset.kPartsWithoutHeat": c => c.project.simSetup?.kPartsWithoutHeat,
 
   "bb.area": c => c.calc.bareBoard.board.areaMm2,
@@ -154,6 +184,7 @@ export const VALUES = {
   "bb.rise": c => c.calc.bareBoard.board.riseC,
   "bb.boardC": c => c.calc.bareBoard.board.boardC,
   "bb.qBoard": c => c.calc.bareBoard.board.qBoardW,
+  "bb.boardShare": c => (isNum(c.calc.bareBoard.board.qBoardW) && c.calc.bareBoard.board.totalPdW > 0 ? c.calc.bareBoard.board.qBoardW / c.calc.bareBoard.board.totalPdW : undefined),
   "bb.fail": c => c.calc.bareBoard.board.fail,
   "bb.tight": c => c.calc.bareBoard.board.tight,
   "bb.compareRun": c => c.calc.bareBoard.compare.run,
@@ -185,6 +216,8 @@ export const VALUES = {
   "bbp.fPd": (c, k) => bbp(c, k)?.fPdW,
   "bbp.qBoard": (c, k) => bbp(c, k)?.qBoardW,
   "bbp.qTop": (c, k) => bbp(c, k)?.qTopW,
+  "bbp.boardShare": (c, k) => (isNum(bbp(c, k)?.qBoardW) && bbp(c, k).pdW > 0 ? bbp(c, k).qBoardW / bbp(c, k).pdW : undefined),
+  "bbp.topShare": (c, k) => (isNum(bbp(c, k)?.qTopW) && bbp(c, k).pdW > 0 ? bbp(c, k).qTopW / bbp(c, k).pdW : undefined),
   "bbp.tj": (c, k) => bbp(c, k)?.tjC,
   "bbp.margin": (c, k) => bbp(c, k)?.marginC,
   "bbp.status": (c, k) => bbp(c, k)?.status,
@@ -291,6 +324,19 @@ F["part.ta"] = (c, k) => (isNum(partOf(c, k)?.taOverrideC)
   ? { text: "Ta = Ta override", inputs: [["Ta override", "part.taOverride", k]], fn: v => v["Ta override"] }
   : { text: "Ta = ambient", inputs: [["ambient", "board.ambient", ""]], fn: v => v.ambient, note: "No Ta override for this part, so it sees the board ambient." });
 F["part.area"] = (c, k) => { const b = bodyOfRef(c, k); return b && { text: "A = L × W", inputs: [["L", "body.l", b.key], ["W", "body.w", b.key]], fn: v => v.L * v.W, note: `Footprint of its body, ${b.name}.` }; };
+F["body.pd"] = (c, k) => { const r = bodyRow(c, k)?.refDes; return r && { text: "Pd = Pd of its part", inputs: [["Pd", "part.pd", r]], fn: v => N(v.Pd) }; };
+F["body.density"] = (c, k) => (isNum(geoBody(c, k)?.densityWcm2)
+  ? { text: "Density = Pd / (L × W / 100)", inputs: [["Pd", "body.pd", k], ["L", "body.l", k], ["W", "body.w", k]], fn: v => v.Pd / (v.L * v.W / 100), note: "100 mm² = 1 cm²." } : null);
+F["body.check"] = (c, k) => ({ text: "OK unless: missing geometry, RefDes not in register, RefDes used twice, heat source not included, or overhangs board edge (in this order)",
+  inputs: [["L", "body.l", k], ["W", "body.w", k], ["H", "body.h", k], ["X min", "body.xMin", k], ["Y min", "body.yMin", k], ["Part", "body.refDes", k], ["Include", "body.include", k], ["PCB L", "pcb.l", ""], ["PCB W", "pcb.w", ""]] });
+F["geo.included"] = () => ({ text: "Number of bodies with Include ticked", inputs: [] });
+F["geo.placed"] = c => {
+  const ins = c.calc.bodies.filter(b => b.include && b.name && b.refDes).map(b => [`Pd(${b.refDes})`, "body.pd", b.key]);
+  return { text: "Pd placed = sum of Pd of every included body with a part", expr: ins.map(x => x[0]).join(" + ") || "0", inputs: ins, fn: v => ins.reduce((a, x) => a + N(v[x[0]]), 0) };
+};
+F["geo.notPlaced"] = () => ({ text: "Pd with no body = Board Pd - Pd placed", inputs: [["Board Pd", "board.totalPd", ""], ["Pd placed", "geo.placed", ""]], fn: v => v["Board Pd"] - v["Pd placed"] });
+F["geo.noBody"] = () => ({ text: "Number of parts that no included body carries", inputs: [] });
+F["geo.problems"] = () => ({ text: "Number of bodies whose check is not OK (overhangs only warn)", inputs: [] });
 F["part.rise"] = (c, k) => ({ text: "ΔT = Pd × Rja", inputs: [["Pd", "part.pd", k], ["Rja", "part.rja", k]], fn: v => v.Pd * v.Rja });
 F["part.tjEst"] = (c, k) => ({ text: "Tj est = Ta + Pd × Rja", inputs: [["Ta", "part.ta", k], ["Pd", "part.pd", k], ["Rja", "part.rja", k]], fn: v => v.Ta + v.Pd * v.Rja });
 F["part.margin"] = (c, k) => ({ text: "Margin = Tj max - Tj est", inputs: [["Tj max", "part.tjMax", k], ["Tj est", "part.tjEst", k]], fn: v => v["Tj max"] - v["Tj est"] });
@@ -442,6 +488,9 @@ F["bbp.c"] = (c, k) => (isNum(bbp(c, k)?.rTopCW)
   : { text: "C = 0 (no top path)", inputs: [], fn: () => 0 });
 F["bbp.fPd"] = (c, k) => ({ text: "f × Pd", expr: "f × Pd", inputs: [["f", "bbp.f", k], ["Pd", "bbp.pd", k]], fn: v => v.f * v.Pd });
 F["bbp.qBoard"] = (c, k) => ({ text: "Q board = f × Pd - C × ΔT board", inputs: [["f", "bbp.f", k], ["Pd", "bbp.pd", k], ["C", "bbp.c", k], ["ΔT board", "bb.rise", ""]], fn: v => v.f * v.Pd - v.C * v["ΔT board"] });
+F["bbp.boardShare"] = (c, k) => ({ text: "Share = Q board / Pd", inputs: [["Q board", "bbp.qBoard", k], ["Pd", "bbp.pd", k]], fn: v => v["Q board"] / v.Pd });
+F["bbp.topShare"] = (c, k) => ({ text: "Share = Q top / Pd", inputs: [["Q top", "bbp.qTop", k], ["Pd", "bbp.pd", k]], fn: v => v["Q top"] / v.Pd });
+F["bb.boardShare"] = () => ({ text: "Share = Q board / Pd", inputs: [["Q board", "bb.qBoard", ""], ["Pd", "bb.totalPd", ""]], fn: v => v["Q board"] / v.Pd, note: "Q board: the heat all parts put into the board. Pd: the board's total Pd." });
 F["bbp.qTop"] = (c, k) => ({ text: "Q top = Pd - Q board", inputs: [["Pd", "bbp.pd", k], ["Q board", "bbp.qBoard", k]], fn: v => v.Pd - v["Q board"] });
 F["bbp.tj"] = (c, k) => (isNum(bbp(c, k)?.rTopCW)
   ? { text: "Tj = Ta + Q top × R top", inputs: [["Ta", "board.ambient", ""], ["Q top", "bbp.qTop", k], ["R top", "bbp.rTop", k]], fn: v => v.Ta + v["Q top"] * v["R top"] }
@@ -525,11 +574,12 @@ export function instances(ctx) {
   const out = [];
   const add = (prefix, keys) => { for (const t of Object.keys(VALUES)) if (t.startsWith(prefix + ".")) for (const k of keys) out.push([t, k]); };
   const { project: p, calc } = ctx;
-  for (const t of Object.keys(VALUES)) if (/^(const|board|limit|rails|triage|import|pcb|stack|surf|hand|simset|bb|build)\./.test(t) && t !== "buildbody.status") out.push([t, ""]);
+  for (const t of Object.keys(VALUES)) if (/^(const|board|limit|rails|triage|import|set|pcb|pcbov|stack|geo|surf|hand|simset|bb|build)\./.test(t) && t !== "buildbody.status") out.push([t, ""]);
   add("part", p.parts.map(x => x.refDes));
   add("load", p.parts.flatMap(x => x.loads.map(l => l.id)));
   add("rail", calc.rails.rails.map(r => r.rail));
   add("body", calc.bodies.map(b => b.key));
+  add("bodyset", calc.bodies.map(b => b.key));
   add("bbp", p.parts.map(x => x.refDes));
   add("buildbody", (ctx.cad?.build?.bodies || []).map(b => b.key));
   const sides = ["top", "bottom"].filter(s => p.spreader?.[s] && calc.spreader[s]);

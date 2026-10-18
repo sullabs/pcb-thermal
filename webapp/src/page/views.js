@@ -1,11 +1,17 @@
 // Tab contents. Every value is a <V> and every label a <L> with a term id from the catalogue, so it has a hover
 // text, opens the Explain panel, and shows its formula when Show formulas is on (tools/test_w4.mjs checks this).
-// The full tabs 1 to 5 come with W5, the SolidWorks cards with W7.
+// Tabs that keep their own view state (open editors, the selected part) render a small component, because the
+// page calls each tab as a plain function. The SolidWorks cards come with W7.
 
+import { useState, useMemo, useContext } from "preact/hooks";
 import { html, NumField, TextField, Select, Check, Card } from "./ui.js";
-import { V, L, marked } from "./explain.js";
+import { V, L, marked, Explain, fmtValue } from "./explain.js";
 import { CLASSES, METHODS, CLASS_METHOD } from "../calc/constants.js";
-import { addPart, duplicatePart, deletePart, renameRefDes, nextLoadId } from "./model.js";
+import { addPart, duplicatePart, deletePart, renameRefDes, nextLoadId, setIn, withSimSetup, addManualBody } from "./model.js";
+import { readPartsList, applyPartsList, partsListText, suggestLinks, LIST_HEADER } from "./lists.js";
+import { valueOf } from "../calc/formulas.js";
+import { TERMS } from "../terms/catalogue.js";
+import { LEARN } from "../terms/learn.js";
 import { nextStep, unticked } from "./tabs.js";
 import { isNum } from "../calc/util.js";
 
@@ -48,7 +54,38 @@ export function ProjectTab(c) {
 }
 export const stateWord = s => ({ locked: "locked", ready: "to do", done: "done", attention: "needs attention" }[s.status]);
 
+// ---------- Learn mode ----------
+// "What this step is for" and "What to look at" at the top of a tab (design 5.3).
+export function LearnBox({ id }) {
+  const l = LEARN[id];
+  if (!l) return null;
+  return html`<section class="learn" aria-label="Learn">
+    <p><b>What this step is for.</b> ${marked(l.purpose)}</p>
+    <p class="learn-h"><b>What to look at</b></p>
+    <ul>${l.look.map(x => html`<li>${marked(x)}</li>`)}</ul>
+  </section>`;
+}
+const pctV = (t, k, x) => html`<${V} nofx t=${t} k=${k} v=${isNum(x) ? `${Math.round(x * 100)} %` : undefined} />`;
+
 // ---------- 1 Parts and power ----------
+// What each power method needs (calc/power.js). `used`: fields the method reads; `need`: the short list to fill.
+const METHOD_NEEDS = {
+  "LDO / linear reg": { used: ["vinV", "iinA", "voutV", "ioutA"], need: ["vinV", "voutV", "ioutA"], text: "Vin, Vout and Iout (or Vin, Iin, Vout and Iout)" },
+  "Switching regulator": { used: ["vinV", "iinA", "voutV", "ioutA", "efficiency"], need: ["voutV", "ioutA", "efficiency"], text: "Vout, Iout and efficiency (or Vin, Iin, Vout and Iout)" },
+  "Digital load (V x I)": { used: ["vinV", "iinA", "voutV", "ioutA"], need: ["vinV", "iinA"], text: "Vin and Iin (Vout and Iout only if it passes power on)" },
+  "Resistive (I squared R)": { used: ["iinA", "ioutA", "rOhm"], need: ["iinA", "rOhm"], text: "a current (Iin or Iout) and R" },
+  "Manual entry": { used: [], need: ["pdMeasuredW"], text: "Pd measured" },
+};
+const LOAD_FIELDS = [
+  ["load.vin", "vinV", "V", "Vin", {}],
+  ["load.iin", "iinA", "A", "Iin", { min: 0 }],
+  ["load.vout", "voutV", "V", "Vout", {}],
+  ["load.iout", "ioutA", "A", "Iout", { min: 0 }],
+  ["load.eff", "efficiency", "", "Efficiency (0 to 1)", { minEx: 0, max: 1 }],
+  ["load.r", "rOhm", "ohm", "R", { min: 0 }],
+  ["load.pdMeas", "pdMeasuredW", "W", "Pd measured", { min: 0 }],
+];
+
 export function PartsTab(c) {
   const { project: p, calc, locked } = c;
   const reg = calc.register;
@@ -59,6 +96,7 @@ export function PartsTab(c) {
   return html`
     <div class="toolbar">
       <button disabled=${locked} onClick=${() => c.editFn("Add part", addPart)}>Add part</button>
+      <${PasteList} c=${c} />
       <span class="hint"><${V} t="triage.parts" /> parts, <${L} t="board.totalPd" /> <${V} t="board.totalPd" d=${2} u /></span>
     </div>
     ${p.parts.map((x, i) => {
@@ -73,7 +111,7 @@ export function PartsTab(c) {
               onChange=${e => { const v = e.currentTarget.value.trim(); if (v && v !== x.refDes) c.editFn(`RefDes ${x.refDes} to ${v}`, q => renameRefDes(q, x.refDes, v)); else e.currentTarget.value = x.refDes; }} />
             ${dup && html`<span class="err">used twice</span>`}
           </span>
-          <${TextField} term="part.partNumber" tkey=${k} value=${x.partNumber} label="Part number" disabled=${locked} onCommit=${v => setPart(i, "partNumber", "Part number", v)} />
+          <${TextField} term="part.partNumber" tkey=${k} value=${x.partNumber} label="Part number" placeholder="part number" disabled=${locked} onCommit=${v => setPart(i, "partNumber", "Part number", v)} />
           <${Select} term="part.class" tkey=${k} value=${x.class} options=${CLASSES} label="Class" blankText="(pick class)" disabled=${locked} onCommit=${v => setPart(i, "class", "Class", v)} />
           <span class="result"><${L} t="part.pd" k=${k}>Pd</${L}> <b><${V} t="part.pd" k=${k} d=${3} u /></b> · <${L} t="part.tjEst" k=${k}>Tj est</${L}> <b><${V} t="part.tjEst" k=${k} d=${1} u /></b> · <${L} t="part.margin" k=${k}>margin</${L}> <b><${V} t="part.margin" k=${k} d=${1} u /></b> <${V} t="part.flag" k=${k} /></span>
           <span class="actions">
@@ -86,49 +124,98 @@ export function PartsTab(c) {
           <label><${L} t="part.tjMax" k=${k}>Tj max</${L}> <${NumField} term="part.tjMax" tkey=${k} value=${x.tjMaxC} unit="C" label="Tj max" disabled=${locked} rule=${{ min: -273.15 }} onCommit=${v => setPart(i, "tjMaxC", "Tj max", v)} /></label>
           <label><${L} t="part.rja" k=${k}>Rja</${L}> <${NumField} term="part.rja" tkey=${k} value=${x.rjaCW} unit="CW" label="Rja" disabled=${locked} rule=${{ minEx: 0 }} onCommit=${v => setPart(i, "rjaCW", "Rja", v)} /></label>
           <label><${L} t="part.rjc" k=${k}>Rjc</${L}> <${NumField} term="part.rjc" tkey=${k} value=${x.rjcCW} unit="CW" label="Rjc" disabled=${locked} rule=${{ minEx: 0 }} onCommit=${v => setPart(i, "rjcCW", "Rjc", v)} /></label>
-          <label><${L} t="part.rjb" k=${k}>Rjb</${L}> <${NumField} term="part.rjb" tkey=${k} value=${x.rjbCW} unit="CW" label="Rjb" disabled=${locked} rule=${{ minEx: 0 }} onCommit=${v => setPart(i, "rjbCW", "Rjb", v)} /></label>
-          <label><${L} t="part.taOverride" k=${k} /> <${NumField} term="part.taOverride" tkey=${k} value=${x.taOverrideC} unit="C" label="Ta override" disabled=${locked} rule=${{ min: -273.15 }} onCommit=${v => setPart(i, "taOverrideC", "Ta override", v)} /></label>
+          <label><${L} t="part.rjb" k=${k}>Rjb</${L}> <${NumField} term="part.rjb" tkey=${k} value=${x.rjbCW} unit="CW" label="Rjb" disabled=${locked} rule=${{ minEx: 0 }} placeholder="optional" onCommit=${v => setPart(i, "rjbCW", "Rjb", v)} /></label>
+          <label><${L} t="part.taOverride" k=${k} /> <${NumField} term="part.taOverride" tkey=${k} value=${x.taOverrideC} unit="C" label="Ta override" disabled=${locked} rule=${{ min: -273.15 }} placeholder="optional" onCommit=${v => setPart(i, "taOverrideC", "Ta override", v)} /></label>
           <span class="calcs"><${L} t="part.ta" k=${k}>Ta</${L}> <${V} t="part.ta" k=${k} d=${1} u /> · <${L} t="part.area" k=${k}>A</${L}> <${V} t="part.area" k=${k} d=${1} u /> · <${L} t="part.density" k=${k}>density</${L}> <${V} t="part.density" k=${k} d=${2} u /> · <${L} t="part.share" k=${k}>share</${L}> <${V} t="part.share" k=${k} d=${3} /></span>
+          <label class="grow"><${L} t="part.notes" k=${k} /> <${TextField} term="part.notes" tkey=${k} value=${x.notes} label="Part notes" width="100%" placeholder="datasheet page, load case" disabled=${locked} onCommit=${v => setPart(i, "notes", "Part notes", v)} /></label>
         </div>
         ${r.flag && r.flag !== "Minor" && html`<p class="why"><${L} t="part.why" k=${k} />: <${V} t="part.why" k=${k} /></p>`}
         <${Scroll}><table class="grid loads">
-          <thead><tr>${["load.label", "load.rail", "load.method", "load.vin", "load.iin", "load.vout", "load.iout", "load.eff", "load.r", "load.pdMeas", "load.pd"].map(t => html`<th><${L} t=${t} /></th>`)}<th></th></tr></thead>
+          <thead><tr>${["load.label", "load.rail", "load.method", ...LOAD_FIELDS.map(f => f[0]), "load.pd"].map(t => html`<th><${L} t=${t} /></th>`)}<th></th></tr></thead>
           <tbody>${x.loads.map((l, j) => {
             const lr = reg.loads[l.id] || {};
             const lk = l.id;
+            const needs = METHOD_NEEDS[lr.method];
+            const missing = !isNum(lr.pdW);
+            const cls = f => (!needs || f === "pdMeasuredW" ? (missing && needs?.need.includes(f) ? "need" : "")
+              : missing && needs.need.includes(f) && !isNum(l[f]) ? "need" : needs.used.includes(f) ? "" : "unused");
             return html`<tr key=${l.id}>
               <td><${TextField} term="load.label" tkey=${lk} value=${l.label} label="Load label" width="10em" disabled=${locked} onCommit=${v => setLoad(i, j, "label", "Load label", v)} /></td>
               <td><${TextField} term="load.rail" tkey=${lk} value=${l.rail} label="Rail" width="6em" disabled=${locked} onCommit=${v => setLoad(i, j, "rail", "Rail", v)} /></td>
               <td><${Select} term="load.method" tkey=${lk} value=${l.method} options=${METHODS} label="Method" blankText=${method ? `(class: ${method})` : "(class default)"} disabled=${locked} onCommit=${v => setLoad(i, j, "method", "Method", v)} /></td>
-              <td><${NumField} term="load.vin" tkey=${lk} value=${l.vinV} unit="V" label="Vin" width="4.5em" disabled=${locked} onCommit=${v => setLoad(i, j, "vinV", "Vin", v)} /></td>
-              <td><${NumField} term="load.iin" tkey=${lk} value=${l.iinA} unit="A" label="Iin" width="4.5em" disabled=${locked} rule=${{ min: 0 }} onCommit=${v => setLoad(i, j, "iinA", "Iin", v)} /></td>
-              <td><${NumField} term="load.vout" tkey=${lk} value=${l.voutV} unit="V" label="Vout" width="4.5em" disabled=${locked} onCommit=${v => setLoad(i, j, "voutV", "Vout", v)} /></td>
-              <td><${NumField} term="load.iout" tkey=${lk} value=${l.ioutA} unit="A" label="Iout" width="4.5em" disabled=${locked} rule=${{ min: 0 }} onCommit=${v => setLoad(i, j, "ioutA", "Iout", v)} /></td>
-              <td><${NumField} term="load.eff" tkey=${lk} value=${l.efficiency} unit="" label="Efficiency (0 to 1)" width="4em" disabled=${locked} rule=${{ minEx: 0, max: 1 }} onCommit=${v => setLoad(i, j, "efficiency", "Efficiency", v)} /></td>
-              <td><${NumField} term="load.r" tkey=${lk} value=${l.rOhm} unit="ohm" label="R" width="4.5em" disabled=${locked} rule=${{ min: 0 }} onCommit=${v => setLoad(i, j, "rOhm", "R", v)} /></td>
-              <td><${NumField} term="load.pdMeas" tkey=${lk} value=${l.pdMeasuredW} unit="W" label="Pd measured" width="4.5em" disabled=${locked} rule=${{ min: 0 }} onCommit=${v => setLoad(i, j, "pdMeasuredW", "Pd measured", v)} /></td>
-              <td class="num">${isNum(lr.pdW) ? html`<${V} t="load.pd" k=${lk} d=${3} />` : html`<span class="warn"><${V} t="load.problem" k=${lk} /></span>`}</td>
+              ${LOAD_FIELDS.map(([t, f, unit, label, rule]) => html`<td><${NumField} term=${t} tkey=${lk} value=${l[f]} unit=${unit} label=${label} width=${f === "efficiency" ? "4em" : "4.5em"} cls=${cls(f)} disabled=${locked} rule=${rule}
+                onCommit=${v => setLoad(i, j, f, label, v)} /></td>`)}
+              <td class="num">${isNum(lr.pdW) ? html`<${V} t="load.pd" k=${lk} d=${3} />` : html`<span class="warn"><${V} t="load.problem" k=${lk} /></span>${needs ? html`<span class="needs">needs ${marked(needs.text)}</span>` : ""}`}</td>
               <td>${x.loads.length > 1 && html`<button class="small" disabled=${locked} title="Delete this load" onClick=${() => c.editFn("Delete load", q => ({ ...q, parts: q.parts.map(y => (y.id === x.id ? { ...y, loads: y.loads.filter(z => z.id !== l.id) } : y)) }))}>x</button>`}</td>
             </tr>`;
           })}</tbody>
         </table><//>
         <button class="small" disabled=${locked} onClick=${() => c.editFn(`Add load to ${x.refDes}`, q => ({ ...q, parts: q.parts.map(y => (y.id === x.id ? { ...y, loads: [...y.loads, { id: nextLoadId(y) }] } : y)) }))}>Add load</button>
+        <span class="hint"> One load per heat source in the part, for example each buck of a ${marked("PMIC")}.</span>
       </section>`;
     })}
-    ${!p.parts.length && html`<p class="hint">No parts yet. Press Add part, then type the ${marked("RefDes")} from the schematic.</p>`}`;
+    ${!p.parts.length && html`<p class="hint">No parts yet. Press Add part, then type the ${marked("RefDes")} from the schematic. Or paste the whole list from Excel.</p>`}`;
+}
+
+// Paste a parts list (from Excel, tab separated, or a CSV text). One line per load; lines with the same RefDes
+// make one part.
+function PasteList({ c }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [copied, setCopied] = useState("");
+  const list = useMemo(() => (text.trim() ? readPartsList(text) : null), [text]);
+  const refs = list ? [...new Set(list.rows.map(r => r.part.refDes))] : [];
+  const have = new Set(c.project.parts.map(x => x.refDes));
+  const add = () => {
+    let out;
+    c.editFn(`Paste ${refs.length} parts`, q => { out = applyPartsList(q, list); return out.project; });
+    setOpen(false); setText("");
+  };
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(partsListText(c.project)); setCopied("Copied. Paste it into Excel, fill it, then paste it back here."); }
+    catch { setCopied("The browser did not allow copying."); }
+  };
+  if (!open) return html`<button disabled=${c.locked} onClick=${() => setOpen(true)}>Paste a parts list</button>`;
+  return html`<div class="paste card" data-term="file.partsList">
+    <h3>Paste a parts list</h3>
+    <p class="hint">Copy the cells from Excel (first row: the column names) and paste them here. One row per load: rows with the same ${marked("RefDes")} make one part. Columns read: <code>${LIST_HEADER.join(", ")}</code>. Units may be typed in the cells (mA, mW, oz). A RefDes already on the list gets the new values.</p>
+    <textarea rows="8" aria-label="Parts list" value=${text} onInput=${e => setText(e.currentTarget.value)} placeholder=${LIST_HEADER.join("\t")}></textarea>
+    ${list && html`<p class="hint">${refs.length} parts (${refs.filter(r => !have.has(r)).length} new, ${refs.filter(r => have.has(r)).length} already on the list), ${list.rows.filter(r => Object.keys(r.load).length).length} loads.</p>
+      ${list.problems.length > 0 && html`<ul class="warn">${list.problems.slice(0, 12).map(x => html`<li>${marked(x)}</li>`)}</ul>`}`}
+    <p class="hint">
+      <button class="primary" disabled=${!refs.length} onClick=${add}>Add to the list</button>
+      <button onClick=${copy}>Copy the current list</button>
+      <button onClick=${() => { setOpen(false); setText(""); }}>Cancel</button>
+      ${copied && html` ${copied}`}
+    </p>
+  </div>`;
 }
 
 // ---------- 2 Import geometry ----------
 export function ImportTab(c) {
-  const { cad, calc } = c;
+  const { project: p, cad, calc, locked } = c;
   const imp = cad?.import;
+  const s = p.settings;
+  const set = (path, label, v) => c.edit(label, ["settings", ...path], v, "settings." + path.join("."));
   return html`
     <${Card} title="In SolidWorks: 2 Import STEP">
       <p>${marked("Import STEP reads the STEP file named on tab 0, finds the PCB and one body per part, and writes them to cad.json. The page reloads that file on its own when the macro has finished.")}</p>
+      <${Facts} ctx=${c} rows=${[[, "board.stepFile"]]} />
+      ${!p.board.stepFile && html`<p class="warn">No STEP file named yet. Type it on tab 0.</p>`}
+    <//>
+    <${Card} title="Import settings">
+      <div class="form">
+        <label><${L} t="set.pcbNameContains" /> <${TextField} term="set.pcbNameContains" value=${s.import.pcbNameContains} label="PCB body name has" required width="8em" disabled=${locked} onCommit=${v => set(["import", "pcbNameContains"], "PCB body name", v)} /></label>
+        <label><${L} t="set.minSize" /> <${NumField} term="set.minSize" value=${s.import.minSizeMm} unit="mm" label="Smallest body" rule=${{ required: true, min: 0 }} disabled=${locked} onCommit=${v => v !== undefined && set(["import", "minSizeMm"], "Smallest body", v)} /></label>
+        <label><${L} t="set.topLevelOnly" /> <span class="field"><${Check} term="set.topLevelOnly" value=${s.import.topLevelOnly} label="One body per component" disabled=${locked} onCommit=${v => set(["import", "topLevelOnly"], "One body per component", v)} /></span></label>
+        <label><${L} t="set.tolPos" /> <${NumField} term="set.tolPos" value=${s.tolPosMm} unit="mm" label="Move tolerance" rule=${{ required: true, min: 0 }} disabled=${locked} onCommit=${v => v !== undefined && set(["tolPosMm"], "Move tolerance", v)} /></label>
+        <label><${L} t="set.tolSize" /> <${NumField} term="set.tolSize" value=${s.tolSizeMm} unit="mm" label="Size tolerance" rule=${{ required: true, min: 0 }} disabled=${locked} onCommit=${v => v !== undefined && set(["tolSizeMm"], "Size tolerance", v)} /></label>
+      </div>
+      <p class="hint">The macro reads these when it runs. Change them, save, then run Import STEP again.</p>
     <//>
     ${imp ? html`
       <${Card} title="What the import found">
-        <${Facts} ctx=${c} rows=${[[, "import.model"], [, "import.date", "", undefined, date(imp.date)], [, "pcb.l", "", 1], [, "pcb.w", "", 1], [, "pcb.h", "", 2], [, "pcb.kxy", "", 1], [, "pcb.kz", "", 3], [, "import.bodies"], [, "import.frame"]]} />
+        <${Facts} ctx=${c} rows=${[[, "import.model"], [, "import.date", "", undefined, date(imp.date)], [, "pcb.l", "", 1], [, "pcb.w", "", 1], [, "pcb.h", "", 2], [, "import.bodies"], [, "import.frame"]]} />
         <${BoardDrawing} calc=${calc} />
       <//>` : html`<p class="hint">No import yet.</p>`}`;
 }
@@ -148,32 +235,128 @@ export function BoardDrawing({ calc }) {
 }
 
 // ---------- 3 Link bodies ----------
+const BOX_FIELDS = [["l", "L"], ["w", "W"], ["h", "H"], ["xMin", "X min"], ["yMin", "Y min"], ["zMin", "Z min"]];
+const SIDES = ["Top", "Bottom", "Board", "Through"];
+
 export function LinkTab(c) {
+  return html`<${LinkView} c=${c} />`;
+}
+function LinkView({ c }) {
   const { project: p, calc, locked } = c;
+  const [show, setShow] = useState("all");
+  const [open, setOpen] = useState(null);
   const refs = p.parts.map(x => x.refDes);
   const noBody = p.parts.filter(x => isNum(calc.register.parts[x.refDes]?.pdW) && !calc.bodies.some(b => b.refDes === x.refDes)).map(x => x.refDes);
+  const sugg = suggestLinks(p, calc);
+  const suggOf = Object.fromEntries(sugg.map(s => [s.key, s]));
+  const geoOf = Object.fromEntries(calc.geometry.bodies.map(b => [b.key, b]));
+  const shown = calc.bodies.filter(b => show === "all" || (show === "included" && b.include) || (show === "linked" && b.refDes)
+    || (show === "problems" && geoOf[b.key]?.check && geoOf[b.key].check !== "OK"));
+  const applyAll = () => c.editFn(`Link ${sugg.length} suggested bodies`, q => sugg.reduce((a, s) => setIn(setIn(a, ["bodies", s.key, "refDes"], s.refDes), ["bodies", s.key, "include"], true), q));
+  const addBody = () => { let key; c.editFn("Add a body by hand", q => { const r = addManualBody(q, calc.pcb.h); key = r.key; return r.project; }); setTimeout(() => setOpen(key)); };
   return html`
-    ${noBody.length > 0 && html`<p class="warn">${marked(`Parts with Pd and no body: ${noBody.join(", ")}. Link each to its body below.`)}</p>`}
-    <${Scroll}><table class="grid">
-      <thead><tr><th><${L} t="body.include" /></th><th><${L} t="body.name" /></th><th><${L} t="body.side" /></th><th><${L} t="body.refDes" /></th><th class="num"><${L} t="body.l" /></th><th class="num"><${L} t="body.w" /></th><th class="num"><${L} t="body.h" /></th></tr></thead>
-      <tbody>${calc.bodies.map(b => html`<tr key=${b.key} class=${b.include ? "" : "dim"}>
-        <td><${Check} term="body.include" tkey=${b.key} value=${b.include} label=${"Include " + b.name} disabled=${locked} onCommit=${v => c.edit(`Include ${shortName(b.name)}`, ["bodies", b.key, "include"], v)} /></td>
-        <td><${V} t="body.name" k=${b.key} v=${shortName(b.name)} />${b.manual ? html` <span class="hint">(typed in)</span>` : ""}</td>
-        <td><${V} t="body.side" k=${b.key} /></td>
-        <td><${Select} term="body.refDes" tkey=${b.key} value=${b.refDes} options=${refs} label="RefDes" blankText="(none)" disabled=${locked} onCommit=${v => c.edit(`Link ${shortName(b.name)}`, ["bodies", b.key, "refDes"], v)} /></td>
-        <td class="num"><${V} t="body.l" k=${b.key} d=${2} /></td><td class="num"><${V} t="body.w" k=${b.key} d=${2} /></td><td class="num"><${V} t="body.h" k=${b.key} d=${2} /></td>
-      </tr>`)}</tbody>
-    </table><//>`;
+    ${noBody.length > 0 && html`<p class="warn">${marked(`Parts with Pd and no body: ${noBody.join(", ")}. Link each to its body below, or add a body by hand.`)}</p>`}
+    <div class="toolbar">
+      ${sugg.length > 0 && html`<button class="primary" disabled=${locked} onClick=${applyAll} title=${sugg.map(s => `${s.refDes}: ${s.why}`).join("\n")}>Link the ${sugg.length} suggested bodies</button>`}
+      <button disabled=${locked} onClick=${addBody}>Add a body by hand</button>
+      <span class="hint">Show:</span>
+      ${[["all", "all"], ["included", "included"], ["linked", "with a part"], ["problems", "with a problem"]].map(([v, t]) => html`<button class=${`small ${show === v ? "on" : ""}`} aria-pressed=${show === v} onClick=${() => setShow(v)}>${t}</button>`)}
+    </div>
+    <${Scroll}><table class="grid bodies">
+      <thead><tr><th><${L} t="body.include" /></th><th><${L} t="body.name" /></th><th><${L} t="body.side" /></th><th><${L} t="body.refDes" /></th>
+        ${["body.l", "body.w", "body.h", "body.pd", "body.density"].map(t => html`<th class="num"><${L} t=${t} /></th>`)}<th><${L} t="body.check" /></th><th></th></tr></thead>
+      <tbody>${shown.map(b => {
+        const s = suggOf[b.key];
+        const chk = geoOf[b.key]?.check;
+        return html`<tr key=${b.key} class=${b.include ? "" : "dim"}>
+          <td><${Check} term="body.include" tkey=${b.key} value=${b.include} label=${"Include " + b.name} disabled=${locked} onCommit=${v => c.edit(`Include ${shortName(b.name)}`, ["bodies", b.key, "include"], v)} /></td>
+          <td><${V} t="body.name" k=${b.key} v=${shortName(b.name)} />${b.manual ? html` <span class="hint">(typed in)</span>` : ""}</td>
+          <td><${V} t="body.side" k=${b.key} /></td>
+          <td><${Select} term="body.refDes" tkey=${b.key} value=${b.refDes} options=${refs} label="RefDes" blankText="(none)" disabled=${locked} onCommit=${v => c.editFn(`Link ${shortName(b.name)}`, q => { const r = setIn(q, ["bodies", b.key, "refDes"], v); return v ? setIn(r, ["bodies", b.key, "include"], true) : r; })} />
+            ${s && html` <button class="small sugg" disabled=${locked} title=${"Suggested: " + s.why} onClick=${() => c.editFn(`Link ${shortName(b.name)} to ${s.refDes}`, q => setIn(setIn(q, ["bodies", b.key, "refDes"], s.refDes), ["bodies", b.key, "include"], true))}>${s.refDes}?</button>`}</td>
+          <td class="num"><${V} t="body.l" k=${b.key} d=${2} /></td><td class="num"><${V} t="body.w" k=${b.key} d=${2} /></td><td class="num"><${V} t="body.h" k=${b.key} d=${2} /></td>
+          <td class="num">${b.refDes ? html`<${V} t="body.pd" k=${b.key} d=${3} />` : ""}</td><td class="num">${b.refDes ? html`<${V} t="body.density" k=${b.key} d=${2} />` : ""}</td>
+          <td class=${chk && chk !== "OK" ? "warn" : ""}><${V} t="body.check" k=${b.key} /></td>
+          <td><button class="small" onClick=${() => setOpen(open === b.key ? null : b.key)} aria-expanded=${open === b.key}>${open === b.key ? "Close" : "Edit"}</button></td>
+        </tr>${open === b.key && html`<tr class="edit"><td colspan="11"><${BodyEdit} c=${c} b=${b} close=${() => setOpen(null)} /></td></tr>`}`;
+      })}</tbody>
+    </table><//>
+    <${Card} title="Bodies and heat">
+      <${Facts} ctx=${c} rows=${[[, "geo.included"], [, "board.totalPd", "", 3], [, "geo.placed", "", 3], [, "geo.notPlaced", "", 3], [, "geo.noBody"], [, "geo.problems"]]} />
+    <//>
+    <${PcbCard} c=${c} />`;
+}
+
+function BodyEdit({ c, b, close }) {
+  const { project: p, cad, locked } = c;
+  const imported = cad?.import?.bodies?.find(x => x.key === b.key);
+  const base = b.manual ? ["bodies", b.key, "manual"] : ["bodies", b.key];
+  const boxPath = f => (b.manual ? [...base, "box", f] : [...base, "override", f]);
+  const ch = p.bodies[b.key] || {};
+  return html`<div class="form body-edit">
+    <label><${L} t="bodyset.name" k=${b.key} /> <${TextField} term="bodyset.name" tkey=${b.key} value=${b.manual ? ch.manual.name : ch.nameOverride} label="Body name" width="18em" required=${b.manual}
+      placeholder=${imported ? shortName(imported.name) : ""} disabled=${locked} onCommit=${v => c.edit("Body name", b.manual ? [...base, "name"] : [...base, "nameOverride"], v, `bodies.${b.key}.name`)} /></label>
+    ${b.manual && html`<label><${L} t="bodyset.side" k=${b.key} /> <${Select} term="bodyset.side" tkey=${b.key} value=${ch.manual.side} options=${SIDES} label="Side" disabled=${locked} onCommit=${v => c.edit("Body side", [...base, "side"], v)} /></label>`}
+    ${BOX_FIELDS.map(([f, lab]) => html`<label><${L} t=${"bodyset." + f} k=${b.key} /> <${NumField} term=${"bodyset." + f} tkey=${b.key} value=${b.manual ? ch.manual.box[f] : ch.override?.[f]} unit="mm" label=${lab}
+      placeholder=${imported && isNum(imported.box?.[f]) ? String(+imported.box[f].toFixed(3)) : ""} rule=${{ required: !!b.manual, ...(["l", "w", "h"].includes(f) ? { minEx: 0 } : {}) }} disabled=${locked}
+      onCommit=${v => (v !== undefined || !b.manual) && c.edit(`${lab} of ${shortName(b.name)}`, boxPath(f), v, `bodies.${b.key}.${f}`)} /></label>`)}
+    <p class="hint wide">${b.manual ? "A body you added: it is built like an imported one." : "Blank fields keep the imported value (shown in grey). Typed values replace it in the model."}
+      ${!b.manual && (ch.override || ch.nameOverride) && html` <button class="small" disabled=${locked} onClick=${() => c.editFn(`Clear typed values of ${shortName(b.name)}`, q => setIn(setIn(q, [...base, "override"], undefined), [...base, "nameOverride"], undefined))}>Clear typed values</button>`}
+      ${b.manual && html` <button class="small danger" disabled=${locked} onClick=${() => { close(); c.editFn(`Delete ${shortName(b.name)}`, q => setIn(q, ["bodies", b.key], undefined)); }}>Delete this body</button>`}</p>
+  </div>`;
+}
+
+function PcbCard({ c }) {
+  const { project: p, cad, locked } = c;
+  const imp = cad?.import?.pcb?.box || {};
+  const st = p.pcbStack;
+  const setStack = (f, label, v) => v !== undefined && c.edit(label, ["pcbStack", f], v, "pcbStack." + f);
+  return html`<${Card} title="PCB">
+    <div class="cols">
+      <div>
+        <h4>Size</h4>
+        <div class="form">
+          ${[["l", "pcbov.l", "pcb.l"], ["w", "pcbov.w", "pcb.w"], ["h", "pcbov.h", "pcb.h"]].map(([f, t, used]) => html`<label><${L} t=${t} /> <${NumField} term=${t} value=${p.pcbOverride?.[f]} unit="mm" label=${TERMS[t].label}
+            placeholder=${isNum(imp[f]) ? String(+imp[f].toFixed(3)) : ""} rule=${{ minEx: 0 }} disabled=${locked} onCommit=${v => c.edit(TERMS[t].label, ["pcbOverride", f], v, "pcbOverride." + f)} />
+            <span>used: <${V} t=${used} d=${2} u /></span></label>`)}
+        </div>
+        <p class="hint">Blank uses the size from Import STEP (shown in grey).</p>
+      </div>
+      <div>
+        <h4>Stack</h4>
+        <div class="form">
+          <label><${L} t="stack.layers" /> <${NumField} term="stack.layers" value=${st.copperLayers} unit="" label="Copper layers" width="4em" rule=${{ required: true, integer: true, min: 1 }} disabled=${locked} onCommit=${v => setStack("copperLayers", "Copper layers", v)} /></label>
+          <label><${L} t="stack.cuT" /> <${NumField} term="stack.cuT" value=${st.copperThicknessMm} unit="mm" accepts="copperMm" label="Copper thickness" rule=${{ required: true, minEx: 0 }} disabled=${locked} onCommit=${v => setStack("copperThicknessMm", "Copper thickness", v)} /></label>
+          <label><${L} t="stack.coverage" /> <${NumField} term="stack.coverage" value=${st.copperCoverage} unit="" label="Copper coverage" width="4em" rule=${{ required: true, minEx: 0, max: 1 }} disabled=${locked} onCommit=${v => setStack("copperCoverage", "Copper coverage", v)} /></label>
+          <label><${L} t="stack.cuK" /> <${NumField} term="stack.cuK" value=${st.copperK} unit="WmK" label="Copper k" rule=${{ required: true, minEx: 0 }} disabled=${locked} onCommit=${v => setStack("copperK", "Copper k", v)} /></label>
+          <label><${L} t="stack.dielK" /> <${NumField} term="stack.dielK" value=${st.dielectricK} unit="WmK" label="Dielectric k" rule=${{ required: true, minEx: 0 }} disabled=${locked} onCommit=${v => setStack("dielectricK", "Dielectric k", v)} /></label>
+        </div>
+        <p class="hint">Copper thickness accepts oz (1 oz = 0.035 mm) and um.</p>
+        <${Facts} ctx=${c} rows=${[[, "pcb.cuTotal", "", 3], [, "pcb.cuFraction", "", 4], [, "pcb.kxy", "", 2], [, "pcb.kz", "", 3]]} />
+      </div>
+    </div>
+  <//>`;
 }
 export const shortName = n => (n || "").split("/").pop().replace(/-\d+$/, "");
 
 // ---------- 4 Triage ----------
 export function TriageTab(c) {
-  const { calc } = c;
+  const { project: p, calc, locked } = c;
   const t = calc.triage, rails = calc.rails;
   const problems = c.blocking;
+  const lim = p.settings.flagLimits;
+  const setLim = (lvl, f, label, v) => v !== undefined && c.edit(label, ["settings", "flagLimits", lvl, f], v, `limit.${lvl}.${f}`);
+  const top = t.byPd.find(r => isNum(calc.register.parts[r]?.pdW));
+  const dense = t.byDensity.find(r => isNum(calc.register.parts[r]?.densityWcm2));
   return html`
     ${problems.length ? html`<${Card} title="Fix first" cls="attention"><ul>${problems.map(x => html`<li>${marked(x)}</li>`)}</ul><//>` : ""}
+    ${c.learn && top && html`<${Card} title="What the numbers say" cls="reading">
+      <p><${V} nofx t="part.refDes" k=${top} /> makes ${pctV("part.share", top, calc.register.parts[top].share)} of the board's heat (<${V} nofx t="part.pd" k=${top} d=${2} u />).
+        ${dense && html` <${V} nofx t="part.refDes" k=${dense} /> has the highest power density, <${V} nofx t="part.density" k=${dense} d=${2} u />: the least area to lose its heat through.`}</p>
+      <p>${t.critical > 0 ? html`<${V} nofx t="triage.critical" /> part${t.critical === 1 ? " is" : "s are"} CRITICAL: start with ${t.critical === 1 ? "it" : "them"} on <button class="link" onClick=${() => c.go(5)}>tab 5</button>.` : "No part is CRITICAL on this first estimate."}
+        ${t.noRja > 0 ? html` <${V} nofx t="triage.noRja" /> part${t.noRja === 1 ? " has" : "s have"} no ${marked("Rja")}, so ${t.noRja === 1 ? "its" : "their"} margin is not checked here.` : ""}</p>
+      ${isNum(rails.unaccountedFrac) && html`<p>The parts account for all but ${pctV("rails.unaccountedFrac", "", rails.unaccountedFrac)} of the measured input power.${Math.abs(rails.unaccountedFrac) > 0.2 ? " That is a lot: a heat source may be missing from tab 1, or one is counted twice." : ""}</p>`}
+    <//>`}
     <${Card} title="Overview">
       <${Facts} ctx=${c} rows=${[[, "triage.parts"], [, "board.totalPd", "", 2], [, "triage.critical"], [, "triage.watch"], [, "triage.minor"], [, "triage.noPd"], [, "triage.noRja"], [, "triage.noBody"]]} />
     <//>
@@ -185,29 +368,121 @@ export function TriageTab(c) {
       <${Scroll}><table class="grid"><thead><tr><th><${L} t="rail.name" /></th><th class="num"><${L} t="rail.parts" /></th><th class="num"><${L} t="rail.pd" /> W</th><th class="num"><${L} t="rail.share" /></th></tr></thead>
       <tbody>${rails.rails.map(r => html`<tr><td><${V} t="rail.name" k=${r.rail} /></td><td class="num"><${V} t="rail.parts" k=${r.rail} /></td><td class="num"><${V} t="rail.pd" k=${r.rail} d=${3} /></td><td class="num"><${V} t="rail.share" k=${r.rail} d=${3} /></td></tr>`)}</tbody></table><//>
       <${Facts} ctx=${c} rows=${[[, "rails.sum", "", 3], [, "rails.noRail", "", 3], [, "rails.measured", "", 2], [, "rails.unaccounted", "", 2], [, "rails.unaccountedFrac", "", 3]]} />
+      ${!isNum(rails.measuredW) && html`<p class="hint">Type the measured board input power on tab 0 to check that the parts account for all of it.</p>`}
+    <//>
+    <${Card} title="Flag limits">
+      <p class="hint">A part gets a flag when any one of its numbers crosses a limit. The same limits set Tight on tab 5.</p>
+      <table class="grid limits"><thead><tr><th></th><th><${L} t="part.margin">margin below</${L}></th><th><${L} t="part.density">density above</${L}></th><th><${L} t="part.share">share above</${L}></th></tr></thead>
+      <tbody>${[["critical", "CRITICAL", "limit.critical"], ["watch", "Watch", "limit.watch"]].map(([lvl, word, t]) => html`<tr><td><${V} t="part.flag" v=${word} /></td>
+        <td><${NumField} term=${t + "Margin"} value=${lim[lvl].marginBelowC} unit="dC" label=${word + " margin limit"} rule=${{ required: true }} disabled=${locked} onCommit=${v => setLim(lvl, "marginBelowC", word + " margin limit", v)} /></td>
+        <td><${NumField} term=${t + "Density"} value=${lim[lvl].densityAboveWcm2} unit="W/cm²" accepts="none" label=${word + " density limit"} rule=${{ required: true, min: 0 }} disabled=${locked} onCommit=${v => setLim(lvl, "densityAboveWcm2", word + " density limit", v)} /></td>
+        <td><${NumField} term=${t + "Share"} value=${lim[lvl].shareAbove} unit="" label=${word + " share limit"} width="4em" rule=${{ required: true, min: 0, max: 1 }} disabled=${locked} onCommit=${v => setLim(lvl, "shareAbove", word + " share limit", v)} /></td></tr>`)}</tbody></table>
     <//>`;
 }
 
 // ---------- 5 Hand check: bare board ----------
 export function BareTab(c) {
-  const { project: p, calc } = c;
+  return html`<${BareView} c=${c} />`;
+}
+function BareView({ c }) {
+  const { project: p, calc, results, locked } = c;
   const bb = calc.bareBoard;
+  const withTj = p.parts.filter(x => isNum(bb.parts[x.refDes]?.tjC)).map(x => x.refDes);
+  const worst = [...withTj].sort((a, z) => (isNum(bb.parts[a].marginC) ? bb.parts[a].marginC : 1e9) - (isNum(bb.parts[z].marginC) ? bb.parts[z].marginC : 1e9));
+  const [sel, setSel] = useState(null);
+  const k = sel && bb.parts[sel] ? sel : worst[0];
   const cols = [["bbp.pd", 3], ["bbp.rTop", 1], ["bbp.rSpread", 2], ["bbp.rBoard", 2], ["bbp.qBoard", 3], ["bbp.tj", 1], ["bbp.margin", 1]];
+  const s = p.simSetup?.surfaces || {};
+  const setSim = (path, label, v) => v !== undefined && c.editFn(label, q => setIn(withSimSetup(q), ["simSetup", ...path], v), "simSetup." + path.join("."));
+  const runs = (results?.runs || []).map(r => r.name);
+  const surf = [["pcbTop", "surf.pcbTopH", "surf.pcbTopEps", "PCB top"], ["pcbBottom", "surf.pcbBottomH", "surf.pcbBottomEps", "PCB bottom"], ["parts", "surf.partsH", "surf.partsEps", "parts"]];
   return html`
+    ${c.learn && html`<${Reading} c=${c} parts=${worst} />`}
+    <${Card} title="Air and surfaces">
+      <table class="grid limits"><thead><tr><th></th><th><${L} t="surf.pcbTopH">h</${L}></th><th><${L} t="surf.pcbTopEps">emissivity</${L}></th></tr></thead>
+      <tbody>${surf.map(([f, th, te, name]) => html`<tr><td>${name}</td>
+        <td><${NumField} term=${th} value=${s[f]?.h} unit="W/(m² K)" accepts="none" label=${"h, " + name} rule=${{ required: true, min: 0 }} disabled=${locked} onCommit=${v => setSim(["surfaces", f, "h"], "h, " + name, v)} /></td>
+        <td><${NumField} term=${te} value=${s[f]?.emissivity} unit="" label=${"Emissivity, " + name} width="4em" rule=${{ required: true, min: 0, max: 1 }} disabled=${locked} onCommit=${v => setSim(["surfaces", f, "emissivity"], "Emissivity, " + name, v)} /></td></tr>`)}</tbody></table>
+      <div class="form row">
+        <label><${L} t="board.ambient" /> <span><${V} t="board.ambient" d=${1} u /> <span class="hint">(tab 0)</span></span></label>
+        <label><${L} t="hand.surfaceRise" /> <${NumField} term="hand.surfaceRise" value=${p.handCheck?.surfaceRiseK} unit="dC" label="Surface rise for radiation" rule=${{ min: 0 }} disabled=${locked} onCommit=${v => c.edit("Surface rise", ["handCheck", "surfaceRiseK"], v, "handCheck.surfaceRiseK")} /></label>
+        <label><${L} t="simset.kPartsWithoutHeat" /> <${NumField} term="simset.kPartsWithoutHeat" value=${p.simSetup?.kPartsWithoutHeat} unit="WmK" label="k of parts without Rjc" rule=${{ required: true, minEx: 0 }} disabled=${locked} onCommit=${v => setSim(["kPartsWithoutHeat"], "k of parts without Rjc", v)} /></label>
+      </div>
+      <p class="hint">The simulation on tab 8 uses the same h and emissivity, so the hand check and the study see the same air.</p>
+    <//>
     <${Card} title="Board and air">
-      <${Facts} ctx=${c} rows=${[[, "pcb.kxy", "", 1], [, "bb.area", "", 0], [, "bb.hPcb", "", 2], [, "bb.hParts", "", 2], [, "bb.rBoardAir", "", 2],
-        [, "bb.rise", "", 1], [, "bb.boardC", "", 1], [, "bb.qBoard", "", 2], [, "bb.fail"], [, "bb.tight"]]} />
+      <${Facts} ctx=${c} rows=${[[, "pcb.kxy", "", 1], [, "bb.area", "", 0], [, "bb.hRadTop", "", 2], [, "bb.hRadBottom", "", 2], [, "bb.hPcb", "", 2], [, "bb.hRadParts", "", 2], [, "bb.hParts", "", 2], [, "bb.rBoardAir", "", 2],
+        [, "bb.rise", "", 1], [, "bb.boardC", "", 1], [, "bb.qBoard", "", 2], [, "bb.boardShare", "", 2], [, "bb.fail"], [, "bb.tight"]]} />
     <//>
     <${Scroll}><table class="grid">
-      <thead><tr><th>RefDes</th>${cols.map(([t]) => html`<th class="num"><${L} t=${t} /></th>`)}<th><${L} t="bbp.status" /></th></tr></thead>
-      <tbody>${p.parts.map(x => bb.parts[x.refDes] && html`<tr><td><${V} t="part.refDes" k=${x.refDes} /></td>${cols.map(([t, d]) => html`<td class="num"><${V} t=${t} k=${x.refDes} d=${d} /></td>`)}<td><${V} t="bbp.status" k=${x.refDes} /></td></tr>`)}</tbody>
+      <thead><tr><th><${L} t="part.refDes" /></th>${cols.map(([t]) => html`<th class="num"><${L} t=${t} /></th>`)}<th><${L} t="bbp.status" /></th><th></th></tr></thead>
+      <tbody>${p.parts.map(x => bb.parts[x.refDes] && html`<tr class=${x.refDes === k ? "sel" : ""}><td><${V} t="part.refDes" k=${x.refDes} /></td>${cols.map(([t, d]) => html`<td class="num"><${V} t=${t} k=${x.refDes} d=${d} /></td>`)}<td><${V} t="bbp.status" k=${x.refDes} /></td>
+        <td>${isNum(bb.parts[x.refDes].tjC) && html`<button class="small" aria-pressed=${x.refDes === k} onClick=${() => setSel(x.refDes)}>Network</button>`}</td></tr>`)}</tbody>
     </table><//>
-    ${bb.compare?.compared ? html`<${Card} title="Hand check against the simulation">
-      <${Facts} ctx=${c} rows=${[[, "bb.compareRun"], [, "bb.compareCheck"], [, "bb.meanGap", "", 1], [, "bb.maxGap", "", 1]]} />
-      <${Scroll}><table class="grid"><thead><tr><th>RefDes</th><th class="num"><${L} t="bbp.tj" /></th><th class="num"><${L} t="bbp.simC" /></th><th class="num"><${L} t="bbp.gap" /></th></tr></thead>
-      <tbody>${Object.keys(bb.compare.parts).map(r => html`<tr><td><${V} t="part.refDes" k=${r} /></td><td class="num"><${V} t="bbp.tj" k=${r} d=${1} /></td><td class="num"><${V} t="bbp.simC" k=${r} d=${1} /></td><td class="num"><${V} t="bbp.gap" k=${r} d=${1} /></td></tr>`)}</tbody></table><//>
-    <//>` : ""}
+    ${k && html`<${Card} title=${`Heat paths of ${k}`}>
+      <div class="cols net">
+        <${NetDrawing} k=${k} />
+        <div>
+          <${Facts} ctx=${c} rows=${[[, "bbp.model", k], [, "bbp.pd", k, 3], [, "bbp.rjcUsed", k, 3], [, "bbp.rJTop", k, 3], [, "bbp.exposed", k, 1], [, "bbp.rSurfaceAir", k, 2], [, "bbp.rTop", k, 2],
+            [, "bbp.rJBoard", k, 3], [, "bbp.footprint", k, 1], [, "bbp.share", k, 0], [, "bbp.eps", k, 4], [, "bbp.tau", k, 4], [, "bbp.bi", k, 4], [, "bbp.lambda", k, 4], [, "bbp.phi", k, 4], [, "bbp.rSpread", k, 3], [, "bbp.rBoard", k, 3],
+            [, "bbp.f", k, 3], [, "bbp.c", k, 4], [, "bbp.fPd", k, 3], [, "bbp.qBoard", k, 3], [, "bbp.qTop", k, 3], [, "bbp.boardShare", k, 2], [, "bbp.tj", k, 1], [, "bbp.margin", k, 1], [, "bbp.status", k]]} />
+        </div>
+      </div>
+    <//>`}
+    <${Card} title="Hand check against the simulation">
+      <div class="form row"><label><${L} t="hand.compareRun" /> <${Select} term="hand.compareRun" value=${p.handCheck?.compareRun} options=${runs} label="Run to compare with" blankText="(newest run)" disabled=${locked}
+        onCommit=${v => c.edit("Run to compare with", ["handCheck", "compareRun"], v)} /></label></div>
+      ${bb.compare?.compared ? html`
+        <${Facts} ctx=${c} rows=${[[, "bb.compareRun"], [, "bb.compareCheck"], [, "bb.meanGap", "", 1], [, "bb.maxGap", "", 1]]} />
+        <${Scroll}><table class="grid"><thead><tr><th><${L} t="part.refDes" /></th><th class="num"><${L} t="bbp.tj" /></th><th class="num"><${L} t="bbp.simC" /></th><th class="num"><${L} t="bbp.gap" /></th></tr></thead>
+        <tbody>${Object.keys(bb.compare.parts).map(r => html`<tr><td><${V} t="part.refDes" k=${r} /></td><td class="num"><${V} t="bbp.tj" k=${r} d=${1} /></td><td class="num"><${V} t="bbp.simC" k=${r} d=${1} /></td><td class="num"><${V} t="bbp.gap" k=${r} d=${1} /></td></tr>`)}</tbody></table><//>`
+      : html`<p class="hint">No simulation run to compare with yet. The study comes on tab 8.</p>`}
+    <//>
     <p class="hint">Click any value to see its formula and walk back to its inputs.</p>`;
+}
+
+// Plain reading of the hand check (Learn mode): the board, then each part from the lowest margin.
+function Reading({ c, parts }) {
+  const bb = c.calc.bareBoard;
+  if (!isNum(bb.board.boardC)) return null;
+  return html`<${Card} title="What the numbers say" cls="reading">
+    <p>The board sits at <${V} nofx t="bb.boardC" d=${1} u />, <${V} nofx t="bb.rise" d=${1} u /> above the air. ${pctV("bb.boardShare", "", valueOfC(c, "bb.boardShare"))} of all the heat goes down into the board and leaves from its two faces; the rest leaves from the part tops.</p>
+    <ul>${parts.slice(0, 8).map(k => {
+      const r = bb.parts[k];
+      const share = valueOfC(c, "bbp.boardShare", k);
+      return html`<li><${V} nofx t="part.refDes" k=${k} /> ${isNum(r.marginC) ? (r.marginC >= 0 ? html`is <${V} nofx t="bbp.margin" k=${k} d=${1} u /> below its ${marked("Tj max")}.` : html`is over its ${marked("Tj max")}: margin <${V} nofx t="bbp.margin" k=${k} d=${1} u />.`) : html`has no ${marked("Tj max")} to check against.`}
+        ${!isNum(share) ? "" : share < 0 ? " The board around it is warmer than it would make it alone, so it takes heat in from its neighbours: cooling the parts near it helps it most."
+          : share >= 0.5 ? html` ${pctV("bbp.boardShare", k, share)} of its heat goes down into the board, so more copper under it, thermal vias or a bigger board would help more than a heatsink.`
+          : html` ${pctV("bbp.topShare", k, valueOfC(c, "bbp.topShare", k))} of its heat leaves from its top, so a heatsink or a spreader on top (<button class="link" onClick=${() => c.go(7)}>tab 7</button>) would help more than extra copper.`}</li>`;
+    })}</ul>
+  <//>`;
+}
+const valueOfC = (c, t, k = "") => c.value(t, k);
+
+// The two heat paths of one part, drawn as a resistor network with the numbers of this board.
+function NetDrawing({ k }) {
+  const X = useContext(Explain);
+  if (!X.ctx) return null;
+  const val = (t, kk) => valueOf(X.ctx, t, kk);
+  const num = (x, y, t, kk = "", d = 2, anchor = "start") => html`<text x=${x} y=${y} text-anchor=${anchor} class="nv" data-term=${t} data-key=${kk} tabindex="0" role="button"
+    onClick=${() => X.open(t, kk)} onKeyDown=${e => { if (e.key === "Enter") X.open(t, kk); }}>${isNum(val(t, kk)) ? fmtValue(val(t, kk), d) : "?"} ${TERMS[t].unit}</text>`;
+  const res = (x, y, label, t, kk) => html`<rect class="res" x=${x - 8} y=${y - 18} width="16" height="36" rx="3" />
+    <text class="rl" x=${x - 14} y=${y + 4} text-anchor="end">${label}</text>${num(x + 14, y + 4, t, kk, 2)}`;
+  return html`<svg class="net" viewBox="0 0 560 330" role="img" aria-label=${"Heat paths of " + k}>
+    <line class="node" x1="30" y1="24" x2="530" y2="24" /><text class="nl" x="30" y="16">Air</text>${num(62, 16, "board.ambient", "", 1)}
+    <line class="wire" x1="150" y1="24" x2="150" y2="300" />
+    <line class="wire" x1="430" y1="24" x2="430" y2="300" />
+    ${res(150, 66, "R surface to air", "bbp.rSurfaceAir", k)}
+    ${res(150, 120, "R junction to top", "bbp.rJTop", k)}
+    <text class="flow" x="164" y="96" data-term="bbp.qTop" data-key=${k}>↑ Q top</text>${num(220, 96, "bbp.qTop", k, 3)}
+    <circle class="tj" cx="150" cy="165" r="7" /><text class="nl" x="136" y="170" text-anchor="end">Junction</text>${num(164, 170, "bbp.tj", k, 1)}
+    ${res(150, 210, "R junction to board", "bbp.rJBoard", k)}
+    <text class="flow" x="164" y="238" data-term="bbp.qBoard" data-key=${k}>↓ Q board</text>${num(234, 238, "bbp.qBoard", k, 3)}
+    ${res(150, 266, "R spreading", "bbp.rSpread", k)}
+    ${res(430, 162, "R board to air", "bb.rBoardAir", "")}
+    <line class="node" x1="30" y1="300" x2="530" y2="300" /><text class="nl" x="30" y="320">Board (shared by all parts)</text>${num(212, 320, "bb.boardC", "", 1)}
+    <text class="hint-svg" x="290" y="292" text-anchor="middle">heat from the other parts joins here</text>
+  </svg>`;
 }
 
 // ---------- 6 Build model ----------
@@ -278,7 +553,7 @@ export function ChangesTab(c) {
 }
 
 // ---------- 11 Help ----------
-export function HelpTab() {
+export function HelpTab(c = {}) {
   return html`<${Card} title="Start here">
     <p>This page takes a ${marked("PCB")} from ${marked("STEP")} file to a checked thermal result. You do the engineering (power numbers, datasheet values, judging the results); the SolidWorks macros build the model and run the study.</p>
     <ol>
@@ -286,6 +561,12 @@ export function HelpTab() {
       <li>Tab 1: add each part that makes heat, with its datasheet values and its power.</li>
       <li>Tabs 2 to 9: follow the tabs in order. A grey tab says what to do first and links to it.</li>
     </ol>
+    <h4>See a finished study first</h4>
+    <p>The example study is the Raspberry Pi 4, with every tab filled in. It opens read only, so nothing can break. ${c.openExample && html`<button class="small" onClick=${c.openExample}>Open the example study</button>`}</p>
+    <h4>Learn mode</h4>
+    <p>Learn in the top bar puts a short box at the top of each tab: what the step is for and what to look at. On tabs 4 and 5 it also reads the results out in plain words, for example which part is closest to its limit and whether copper or a heatsink would help it more. Turn it off when you know the steps.</p>
+    <h4>Filling a board fast</h4>
+    <p>Tab 1: Paste a parts list takes the cells straight from Excel, one row per load. Tab 3: Link the suggested bodies matches body names with part numbers and RefDes. Check each link.</p>
     <h4>Every value explains itself</h4>
     <p>Hover over any value or label (or tab to it with the keyboard) to see what it is, its unit and whether you type it or the page works it out. Click a value, or the small i next to a label, to open the Explain panel: the longer text, the formula with your numbers, the inputs (click one to walk back to it) and what uses the value. Show formulas in the top bar writes the formula under every calculated value. Words with a dotted underline are abbreviations: hover for the meaning.</p>
     <h4>Saving</h4>

@@ -36,6 +36,9 @@ Read `PLAN.md` first. It is the spec. This file is the short list of rules that 
   (`webapp/src/terms/catalogue.js`). A new value on the page needs: a catalogue term, a getter in `VALUES` and, if
   calculated, a formula in `FORMULAS` (`webapp/src/calc/formulas.js`); show it with `<V>` and label it with `<L>`.
   `npm test` (W4) fails on a number without a term or a formula that does not give the calculated value.
+- Learn mode texts live in `webapp/src/terms/learn.js` (one entry per step tab). Values inside a sentence use `<V nofx>`.
+- The example study inside the page comes from `example/RaspberryPi4/*.json` at build time (`virtual:example`), so
+  board data stays out of `webapp/src/`. Rebuild after those files change.
 
 ## VBA rules (each one cost a failed run already)
 
