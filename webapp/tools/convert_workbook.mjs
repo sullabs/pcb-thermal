@@ -26,6 +26,7 @@ export function convertFile(xlsxPath, opts = {}) {
     boardName: opts.boardName,
     stepFile,
     now: opts.now,
+    forSolidWorksFrom: opts.forSolidWorksFrom,
     savedBy: "convert_workbook 0.1.0",
     reports: {
       buildBoard: readIf(path.join(dir, "CAD", prefix + "BuildBoard_report.txt")),

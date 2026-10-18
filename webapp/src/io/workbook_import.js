@@ -5,10 +5,14 @@
 //
 // wb       SheetJS workbook, read with { cellFormula: false } (cached values are used, Excel computed them).
 // XLSX     the SheetJS module (for its date code parser).
-// options  { fileName, stepFile, reports: { buildBoard, buildSpreader }, now, savedBy }
+// options  { fileName, stepFile, reports: { buildBoard, buildSpreader }, now, savedBy, forSolidWorksFrom }
+//          forSolidWorksFrom: "calc" (default, worked out by src/calc like the page does) or "workbook"
+//          (copied from the workbook's grey cells; the W2 test uses it to check the two agree).
 //
 // Reads tabs by the words after their number ("7 Spreader" -> "Spreader"), as the macros do.
 // Units stay as the workbook has them (mm, C, W), except copper thickness: um in the workbook, mm in the file.
+
+import { calcProject, forSolidWorks as calcForSolidWorks } from "../calc/index.js";
 
 const CLASSES = ["Processor / SoC", "Memory", "LDO / linear reg", "Switching regulator", "PMIC", "Ethernet PHY",
   "USB / interface IC", "Power inductor", "Sense resistor", "MOSFET / driver", "Connector", "Other",
@@ -130,6 +134,8 @@ export function workbookToProject(wb, XLSX, options = {}) {
       const full = boxFrom(R, geo, r, "OPQRST", true);
       if (!full) { notes.push(`Body ${key} was typed in by hand but its box is incomplete; skipped.`); continue; }
       choice.manual = { name: str(R.v(geo, "D" + r)) || nameUsed, box: full };
+      const side = str(R.v(geo, "N" + r));
+      if (["Top", "Bottom", "Board", "Through"].includes(side)) choice.manual.side = side;
     }
     bodies[key] = choice;
 
@@ -223,7 +229,7 @@ export function workbookToProject(wb, XLSX, options = {}) {
     put(settings, "asmName", str(R.v(set, "C11")));
   }
 
-  // ---------- forSolidWorks: copied from the workbook's cached values ----------
+  // ---------- forSolidWorks as the workbook has it (cached values) ----------
   const heat = {};
   for (let r = regRows[0]; r <= regRows[1]; r++) {
     const refDes = str(R.v(reg, "B" + r));
@@ -368,7 +374,10 @@ export function workbookToProject(wb, XLSX, options = {}) {
   if (Object.keys(handCheck).length) project.handCheck = handCheck;
   if (simSetup) project.simSetup = simSetup;
   project.settings = settings;
-  if (Object.values(forSolidWorks.pcb).every(x => x !== undefined)) project.forSolidWorks = forSolidWorks;
+  const fsUsed = options.forSolidWorksFrom === "workbook"
+    ? (Object.values(forSolidWorks.pcb).every(x => x !== undefined) ? forSolidWorks : undefined)
+    : calcForSolidWorks(project, calcProject(project, cad, results), now);
+  if (fsUsed) project.forSolidWorks = fsUsed;
   else notes.push("PCB size or k is blank (no STEP import yet), so forSolidWorks was left out.");
   project.checks = checks;
   if (notes.length) project.importedFrom.notes = notes;

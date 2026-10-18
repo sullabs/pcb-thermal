@@ -27,6 +27,9 @@ Read `PLAN.md` first. It is the spec. This file is the short list of rules that 
   refreshes them).
 - Fixed units in the files: mm, C, W, W/(m K), C/W. Blank values are left out, never `null`.
 - The page reads the RPi4 example as its reference case. Keep board-specific data out of `webapp/src/`, as for `.bas` files.
+- Every formula lives once, in `webapp/src/calc/` (pure functions on the three files). Port a template formula exactly;
+  `npm test` compares it with `tests/webapp/expected_*.json` (Excel's saved values). After a workbook formula change, open
+  and save the example workbook in Excel, then `npm run expected`.
 - Dark theme by default, light on request. Every value has a hover explanation from the term catalogue.
 
 ## VBA rules (each one cost a failed run already)

@@ -295,16 +295,18 @@ Per macro:
 - **Old workbooks:** the page can read a filled workbook (read only) and make a `project.json` from it, so the RPi4
   workbook becomes the example project. The converter is `webapp/src/io/workbook_import.js` (done in W1); the page
   uses the same module.
-- **Tests:** a script reads every calculated value from `RaspberryPi4.xlsx` through Excel and saves them as
-  `tests/webapp/expected_rpi4.json`. The page's calculation module must match them to 6 significant digits. This runs
-  for every change to a formula.
+- **Tests:** `webapp/tools/expected_from_workbook.mjs` reads every calculated value of `RaspberryPi4.xlsx` and
+  `RPi4_fresh.xlsx` (bottom plate) as Excel last saved them and writes `tests/webapp/expected_rpi4.json` and
+  `expected_rpi4_fresh.json`. Excel itself is not needed: the workbooks were last saved by Excel, so their cached values
+  are Excel's results. The calculation module (`webapp/src/calc/`) must match them to 6 significant digits, texts exactly
+  (`npm test`). This runs for every change to a formula.
 
 ## 12. Milestones
 
 | # | Milestone | Done when |
 |---|---|---|
 | W1 | File formats: JSON schemas for the three files, with the RPi4 example converted from the workbook | `project.json`, `cad.json`, `results.json` for RPi4 exist and validate. **Done 2026-10-18** (`webapp/schema/`, `example/RaspberryPi4/*.json`, `npm test` in `webapp/`) |
-| W2 | Calculation module: register, triage, rail budget, PCB stack, bare board network, spreader checks, thermal solution top and bottom, sim setup k values | matches `expected_rpi4.json` |
+| W2 | Calculation module: register, triage, rail budget, PCB stack, bare board network, spreader checks, thermal solution top and bottom, sim setup k values | matches `expected_rpi4.json`. **Done 2026-10-18** (`webapp/src/calc/`; about 4000 values of both RPi4 workbooks match; `forSolidWorks` is now computed by it) |
 | W3 | Page shell: folder picking, save and reload, tabs with unlock rules and reasons, undo | RPi4 example opens, edits save, a locked tab names its reason |
 | W4 | Term catalogue and Explain panel: hover text, abbreviations, formulas with numbers, trace | every value on every tab has a hover text and, if calculated, a formula |
 | W5 | Tabs 1 to 5 complete (parts to bare board hand check), Learn mode texts | a new user can fill a board from a datasheet list without the workbook |

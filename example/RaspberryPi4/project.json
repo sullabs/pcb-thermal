@@ -515,7 +515,7 @@
   },
   "forSolidWorks": {
     "computedAt": "2026-10-18T12:00:00",
-    "computedBy": "workbook",
+    "computedBy": "calc 0.1.0",
     "ambientC": 40,
     "pcb": {
       "l": 85,
@@ -564,6 +564,7 @@
       {
         "key": "broadcombcm2711b0cpurpi4modelb",
         "name": "Raspberry Pi 4 Model B.STEP-1/Broadcom BCM2711B0 CPU, RPi4ModelB.STEP-1",
+        "refDes": "U1",
         "box": {
           "xMin": 21.75,
           "yMin": 25,
@@ -571,8 +572,7 @@
           "l": 15,
           "w": 15,
           "h": 2.3
-        },
-        "refDes": "U1"
+        }
       },
       {
         "key": "254mmdupontmalepinheaderpoe2x2rpi4modelb",
@@ -637,6 +637,7 @@
       {
         "key": "91d77d9whv778k4gblpddr4sdramrpi4modelb",
         "name": "Raspberry Pi 4 Model B.STEP-1/91D77 D9WHV 778K, 4 GB LPDDR4 SDRAM, RPi4ModelB.STEP-1",
+        "refDes": "U2",
         "box": {
           "xMin": 39.75,
           "yMin": 25.25,
@@ -644,12 +645,12 @@
           "l": 10,
           "w": 14.5,
           "h": 0.8
-        },
-        "refDes": "U2"
+        }
       },
       {
         "key": "cypresscyw43455wirelessmodulecoverrpi4modelb",
         "name": "Raspberry Pi 4 Model B.STEP-1/Cypress CYW43455 Wireless Module Cover, RPi4ModelB.STEP-1",
+        "refDes": "U6",
         "box": {
           "xMin": 6.5,
           "yMin": 36,
@@ -657,12 +658,12 @@
           "l": 11,
           "w": 13,
           "h": 1.6
-        },
-        "refDes": "U6"
+        }
       },
       {
         "key": "femaleusbtypecconnectorrpi4modelb",
         "name": "Raspberry Pi 4 Model B.STEP-1/Female USB Type C Connector, RPi4ModelB.STEP-1",
+        "refDes": "J1",
         "box": {
           "xMin": 6.73,
           "yMin": -1.5,
@@ -670,8 +671,7 @@
           "l": 8.94,
           "w": 7.9,
           "h": 3.96
-        },
-        "refDes": "J1"
+        }
       },
       {
         "key": "2xusb30portsrpi4modelb",
@@ -700,6 +700,7 @@
       {
         "key": "mxl7704universalpmicrpi4modelb",
         "name": "Raspberry Pi 4 Model B.STEP-1/MxL7704 Universal PMIC, RPi4ModelB.STEP-1",
+        "refDes": "U3",
         "box": {
           "xMin": 7.3,
           "yMin": 9.3,
@@ -707,12 +708,12 @@
           "l": 5.4,
           "w": 5.4,
           "h": 0.8
-        },
-        "refDes": "U3"
+        }
       },
       {
         "key": "viavl805pcieusb30controllerrpi4modelb",
         "name": "Raspberry Pi 4 Model B.STEP-1/VIA VL805 PCIe USB 3.0 controller, RPi4ModelB.STEP-1",
+        "refDes": "U4",
         "box": {
           "xMin": 55.6,
           "yMin": 19.6,
@@ -720,8 +721,7 @@
           "l": 8.8,
           "w": 8.8,
           "h": 0.8
-        },
-        "refDes": "U4"
+        }
       },
       {
         "key": "2xusb20portsrpi4modelb",
@@ -738,6 +738,7 @@
       {
         "key": "broadcombcm54213pegigabitethernettransceiverrpi4modelb",
         "name": "Raspberry Pi 4 Model B.STEP-1/Broadcom BCM54213PE Gigabit Ethernet Transceiver, RPi4ModelB.STEP-1",
+        "refDes": "U5",
         "box": {
           "xMin": 55.6,
           "yMin": 34.6,
@@ -745,12 +746,12 @@
           "l": 6.8,
           "w": 6.8,
           "h": 1
-        },
-        "refDes": "U5"
+        }
       },
       {
         "key": "m_l1",
         "name": "L1 inductor, core buck (assumed position)",
+        "refDes": "L1",
         "box": {
           "xMin": 13.5,
           "yMin": 9.6,
@@ -758,12 +759,12 @@
           "l": 2.5,
           "w": 2,
           "h": 1.2
-        },
-        "refDes": "L1"
+        }
       },
       {
         "key": "m_l2",
         "name": "L2 inductor, 3V3 buck (assumed position)",
+        "refDes": "L2",
         "box": {
           "xMin": 13.5,
           "yMin": 12.6,
@@ -771,8 +772,7 @@
           "l": 2,
           "w": 1.6,
           "h": 1
-        },
-        "refDes": "L2"
+        }
       }
     ],
     "heat": {
