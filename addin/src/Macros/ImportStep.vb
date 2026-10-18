@@ -889,53 +889,139 @@ writeFail:
 
     Private Function ItemVolume(ByVal i As Integer) As Double
         Dim bodies As Object = Nothing, info As Object = Nothing, mp As Object, vol As Double = 0
+        Dim leaves As New Collections.Generic.List(Of Object)
         Try
             If srcBody(i) IsNot Nothing Then
-                bodies = Arr(srcBody(i))
+                leaves.Add(Nothing)
             ElseIf srcComp(i) IsNot Nothing Then
-                bodies = srcComp(i).GetBodies3(swSolidBody, info)
+                LeafComps(srcComp(i), leaves)
             End If
-            If IsEmpty(bodies) Then Return 0
-            For k As Integer = 0 To UBound(bodies)
-                mp = Nothing
-                Try
-                    mp = bodies(k).GetMassProperties(1.0)
-                Catch
-                End Try
-                If Not IsEmpty(mp) Then vol = vol + CDbl(mp(3))
+            For Each lc As Object In leaves
+                bodies = Nothing
+                If lc Is Nothing Then
+                    bodies = Arr(srcBody(i))
+                Else
+                    Try
+                        bodies = lc.GetBodies3(swSolidBody, info)
+                    Catch
+                    End Try
+                End If
+                If Not IsEmpty(bodies) Then
+                    For k As Integer = 0 To UBound(bodies)
+                        mp = Nothing
+                        Try
+                            mp = bodies(k).GetMassProperties(1.0)
+                        Catch
+                        End Try
+                        If Not IsEmpty(mp) Then vol = vol + CDbl(mp(3))
+                    Next
+                End If
             Next
         Catch
         End Try
         Return vol * 1000000000.0                           ' m3 -> mm3
     End Function
 
+    ' The part components under a component (the component itself when it is a part). A component that is a
+    ' sub-assembly has no bodies of its own, so its shape comes from these. Suppressed and hidden ones are left out.
+    Private Sub LeafComps(ByVal c As Object, ByVal leaves As Collections.Generic.List(Of Object))
+        If CBool(c.IsSuppressed) Then Exit Sub
+        If IsLeaf(c) Then
+            leaves.Add(c)
+            Exit Sub
+        End If
+        Dim ch As Object = c.GetChildren
+        For k As Integer = 0 To UBound(ch)
+            If Not CBool(ch(k).IsHidden(True)) Then LeafComps(ch(k), leaves)
+        Next
+    End Sub
+
     ' ---------------------------------------------------------------- surface points of a body
     ' Points (mm, model space) of an item: 3 numbers per point, returned count is the number of NUMBERS used.
+    ' A whole component is read part by part, each with its own transform (it can be a sub-assembly).
     Private Function ItemPoints(ByVal i As Integer, ByRef pts() As Double) As Integer
-        Dim np As Integer = 0, bodies As Object = Nothing, info As Object = Nothing, rb(5) As Double
-        Dim dRaw As Double, dAsm As Double, doXf As Boolean, xd(12) As Double, ox As Double, oy As Double, oz As Double
-        Dim npPrev As Integer, incomplete As Boolean = False, sc As Double
+        Dim np As Integer = 0, bodies As Object = Nothing, info As Object = Nothing, rb(5) As Double, ab(5) As Double
+        Dim xd(12) As Double, md As Integer, start As Integer, npPrev As Integer, cb As Object, bb As Object
         ReDim pts(3 * 4096 - 1)
         Try
             If srcBody(i) IsNot Nothing Then
                 np = AppendBodyPts(srcBody(i), pts, np)
+                If np < 9 Then Return 0
+                For q As Integer = 0 To 5
+                    rb(q) = rbx(i, q) : ab(q) = bx(i, q)
+                Next
+                For q As Integer = 0 To 12
+                    xd(q) = srcXf(i, q)
+                Next
+                FixPts(pts, 0, np, rb, ab, srcMode(i), xd)
             ElseIf srcComp(i) IsNot Nothing Then
-                bodies = srcComp(i).GetBodies3(swSolidBody, info)
-                If Not IsEmpty(bodies) Then
-                    For k As Integer = 0 To UBound(bodies)
-                        npPrev = np
-                        np = AppendBodyPts(bodies(k), pts, np)
-                        If np = npPrev Then incomplete = True
-                    Next
-                End If
+                Dim leaves As New Collections.Generic.List(Of Object)
+                LeafComps(srcComp(i), leaves)
+                For Each lc As Object In leaves
+                    bodies = Nothing
+                    Try
+                        bodies = lc.GetBodies3(swSolidBody, info)
+                    Catch
+                    End Try
+                    If Not IsEmpty(bodies) Then
+                        cb = Nothing
+                        Try
+                            cb = lc.GetBox(False, False)
+                        Catch
+                        End Try
+                        ReadXf(lc, xd)
+                        md = PickMode(lc, bodies, xd)
+                        For q As Integer = 0 To 2
+                            rb(q) = 1.0E+30 : rb(3 + q) = -1.0E+30
+                        Next
+                        start = np
+                        For k As Integer = 0 To UBound(bodies)
+                            bb = Nothing
+                            Try
+                                bb = bodies(k).GetBodyBox
+                            Catch
+                            End Try
+                            If Not IsEmpty(bb) Then
+                                For q As Integer = 0 To 2
+                                    If bb(q) * 1000.0 < rb(q) Then rb(q) = bb(q) * 1000.0
+                                    If bb(3 + q) * 1000.0 > rb(3 + q) Then rb(3 + q) = bb(3 + q) * 1000.0
+                                Next
+                            End If
+                            npPrev = np
+                            np = AppendBodyPts(bodies(k), pts, np)
+                            If np = npPrev Then Return 0           ' a body without points would leave a hole in the shape
+                        Next
+                        If IsEmpty(cb) Then
+                            Dim rbm(5) As Double
+                            For q As Integer = 0 To 5
+                                rbm(q) = rb(q) / 1000.0
+                            Next
+                            BoxXf(rbm, xd, md, ab, True)
+                        Else
+                            For q As Integer = 0 To 5
+                                ab(q) = cb(q) * 1000.0
+                            Next
+                        End If
+                        FixPts(pts, start, np, rb, ab, md, xd)
+                    End If
+                Next
             End If
         Catch
+            Return 0
         End Try
-        If np < 9 Or incomplete Then Return 0              ' a body without points would leave a hole in the shape
+        If np < 9 Then Return 0
+        Return np
+    End Function
+
+    ' Puts the points pts(start .. np-1) of one part into model space (mm). rawBox: the part's body box in its own
+    ' space (mm), asmBox: its box in the assembly (mm), md and xd: how to turn own-space points (see PickMode, ReadXf).
+    Private Sub FixPts(ByVal pts() As Double, ByVal start As Integer, ByVal np As Integer, ByVal rawBox() As Double,
+                       ByVal asmBox() As Double, ByVal md As Integer, ByVal xd() As Double)
+        Dim rb(5) As Double, dRaw As Double, dAsm As Double, sc As Double, ox As Double, oy As Double, oz As Double
         For q As Integer = 0 To 2
             rb(q) = 1.0E+30 : rb(3 + q) = -1.0E+30
         Next
-        For k As Integer = 0 To np - 3 Step 3
+        For k As Integer = start To np - 3 Step 3
             For q As Integer = 0 To 2
                 If pts(k + q) < rb(q) Then rb(q) = pts(k + q)
                 If pts(k + q) > rb(3 + q) Then rb(3 + q) = pts(k + q)
@@ -944,40 +1030,33 @@ writeFail:
         ' unit guard: the points must have about the size of the body box (mm). A factor of 1000 means the API returned
         ' millimetres or metres where metres were expected: put it right instead of building the wrong shape.
         dRaw = (rb(3) - rb(0)) + (rb(4) - rb(1)) + (rb(5) - rb(2))
-        dAsm = (rbx(i, 3) - rbx(i, 0)) + (rbx(i, 4) - rbx(i, 1)) + (rbx(i, 5) - rbx(i, 2))
+        dAsm = (rawBox(3) - rawBox(0)) + (rawBox(4) - rawBox(1)) + (rawBox(5) - rawBox(2))
         sc = 1.0
         If dRaw > 0 And dAsm > 0 Then
             If dRaw / dAsm > 500 And dRaw / dAsm < 2000 Then sc = 0.001
             If dRaw / dAsm < 0.002 And dRaw / dAsm > 0.0005 Then sc = 1000.0
         End If
         If sc <> 1.0 Then
-            For k As Integer = 0 To np - 1
+            For k As Integer = start To np - 1
                 pts(k) = pts(k) * sc
             Next
             For q As Integer = 0 To 5
                 rb(q) = rb(q) * sc
             Next
         End If
+        If md = 0 Then Exit Sub
+        ' are the points in the part's own space (turn them) or already in the assembly (leave them)?
         dRaw = 0 : dAsm = 0
-        If srcMode(i) <> 0 Then
-            ' are the points in the part's own space (turn them) or already in the assembly (leave them)?
-            For q As Integer = 0 To 5
-                If Math.Abs(rb(q) - rbx(i, q)) > dRaw Then dRaw = Math.Abs(rb(q) - rbx(i, q))
-                If Math.Abs(rb(q) - bx(i, q)) > dAsm Then dAsm = Math.Abs(rb(q) - bx(i, q))
-            Next
-            doXf = Not (dAsm + 0.0001 < dRaw)
-            If doXf Then
-                For q As Integer = 0 To 12
-                    xd(q) = srcXf(i, q)
-                Next
-                For k As Integer = 0 To np - 3 Step 3
-                    XfPoint(srcMode(i), xd, pts(k), pts(k + 1), pts(k + 2), ox, oy, oz)
-                    pts(k) = ox : pts(k + 1) = oy : pts(k + 2) = oz
-                Next
-            End If
-        End If
-        Return np
-    End Function
+        For q As Integer = 0 To 5
+            If Math.Abs(rb(q) - rawBox(q)) > dRaw Then dRaw = Math.Abs(rb(q) - rawBox(q))
+            If Math.Abs(rb(q) - asmBox(q)) > dAsm Then dAsm = Math.Abs(rb(q) - asmBox(q))
+        Next
+        If dAsm + 0.0001 < dRaw Then Exit Sub
+        For k As Integer = start To np - 3 Step 3
+            XfPoint(md, xd, pts(k), pts(k + 1), pts(k + 2), ox, oy, oz)
+            pts(k) = ox : pts(k + 1) = oy : pts(k + 2) = oz
+        Next
+    End Sub
 
     Private Sub GrowPts(ByRef pts() As Double, ByVal need As Integer)
         Dim cap As Integer = UBound(pts) + 1
