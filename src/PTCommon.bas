@@ -648,9 +648,11 @@ End Function
 
 ' Rectangle from (x0,y0) to (x1,y1), board frame mm, on plane pl whose height is zPlane (mm).
 ' Uses the sketch's own transform, so the plane orientation does not matter. Returns the sketch feature.
+' Drawn as four lines: CreateCornerRectangle returns nothing for a rectangle with a corner on the sketch origin and a
+' side under about 4 mm (tested 2026-10-18 on SolidWorks 2023), which made small parts fail.
 Public Function PT_SketchRect(ByVal md As Object, ByVal pl As Object, ByVal x0 As Double, ByVal y0 As Double, _
                               ByVal x1 As Double, ByVal y1 As Double, ByVal zPlane As Double) As Object
-    Dim sk As Object, xf As Object, a As Variant, b As Variant, skF As Object, tryN As Long, seg As Variant, nBefore As Long
+    Dim sk As Object, xf As Object, a As Variant, b As Variant, skF As Object, tryN As Long, nBefore As Long
     nBefore = PT_CountFeatures(md, "ProfileFeature")
     For tryN = 0 To 1
         md.ClearSelection2 True
@@ -662,7 +664,10 @@ Public Function PT_SketchRect(ByVal md As Object, ByVal pl As Object, ByVal x0 A
         a = PT_ToSketch(xf, x0, y0, zPlane)
         b = PT_ToSketch(xf, x1, y1, zPlane)
         md.SketchManager.AddToDB = (tryN = 0)          ' second try: normal sketch mode
-        seg = md.SketchManager.CreateCornerRectangle(a(0), a(1), 0, b(0), b(1), 0)
+        md.SketchManager.CreateLine a(0), a(1), 0, b(0), a(1), 0
+        md.SketchManager.CreateLine b(0), a(1), 0, b(0), b(1), 0
+        md.SketchManager.CreateLine b(0), b(1), 0, a(0), b(1), 0
+        md.SketchManager.CreateLine a(0), b(1), 0, a(0), a(1), 0
         md.SketchManager.AddToDB = False
         md.SketchManager.InsertSketch True
         md.ClearSelection2 True

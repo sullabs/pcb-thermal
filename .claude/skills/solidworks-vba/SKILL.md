@@ -116,3 +116,6 @@ Do not crawl the whole site; the method reference is already local.
   `GetCommandManager` all take the add-in cookie from `ISwAddin::ConnectToSW`; `AddToolbar5` "only operates properly when the
   application is implemented as a .dll"; callbacks are methods of the add-in object. No VBA examples exist. API toolbars also vanish
   when SolidWorks closes. For macros use manual macro buttons (docs/HOWTO_TOOLBAR.md), saved with the Copy Settings Wizard.
+- `SketchManager.CreateCornerRectangle` returns Empty (no sketch) when one corner is on the sketch origin and a side is under
+  about 4 mm, with or without AddToDB or DisplayWhenAdded (tested 2026-10-18). Away from the origin it works. `PT_SketchRect`
+  now draws four `CreateLine` calls instead, which work at any size. Do not use CreateCornerRectangle for part footprints.
