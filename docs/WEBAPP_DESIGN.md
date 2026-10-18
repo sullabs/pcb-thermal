@@ -1,6 +1,6 @@
 # PCB thermal web app: design
 
-Status: design, agreed in outline on 2026-10-18. No code yet. This replaces the Excel workbook as the place where the
+Status: design, agreed in outline on 2026-10-18. W1 to W3 are built (schemas, calculation module, page shell). This replaces the Excel workbook as the place where the
 user works. The SolidWorks macros stay and keep doing the CAD and simulation work.
 
 ## 1. Goal
@@ -142,7 +142,7 @@ the user changed them.
 | 4 | **Triage** | Read only: ranked by Pd and by W/cm2, rail budget, what to worry about first. | parts linked to bodies | "Link at least one part to a body on tab 3. Power density needs the body footprint." |
 | 5 | **Hand check: bare board** | Read only: the resistance network per part, board temperature, pass or fail. Learn the physics here. | triage has no blocking problem | "Fix the problems listed on tab 4 first: {list}." |
 | 6 | **Build model** | SolidWorks card: run Build Board. See what was built, what failed and why, overlaps. Tick changes. | at least one body included | "Include at least one body on tab 3. Build Board builds a box for each included body." |
-| 7 | **Spreader** (optional) | Choose a plate, cover chips, TIM. Hand check with spreader. SolidWorks card: Build Spreader, then Sync. | model built, no unticked changes | "Run Build Board first (tab 6)." or "Tick the {n} changes on tab 6 first. Building on top of unchecked changes can hide a mistake." |
+| 7 | **Spreader** (optional) | Choose a plate, cover chips, TIM. Hand check with spreader. SolidWorks card: Build Spreader, then Sync. | model built, no unticked changes | "Run Build Board first (tab 6)." or "Tick the {n} changes on tab 10 first. Building on top of unchecked changes can hide a mistake." |
 | 8 | **Simulation setup** | Surface h and emissivity, contacts, mesh, chip models. Shows the k z each chip will get and why. SolidWorks card: Run Thermal Study. | model built, no unticked changes | same as above |
 | 9 | **Results** | Temperatures per part, hand vs simulation, energy balance, pass or fail, run history, plot picture. | `results.json` has a run | "Run the study first (tab 8). Results appear here when Read Results has finished." |
 | 10 | **Changes** | All change records, tick them. | always (badge shows unticked count) | |
@@ -150,6 +150,8 @@ the user changed them.
 
 Rules:
 
+- Every tab past 0 also needs an open project that can be saved (a folder, or files opened by hand).
+- Blocking problems for tab 5: a load whose Pd cannot be worked out, an unknown PCB size or PCB k.
 - A locked tab can still be opened to read. Its inputs are greyed and its SolidWorks card shows the reason.
 - Every reason names the fix and links to it ("Go to tab 3").
 - A tab that is done but whose inputs changed later shows "out of date" with what changed ("Pd of U5 changed after the
@@ -307,7 +309,7 @@ Per macro:
 |---|---|---|
 | W1 | File formats: JSON schemas for the three files, with the RPi4 example converted from the workbook | `project.json`, `cad.json`, `results.json` for RPi4 exist and validate. **Done 2026-10-18** (`webapp/schema/`, `example/RaspberryPi4/*.json`, `npm test` in `webapp/`) |
 | W2 | Calculation module: register, triage, rail budget, PCB stack, bare board network, spreader checks, thermal solution top and bottom, sim setup k values | matches `expected_rpi4.json`. **Done 2026-10-18** (`webapp/src/calc/`; about 4000 values of both RPi4 workbooks match; `forSolidWorks` is now computed by it) |
-| W3 | Page shell: folder picking, save and reload, tabs with unlock rules and reasons, undo | RPi4 example opens, edits save, a locked tab names its reason |
+| W3 | Page shell: folder picking, save and reload, tabs with unlock rules and reasons, undo | RPi4 example opens, edits save, a locked tab names its reason. **Done 2026-10-18** (`webapp/src/page/`, `npm run build` makes `dist/PCB_Thermal.html`; `tools/test_w3.mjs` checks the unlock rules, undo and save output; RPi4 opened, edited, saved and reloaded in the browser) |
 | W4 | Term catalogue and Explain panel: hover text, abbreviations, formulas with numbers, trace | every value on every tab has a hover text and, if calculated, a formula |
 | W5 | Tabs 1 to 5 complete (parts to bare board hand check), Learn mode texts | a new user can fill a board from a datasheet list without the workbook |
 | W6 | Macros on JSON: `PTJson.bas`, project folder, Import STEP and Build Board read and write JSON | RPi4: import and build from the page give the same model as from the workbook |

@@ -17,6 +17,8 @@ Read `PLAN.md` first. It is the spec. This file is the short list of rules that 
   (milestones W1 to W9). The page is one HTML file, `webapp/dist/PCB_Thermal.html`, opened from disk in Chrome or Edge,
   with every library inside it. It writes only `project.json`; the macros write only `cad.json` and `results.json`. Schemas:
   `webapp/schema/`. The workbook and the current macros keep working until W7.
+- Page source is `webapp/src/page/` (Preact and htm, no JSX). `npm run build` in `webapp/` makes `dist/PCB_Thermal.html`;
+  commit the rebuilt file with every page change. `npm run serve` serves the repo on localhost for browser checks.
 - Node tools in `webapp/` (`npm test`, converter, validator) are for development here only. The user's PC never needs
   Node, npm or Python: only the built HTML file ships.
 

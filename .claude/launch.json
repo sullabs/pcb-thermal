@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "page",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["webapp/tools/serve.mjs"],
+      "port": 8173
+    }
+  ]
+}
