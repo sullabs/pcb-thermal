@@ -56,6 +56,7 @@ function App() {
   const [last, setLast] = useState(null);         // remembered folder handle
   const [backups, setBackups] = useState([]);
   const [showFx, setShowFx] = useState(store.get("fx") === "1");
+  const [hover, setHover] = useState(store.get("hover") !== "0");   // hover texts, on until the user turns them off
   const [learn, setLearn] = useState(store.get("learn") !== "0");   // on until the user turns it off
   const [explain, setExplain] = useState([]);     // stack of { t, k }: the last is shown, Back pops
   const [helpAt, setHelpAt] = useState(null);    // Help section to scroll to
@@ -76,6 +77,7 @@ function App() {
   useEffect(() => { document.documentElement.dataset.theme = theme; store.set("theme", theme); }, [theme]);
   useEffect(() => { store.set("tab", String(tab)); }, [tab]);
   useEffect(() => { store.set("fx", showFx ? "1" : "0"); }, [showFx]);
+  useEffect(() => { store.set("hover", hover ? "1" : "0"); }, [hover]);
   useEffect(() => { store.set("learn", learn ? "1" : "0"); }, [learn]);
   useEffect(() => { if (F.folderSupported) F.lastFolder().then(setLast); }, []);
 
@@ -496,6 +498,7 @@ function App() {
       <button onClick=${doRedo} disabled=${!hist.future.length} title=${hist.future.length ? "Redo: " + hist.future[0].label + " (Ctrl+Y)" : "Nothing to redo"}>Redo</button>
       <button aria-pressed=${learn} class=${learn ? "on" : ""} onClick=${() => setLearn(!learn)} title="Show what each step is for, what to look at, and a plain reading of the results">Learn</button>
       <button aria-pressed=${showFx} class=${showFx ? "on" : ""} onClick=${() => setShowFx(!showFx)} title="Write the formula, with your numbers, under every calculated value">Show formulas</button>
+      <button aria-pressed=${hover} class=${hover ? "on" : ""} onClick=${() => setHover(!hover)} title=${hover ? "Hover texts are on: pointing at a value, label or abbreviation explains it. Click to turn them off (clicking a value still opens the Explain panel)." : "Hover texts are off. Click to turn them on again."}>Hover help</button>
       <button onClick=${() => setTheme(theme === "dark" ? "light" : "dark")} title="Switch between dark and light">${theme === "dark" ? "Light" : "Dark"}</button>
       <span class="menu-wrap">
         <button aria-expanded=${exp} disabled=${!fctx} onClick=${() => setExp(!exp)} title="Report (PDF), workbook (.xlsx) or project archive (.zip)">Export</button>
@@ -529,7 +532,7 @@ function App() {
     <${ExplainPanel} at=${explain[explain.length - 1]} ctx=${fctx} onOpen=${openExplain} onEdit=${goEdit} canBack=${explain.length > 1}
       onBack=${() => setExplain(s => s.slice(0, -1))} onClose=${() => setExplain([])} onHelp=${id => { setHelpAt(helpSection(id)); setTab(11); }} />
     </div>
-    <${Tip} />
+    <${Tip} on=${hover} />
     <//>
     <div class="msgs" aria-live="polite">${msgs.map(m => html`<div class=${`msg ${m.kind}`} key=${m.id}>${m.text}</div>`)}</div>
     <footer>page ${PAGE_VERSION} · ${mode === "folder" ? "saves into the folder" : mode === "manual" ? "files opened by hand: Save downloads " + files.project : example ? "example study, read only" : "no folder"}</footer>`;

@@ -114,9 +114,11 @@ export function L({ t, k = "", children }) {
 }
 
 // ---------- hover text: one box for the whole page ----------
-export function Tip() {
+// on: false when the user switched hover texts off (Hover in the top bar); the Explain panel still opens on click.
+export function Tip({ on = true }) {
   const [tip, setTip] = useState(null);
   useEffect(() => {
+    if (!on) { setTip(null); return; }
     const show = e => {
       const el = e.target.closest?.("[data-term],[data-gloss],[data-status]");
       if (!el) return;
@@ -142,7 +144,7 @@ export function Tip() {
     document.addEventListener("focusout", hide);
     document.addEventListener("keydown", esc);
     return () => { for (const [n, f] of [["mouseover", show], ["focusin", show], ["mouseout", hide], ["focusout", hide], ["keydown", esc]]) document.removeEventListener(n, f); };
-  }, []);
+  }, [on]);
   if (!tip) return null;
   return html`<div class="tip" role="tooltip" style=${{ left: tip.at.x + "px", top: tip.at.y + "px" }}>
     <b>${tip.title}</b>${tip.unit ? html` <span class="hint">${tip.unit}</span>` : ""}${tip.kind ? html` <span class="kind">${tip.kind}</span>` : ""}

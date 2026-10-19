@@ -13,7 +13,7 @@ export const HELP = [
     "Who writes what: the page writes only the project file. The macros write the cad and results files. The page reads those every 2 s and shows what a macro did as soon as it has finished. Neither ever overwrites the other's file.",
     ["Tab 0: choose the board's folder. For a new project type your prefix (your initials) and the board name: the page writes AB_project.json, AB_cad.json, AB_results.json and the CAD folder there.",
       "Follow the tabs in order. A grey tab says what it waits for and links to the step that unlocks it.",
-      "Learn in the top bar explains each step; Show formulas writes every formula with your numbers.",
+      "Learn in the top bar explains each step; Show formulas writes every formula with your numbers; Hover help turns the texts that appear when you point at a value on or off.",
       "The example study (Raspberry Pi 4) shows every tab filled in. It opens read only, so nothing can break."],
   ] },
   { id: "heat", title: "Heat basics", body: [
