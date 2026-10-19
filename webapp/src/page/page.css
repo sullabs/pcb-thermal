@@ -51,7 +51,8 @@ fieldset.content { border: 0; margin: 0; padding: 0; min-width: 0; }
 /* Cards flow side by side on wide screens. Cards with a table, the sheet, a sketch or a diagram, and anything that is not a card, take the full width. */
 fieldset.content { display: flex; flex-wrap: wrap; gap: 0 14px; align-items: flex-start; }
 fieldset.content > * { flex: 1 1 100%; min-width: 0; }
-fieldset.content > .card:not(:has(.scroll, .sheet-wrap, .boards, svg, table.grid:not(.limits), .cols, .steps, textarea, .body-edit)) { flex: 1 1 420px; }
+fieldset.content > .card { flex: 0 1 auto; max-width: 100%; }
+fieldset.content > .card:has(.sheet-wrap, .boards, svg, .cols, .steps, textarea, .body-edit) { flex: 1 1 100%; }
 .locked-banner { background: var(--panel2); border: 1px dashed var(--locked); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
 .card.attention { border-color: var(--watch); }
