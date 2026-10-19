@@ -275,6 +275,7 @@ Function BuildRecord(ByVal asmPath As String) As Object
     PJ_Put d, "assembly", asmPath
     PJ_Put d, "date", PJ_Now()
     PJ_Put d, "mode", IIf(isUpdate, "update", "create")
+    PJ_Put d, "inputsHash", PJ_Str(PJ_Project, "forSolidWorks/inputsHash", "")            ' the page compares it to spot an out-of-date model
     Set cnts = PJ_Dict()
     PJ_Put cnts, "wanted", nW
     PJ_Put cnts, "added", nAdded

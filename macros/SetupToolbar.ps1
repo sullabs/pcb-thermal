@@ -33,6 +33,16 @@ $buttons = @(
       "Reads the board STEP (or the open model) and writes the size and position of every body to the project's cad file."),
     @("Build Board", "BuildBoard", "3_BuildBoard_32.bmp",
       "Builds or updates the thermal assembly: one box for the PCB and one per included part. Refuses while changes are unticked."),
+    @("Build Spreader", "BuildSpreader", "4_BuildSpreader_32.bmp",
+      "Builds or updates the heat spreader plate, pedestals and TIM parts from tab 7 of the page. Run Build Board first."),
+    @("Sync CAD", "SyncFromCAD", "5_SyncCADtoExcel_32.bmp",
+      "Reads the thermal assembly back: sizes, the plate as built, checks. Writes the cad file; tab 10 offers the new sizes. Changes no CAD file."),
+    @("Run Thermal Study", "SetupSim", "6_RunThermalStudy_32.bmp",
+      "Makes a new Simulation thermal study from tab 8 of the page, meshes and runs it. Then press Read Results."),
+    @("Run Flow Simulation", "RunFlow", "7_RunFlowSim_32.bmp",
+      "Sets heat sources and ambient on your Flow Simulation project, solves it and writes the goals to the results file."),
+    @("Read Results", "ReadResults", "8_ReadResults_32.bmp",
+      "Reads the solved thermal study and writes the temperatures to the results file, tab 9 of the page."),
     @("Update Macros", "UpdateMacros", "0_UpdateMacros_32.bmp",
       "Imports every .bas file from this folder into PCBThermal.swp, compiles and saves it. Use it after you get new .bas files.")
 )
