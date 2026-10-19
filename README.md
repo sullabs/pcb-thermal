@@ -58,3 +58,13 @@ read the project files.
 
 New `PCB_Thermal.html`: replace the file. New `.bas` files: put them in `macros\`, then press **Update Macros** on the
 PCB Thermal tab.
+
+## For developers
+
+This branch is the user package. Development happens on `addin-mvp`. Every change there to the page or to a macro
+in this package must also land here, in the same session:
+
+- Page: `npm run build` in `webapp\`, copy `webapp\dist\PCB_Thermal.html` here.
+- Macros: copy the changed `.bas` files to `macros\`, press **Update Macros** (or rebuild `PCBThermal.swp`), commit
+  the `.swp` too.
+- A new macro that works with the project files: add its `.bas`, button and icons here and to `README.md`.
