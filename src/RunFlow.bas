@@ -90,6 +90,7 @@ Dim fMinTravels As Double, fGoalCritC As Double   ' convergence (F3)
 Dim curLevel As Long                     ' global mesh level of the solve being read
 Dim mcPair As String                     ' mesh check: name of the other run of the pair ("" = no mesh check)
 Dim domMm(1 To 6) As Double, hasDom As Boolean  ' computational domain (mm) set by SetDomain
+Dim tjBasisD As Object                   ' RefDes (upper) -> "calibrated block", "two-resistor" or "package" (F4)
 
 Sub main()
     Set swApp = Application.SldWorks
@@ -101,6 +102,7 @@ Sub main()
     meshedQ = 0: balPct = 0: hasBal = False: qConv = 0: qRad = 0
     fMeshLevel = 0: fLocalMesh = False: fSolidRefine = 3: fMeshCheck = False: curLevel = 0: mcPair = "": hasDom = False
     fMinTravels = 0: fGoalCritC = 0
+    Set tjBasisD = PJ_Dict()
 
     jsonMode = False: regTotal = 0
     Dim xl As Object, wb As Object, rf As Object, rfPath As String, cad As Object
@@ -657,7 +659,11 @@ Function BuildFlowProject(ByVal asm As Object, ByVal fda As Object, ByVal heat A
     Dim tg As Collection, it As Variant, refComps As Object, partC As Collection, pcbC As Collection
     Dim sprC As Collection, timC As Collection, refU As String, k As Variant, ft As Object, isNew As Boolean
     Dim layersS As String, sprMat As String, cn As String
+    Dim refObj As Object, compRef As Object, fc As Object, cj As Object, basisS As String, okChip As Object
+    Dim coreB As Object, lb As Variant, partRest As Collection, tgt As Collection, byB As Boolean, wantM As Object
     Set refComps = CreateObject("Scripting.Dictionary")
+    Set refObj = CreateObject("Scripting.Dictionary")      ' RefDes -> first SolidWorks component (layer bodies)
+    Set compRef = CreateObject("Scripting.Dictionary")     ' component name -> RefDes
     Set partC = New Collection: Set pcbC = New Collection: Set sprC = New Collection: Set timC = New Collection
     Set tg = PT_ListTagged(asm)
     For Each it In tg
@@ -669,6 +675,8 @@ Function BuildFlowProject(ByVal asm As Object, ByVal fda As Object, ByVal heat A
                 If refU <> "" Then
                     If Not refComps.Exists(refU) Then refComps.Add refU, New Collection
                     refComps(refU).Add cn
+                    If Not refObj.Exists(refU) Then refObj.Add refU, it(3)
+                    compRef(cn) = refU
                 End If
             Case "PCB": pcbC.Add cn
             Case "Spreader": sprC.Add cn
@@ -689,7 +697,53 @@ Function BuildFlowProject(ByVal asm As Object, ByVal fda As Object, ByVal heat A
         layersS = "4"
     End If
     SetMaterial fda, "PCB material", "Pre-Defined\Non-isotropic\PCB " & layersS & "-layers", pcbC
-    SetMaterial fda, "Parts material", MAT_PARTS, partC
+    ' chips (F4): a calibrated block or the three layer bodies of a two-resistor chip, as forSolidWorks.flow says;
+    ' every other part keeps the generic package material, and its peak is the package temperature
+    Set okChip = CreateObject("Scripting.Dictionary")
+    Set coreB = CreateObject("Scripting.Dictionary")
+    Set wantM = CreateObject("Scripting.Dictionary")
+    If jsonMode Then Set fc = PJ_Obj(PJ_Project, "forSolidWorks/flow/chips")
+    For Each k In heat.Keys
+        refU = CStr(k)
+        If heat(k) > 0 And refComps.Exists(refU) Then
+            tjBasisD(refU) = "package"
+            basisS = ""
+            Set cj = Nothing
+            If Not fc Is Nothing Then Set cj = KeyCI(fc, refU)
+            If Not cj Is Nothing Then basisS = PJ_Str(cj, "basis", "")
+            If basisS = "two-resistor" Then
+                lb = LayerBodies(refObj(refU), AsmTitle(asm))
+                If IsArray(lb) Then
+                    wantM("CHIP MATERIAL " & refU & " BOTTOM") = 1: wantM("CHIP MATERIAL " & refU & " CORE") = 1: wantM("CHIP MATERIAL " & refU & " TOP") = 1
+                    If SetMaterial(fda, "Chip material " & refU & " bottom", PJ_Str(cj, "layers/bottom", ""), OneItem(lb(0)), True) And _
+                       SetMaterial(fda, "Chip material " & refU & " core", PJ_Str(cj, "layers/core", ""), OneItem(lb(1)), True) And _
+                       SetMaterial(fda, "Chip material " & refU & " top", PJ_Str(cj, "layers/top", ""), OneItem(lb(2)), True) Then
+                        okChip(refU) = 1
+                        tjBasisD(refU) = "two-resistor"
+                        coreB.Add refU, OneItem(lb(1))
+                    End If
+                Else
+                    notes.Add refU & ": two-resistor in Flow needs the three layer bodies that Run Thermal Study makes. Run it once, or the chip stays a generic package."
+                End If
+            ElseIf basisS = "calibrated block" Then
+                wantM("CHIP MATERIAL " & refU) = 1
+                If SetMaterial(fda, "Chip material " & refU, PJ_Str(cj, "material", ""), refComps(refU)) Then
+                    okChip(refU) = 1
+                    tjBasisD(refU) = "calibrated block"
+                End If
+            End If
+        End If
+    Next
+    DropOldOwned fda, nikSolidMaterial, "CHIP MATERIAL ", wantM
+    Set partRest = New Collection
+    For Each it In partC
+        If compRef.Exists(CStr(it)) Then
+            If Not okChip.Exists(compRef(CStr(it))) Then partRest.Add CStr(it)
+        Else
+            partRest.Add CStr(it)
+        End If
+    Next
+    SetMaterial fda, "Parts material", MAT_PARTS, partRest
     If sprK >= 300 Then sprMat = MAT_COPPER Else sprMat = MAT_ALUMINUM
     SetMaterial fda, "Spreader material", sprMat, sprC
     SetMaterial fda, "TIM material", MAT_TIM, timC
@@ -701,14 +755,17 @@ Function BuildFlowProject(ByVal asm As Object, ByVal fda As Object, ByVal heat A
             If Not refComps.Exists(refU) Then
                 notes.Add refU & " has heat but no part in the thermal assembly: no source or goal made."
             Else
+                ' a two-resistor chip has its heat and its goals on the core body: its peak is Tj
+                byB = coreB.Exists(refU)
+                If byB Then Set tgt = coreB(refU) Else Set tgt = refComps(refU)
                 If OtherSource(fda, refU) Then
                     lines.Add "source for " & refU & ": the one already in the project is used"
                 Else
-                    Set ft = OwnFeature(fda, nikVolumeSource, refU & " heat", refComps(refU), isNew)
+                    Set ft = OwnFeature(fda, nikVolumeSource, refU & " heat", tgt, isNew, byB)
                     If Not ft Is Nothing Then FinishFeature fda, ft, refU & " heat", isNew
                 End If
-                OwnGoal fda, refU & " max", nikGoalMax, refComps(refU)
-                OwnGoal fda, refU & " avg", nikGoalAvg, refComps(refU)
+                OwnGoal fda, refU & " max", nikGoalMax, tgt, byB
+                OwnGoal fda, refU & " avg", nikGoalAvg, tgt, byB
             End If
         End If
     Next
@@ -747,25 +804,41 @@ Function BuildFlowProject(ByVal asm As Object, ByVal fda As Object, ByVal heat A
 End Function
 
 ' Solid material feature of the macro: material path and components. A path the database does not have is noted.
-Sub SetMaterial(ByVal fda As Object, ByVal featName As String, ByVal matPath As String, ByVal comps As Collection)
+' Solid material feature of the macro: material path and components (or bodies, byBody). True when the material
+' was set. A path the database does not have is noted; the feature is then removed, so the components fall back to
+' the material of a wider feature (Parts material) or the project default.
+Function SetMaterial(ByVal fda As Object, ByVal featName As String, ByVal matPath As String, ByVal comps As Collection, _
+                     Optional ByVal byBody As Boolean = False) As Boolean
     Dim ft As Object, isNew As Boolean, rc As Long
-    Set ft = OwnFeature(fda, nikSolidMaterial, featName, comps, isNew)
-    If ft Is Nothing Then Exit Sub
+    If matPath = "" Then
+        Set ft = FeatureNamed(fda, featName)
+        If Not ft Is Nothing Then ft.Delete
+        Exit Function
+    End If
+    Set ft = OwnFeature(fda, nikSolidMaterial, featName, comps, isNew, byBody)
+    If ft Is Nothing Then Exit Function
     rc = SetParamString(ft, nikPathToSolidMaterial, matPath)
     If rc <> 0 Then
-        notes.Add featName & ": " & matPath & " is not in the Flow engineering database (code " & rc & "). Default solid used."
-        If isNew Then Exit Sub
+        notes.Add featName & ": " & matPath & " is not in the Flow engineering database (code " & rc & "). " & _
+                  IIf(UCase(Left$(matPath, 13)) = "USER DEFINED\", "Make it once (tab 8 lists it). ", "") & "Generic material used."
+        If Not isNew Then
+            ft.Delete
+            lines.Add "removed " & featName & " (material missing)"
+        End If
+        Exit Function
     End If
     FinishFeature fda, ft, featName, isNew
-    If isNew And featName = "PCB material" Then
-        notes.Add "PCB material was made new: in SolidWorks set its anisotropy axis to Z (the board normal) once."
+    If isNew And (featName = "PCB material" Or InStr(matPath, "\k ") > 0) Then
+        notes.Add featName & " was made new: if its material is anisotropic, set the anisotropy axis to Z (the board normal) once in SolidWorks."
     End If
-End Sub
+    SetMaterial = True
+End Function
 
 ' Temperature goal of the macro (volume goal, solid temperature, kind = min, max or avg) on the components.
-Sub OwnGoal(ByVal fda As Object, ByVal featName As String, ByVal kind As Long, ByVal comps As Collection)
+Sub OwnGoal(ByVal fda As Object, ByVal featName As String, ByVal kind As Long, ByVal comps As Collection, _
+            Optional ByVal byBody As Boolean = False)
     Dim ft As Object, gl As Object, isNew As Boolean
-    Set ft = OwnFeature(fda, nikVolumeGoal, featName, comps, isNew)
+    Set ft = OwnFeature(fda, nikVolumeGoal, featName, comps, isNew, byBody)
     If ft Is Nothing Then Exit Sub
     Set gl = ft.GetInterface("IParameterGoal")
     If Not gl Is Nothing Then
@@ -778,8 +851,8 @@ End Sub
 ' Feature with a fixed name: the existing one pointed at comps, a new temporary one when missing (isNew), or
 ' deleted when comps is empty (returns Nothing).
 Function OwnFeature(ByVal fda As Object, ByVal featType As Long, ByVal featName As String, ByVal comps As Collection, _
-                    ByRef isNew As Boolean) As Object
-    Dim ft As Object, topo As Object, c As Variant
+                    ByRef isNew As Boolean, Optional ByVal byBody As Boolean = False) As Object
+    Dim ft As Object, topo As Object, c As Variant, okAdd As Boolean
     isNew = False
     Set ft = FeatureNamed(fda, featName)
     If comps.Count = 0 Then
@@ -800,7 +873,12 @@ Function OwnFeature(ByVal fda As Object, ByVal featType As Long, ByVal featName 
     Set topo = ft.GetInterface("ITopologyBasedFeature")
     If Not isNew Then topo.RemoveAllReferencies
     For Each c In comps
-        If Not IsTrue(topo.AddComponent(nikFTR_topology, CStr(c))) Then notes.Add featName & ": component " & CStr(c) & " was not accepted."
+        If byBody Then
+            okAdd = IsTrue(topo.AddModelBody(nikFTR_topology, CStr(c)))
+        Else
+            okAdd = IsTrue(topo.AddComponent(nikFTR_topology, CStr(c)))
+        End If
+        If Not okAdd Then notes.Add featName & ": " & IIf(byBody, "body ", "component ") & CStr(c) & " was not accepted."
     Next
     Set OwnFeature = ft
 End Function
@@ -1050,6 +1128,11 @@ End Sub
 ' Deletes the macro's local meshes ("Local mesh <name>") that are not in want (upper-case names): their part has no
 ' heat any more or is gone from the assembly.
 Sub DropOldLocalMeshes(ByVal fda As Object, ByVal want As Object)
+    DropOldOwned fda, nikLocalMesh, "LOCAL MESH ", want
+End Sub
+
+' Deletes the features of that type whose upper-case name starts with prefixU and is not in want.
+Sub DropOldOwned(ByVal fda As Object, ByVal featType As Long, ByVal prefixU As String, ByVal want As Object)
     Dim en As Object, ft As Object, vr As Variant, drop As Collection, it As Variant
     Set drop = New Collection
     Set en = fda.EnumFeatures
@@ -1059,7 +1142,7 @@ Sub DropOldLocalMeshes(ByVal fda As Object, ByVal want As Object)
     Do While Not ft Is Nothing
         vr = ft.Type
         If IsNumeric(vr) Then
-            If CLng(vr) = nikLocalMesh And UCase(Left$(CStr(ft.Name), 11)) = "LOCAL MESH " And Not want.Exists(UCase(CStr(ft.Name))) Then drop.Add ft
+            If CLng(vr) = featType And UCase(Left$(CStr(ft.Name), Len(prefixU))) = prefixU And Not want.Exists(UCase(CStr(ft.Name))) Then drop.Add ft
         End If
         Set ft = en.Next
     Loop
@@ -1156,6 +1239,55 @@ Sub WarnThinParts(ByVal heat As Object)
     If s <> "" Then notes.Add "Thinner than the estimated smallest cell (" & Format(cellMm, "0.00") & " mm): " & s & _
         ". They may not be meshed. Turn on the local mesh or raise the mesh level on tab 8."
 End Sub
+
+' ---------------------------------------------------------------- chips (Flow plan F4)
+' Item of a dictionary by key, ignoring case (the page writes RefDes as typed). Nothing when missing.
+Function KeyCI(ByVal d As Object, ByVal keyU As String) As Object
+    Dim k As Variant
+    For Each k In d.Keys
+        If UCase(CStr(k)) = keyU Then
+            If IsObject(d(k)) Then Set KeyCI = d(k)
+            Exit Function
+        End If
+    Next
+End Function
+
+Function OneItem(ByVal s As String) As Collection
+    Set OneItem = New Collection
+    OneItem.Add s
+End Function
+
+' Assembly name as Flow writes it in body references (file name without extension)
+Function AsmTitle(ByVal asm As Object) As String
+    Dim s As String
+    s = CStr(asm.GetPathName)
+    s = Mid$(s, InStrRev(s, "\") + 1)
+    If InStr(s, ".") > 0 Then s = Left$(s, InStrRev(s, ".") - 1)
+    AsmTitle = s
+End Function
+
+' Flow body references of a two-resistor chip made by Run Thermal Study (bodies PT_Box, PT_LayerCore, PT_LayerTop):
+' Array(bottom, core, top) as "<body>@<component>@<assembly>", or Empty when the part is not in three layers.
+Function LayerBodies(ByVal comp As Object, ByVal asmName As String) As Variant
+    Dim bodies As Variant, i As Long, nm As String, b0 As String, b1 As String, b2 As String, cn As String
+    On Error Resume Next
+    bodies = comp.GetBodies2(PT_swSolidBody)
+    On Error GoTo 0
+    If Not IsArray(bodies) Then Exit Function
+    For i = LBound(bodies) To UBound(bodies)
+        nm = CStr(bodies(i).Name)
+        If InStr(UCase(nm), "LAYERCORE") > 0 Then
+            b1 = nm
+        ElseIf InStr(UCase(nm), "LAYERTOP") > 0 Then
+            b2 = nm
+        ElseIf InStr(UCase(nm), "PT_BOX") > 0 Then
+            b0 = nm
+        End If
+    Next
+    If b0 = "" Or b1 = "" Or b2 = "" Then Exit Function
+    cn = CStr(comp.Name2)
+    LayerBodies = Array(b0 & "@" & cn & "@" & asmName, b1 & "@" & cn & "@" & asmName, b2 & "@" & cn & "@" & asmName)
+End Function
 
 ' Clears what one solve read, before the second solve of a mesh check.
 Sub ResetRunState()
@@ -1467,6 +1599,7 @@ Function FlowRun(ByVal runName As String, ByVal projName As String, ByVal solved
         Set p = PJ_Dict()
         PJ_Put p, "peakC", Round(peak(refK), 2)
         If avg.Exists(refK) Then PJ_Put p, "avgC", Round(avg(refK), 2)
+        If tjBasisD.Exists(CStr(refK)) Then PJ_Put p, "tjBasis", tjBasisD(CStr(refK))
         PJ_Put parts, refS, p
     Next
     PJ_Put d, "parts", parts

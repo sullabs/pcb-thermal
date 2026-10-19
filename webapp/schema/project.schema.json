@@ -425,6 +425,50 @@
             "top": { "$ref": "#/$defs/plateForSw" },
             "bottom": { "$ref": "#/$defs/plateForSw" }
           }
+        },
+        "flow": { "$ref": "#/$defs/flowForSw" }
+      }
+    },
+    "flowForSw": {
+      "type": "object",
+      "description": "What Run Flow Simulation needs beyond the rest of forSolidWorks (Flow plan F4, F5). Material paths are user materials in Flow's Engineering Database, named after their k in 10 % steps.",
+      "additionalProperties": false,
+      "properties": {
+        "chips": {
+          "type": "object",
+          "description": "Per RefDes with heat: how the chip is modelled in Flow.",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["basis"],
+            "additionalProperties": false,
+            "properties": {
+              "basis": { "$ref": "common.schema.json#/$defs/tjBasis" },
+              "material": { "type": "string", "description": "Calibrated block: material path." },
+              "layers": {
+                "type": "object",
+                "description": "Two-resistor: material path per layer body (PT_Box, PT_LayerCore, PT_LayerTop).",
+                "required": ["bottom", "core", "top"],
+                "additionalProperties": false,
+                "properties": { "bottom": { "type": "string" }, "core": { "type": "string" }, "top": { "type": "string" } }
+              }
+            }
+          }
+        },
+        "materials": {
+          "type": "array",
+          "description": "Every user material the paths above name, to make once in the Engineering Database (Solids > User Defined > PCBThermal).",
+          "items": {
+            "type": "object",
+            "required": ["name", "path", "kxy", "kz"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string" },
+              "path": { "type": "string" },
+              "kxy": { "$ref": "common.schema.json#/$defs/kWmK" },
+              "kz": { "$ref": "common.schema.json#/$defs/kWmK" },
+              "usedBy": { "type": "array", "items": { "type": "string" } }
+            }
+          }
         }
       }
     },

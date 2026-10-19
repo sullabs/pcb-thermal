@@ -8,7 +8,7 @@
 //   inputChanges(fsThen, fsNow, simThen, simNow) -> texts, one per input that differs ("Pd of U5 0.8 W, now 1.1 W")
 
 import { isNum } from "./util.js";
-import { flowSettings, meshCheckResult } from "./flow.js";
+import { flowSettings, meshCheckResult, tjBasisOf } from "./flow.js";
 
 // Energy balance above this (%) means the run is not converged or a heat load is missing.
 export const BALANCE_LIMIT_PCT = 2;
@@ -72,6 +72,7 @@ export function runResults(project, results, calc, fsNow) {
       const r = {};
       if (p && isNum(p.tjMaxC) && isNum(t.peakC)) r.marginC = p.tjMaxC - t.peakC;
       r.status = !p ? "not on tab 1" : !isNum(p.tjMaxC) ? "no Tj max" : r.marginC < 0 ? "FAIL" : r.marginC < tight ? "Tight" : "OK";
+      r.tjBasis = tjBasisOf(run, ref);
       const sol = withPlate ? ["top", "bottom"].map(s => calc.solution[s]?.parts?.[ref]).find(x => isNum(x?.tjC)) : undefined;
       if (sol) { r.handC = sol.tjC; r.handFrom = "thermal solution"; }
       else if (isNum(calc.bareBoard.parts[ref]?.tjC)) { r.handC = calc.bareBoard.parts[ref].tjC; r.handFrom = "bare board"; }

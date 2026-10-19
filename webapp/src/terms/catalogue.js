@@ -452,6 +452,15 @@ def("flow.solidRefine", "Local refinement", "", "", "input", "How many times the
 def("flow.meshCheck", "Mesh check", "", "", "input", "Yes: the next Run Flow solves twice, at the mesh level and one level finer, and tab 9 compares them. Blank = no.",
   "A result you can trust does not change much when the mesh gets finer. The mesh check costs one extra solve, several times longer than the first. Turn it off again for normal runs.");
 def("flow.meshCheckLimit", "Mesh check limit", "", "C", "input", "A mesh check is OK when every chip moved less than this. Blank = 1 C.", undefined, { range: [0.1, 5] });
+def("runp.tjBasis", "Tj basis", "", "", "calculated", "What the simulated peak means: Tj (calibrated block, two-resistor core) or the package temperature (no Rjc, generic material).",
+  "The Thermal study and Run Flow give every chip with an Rjc a block whose k z = H / (Rjc × A), so its peak is Tj. A chip without Rjc gets a generic material: its peak is the package temperature, cooler than Tj, so the Tj max check on it is optimistic.");
+def("fchip.basis", "Tj basis in Flow", "", "", "calculated", "How Run Flow models this chip: calibrated block (peak = Tj), two-resistor (core = Tj) or package (no Rjc).");
+def("fchip.material", "Flow material", "", "", "calculated", "User material in Flow's Engineering Database that Run Flow gives this chip.");
+def("fchip.rjcStep", "Rjc given", "", "C/W", "calculated", "Rjc the stepped material gives the block. Within 5 % of the datasheet Rjc.");
+def("fmat.name", "Material", "", "", "calculated", "Name of the user material: k in 10 % steps. Make it once under Solids > User Defined > PCBThermal.");
+def("fmat.kxy", "k xy", "", "W/(m K)", "calculated", "In-plane conductivity of the material (k in X and Y).");
+def("fmat.kz", "k z", "", "W/(m K)", "calculated", "Through conductivity of the material (k in Z).");
+def("fmat.usedBy", "Used by", "", "", "calculated", "Chips (and layers) that use this material.");
 def("flow.minTravels", "Minimum travels", "", "", "input", "The solve stops only after this many travels, and only when the goals have converged. Blank = 2.",
   "Flow's own criteria are often met after about one travel; on the RPi4 the chip goals then still had criteria of about 2.3 K. Two travels let the air settle so runs can be compared within 1 to 2 C. The API cannot set the criterion of a goal, so a goal still moving more than the goal criterion is flagged on tab 9.", { range: [1, 10] });
 def("flow.goalCriteria", "Goal criterion", "", "C", "input", "A goal whose last change is above this is shown as not converged on tab 9. Blank = 0.2 C.", undefined, { range: [0.05, 2] });

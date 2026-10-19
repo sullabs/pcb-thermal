@@ -405,6 +405,14 @@ export const VALUES = {
   "flow.solidRefine": c => c.calc.flow?.settings.solidRefine,
   "flow.meshCheck": c => c.calc.flow?.settings.meshCheck,
   "flow.meshCheckLimit": c => c.calc.flow?.settings.meshCheckLimitC,
+  "runp.tjBasis": (c, k) => runpCalc(c, k)?.tjBasis,
+  "fchip.basis": (c, k) => c.calc.fsNow?.flow?.chips?.[k]?.basis,
+  "fchip.material": (c, k) => { const x = c.calc.fsNow?.flow?.chips?.[k]; return x?.material || (x?.layers ? `${x.layers.bottom} / ${x.layers.core} / ${x.layers.top}` : undefined); },
+  "fchip.rjcStep": (c, k) => { const ch = c.calc.simChips.find(x => x.refDes === k), m = c.calc.fsNow?.flow?.materials.find(x => x.path === c.calc.fsNow?.flow?.chips?.[k]?.material); return ch && m && ch.hMm > 0 && ch.areaMm2 > 0 ? (ch.hMm * 1000) / (m.kz * ch.areaMm2) : undefined; },
+  "fmat.name": (c, k) => c.calc.fsNow?.flow?.materials?.[+k]?.name,
+  "fmat.kxy": (c, k) => c.calc.fsNow?.flow?.materials?.[+k]?.kxy,
+  "fmat.kz": (c, k) => c.calc.fsNow?.flow?.materials?.[+k]?.kz,
+  "fmat.usedBy": (c, k) => c.calc.fsNow?.flow?.materials?.[+k]?.usedBy?.join(", "),
   "flow.minTravels": c => c.calc.flow?.settings.minTravels,
   "flow.goalCriteria": c => c.calc.flow?.settings.goalCriteriaC,
   "run.goalsLoose": (c, k) => { const r = runOf(c, k), lim = c.calc.flow?.settings.goalCriteriaC; if (!r?.goalsHealth || !isNum(lim)) return undefined; const l = Object.entries(r.goalsHealth).filter(([, g]) => g.deltaC > lim).map(([n]) => n); return l.length ? l.join(", ") : "none"; },
@@ -768,6 +776,16 @@ F["run.meshCheckWorst"] = () => ({ text: "The largest change of a chip peak betw
 F["runp.meshDelta"] = () => ({ text: "Change = peak at the finer level - peak at the coarser level", inputs: [] });
 F["run.goalsLoose"] = (c, k) => ({ text: "Goals whose last change (delta) is above the goal criterion of tab 8", inputs: [["criterion", "flow.goalCriteria", ""], ["largest delta", "run.worstDelta", k]] });
 F["run.worstDelta"] = () => ({ text: "Largest delta of the temperature goals at the end of the solve (from the Flow info file)", inputs: [] });
+F["runp.tjBasis"] = () => ({ text: "Calibrated block or two-resistor core: the peak is Tj. Package: no Rjc (or a generic material), the peak is the package temperature", inputs: [] });
+F["fchip.basis"] = () => ({ text: "Two-resistor when the chip model is Two-resistor with Rjc and Rjb, calibrated block when the chip has a block k from Rjc, else package", inputs: [] });
+F["fchip.material"] = () => ({ text: "User material named after the k of the chip in 10 % steps: k xy and k z rounded to 24 steps per decade", inputs: [] });
+F["fchip.rjcStep"] = (c, k) => { const ch = c.calc.simChips.find(x => x.refDes === k); const i = c.calc.simChips.indexOf(ch);
+  return ch ? { text: "Rjc given = H / (k z step × A)", inputs: [["H", "sim.h", String(i)], ["k z step", "fmat.kz", String(c.calc.fsNow?.flow?.materials.findIndex(x => x.path === c.calc.fsNow?.flow?.chips?.[k]?.material))], ["A", "sim.area", String(i)]],
+    fn: v => (v.H * 1000) / (v["k z step"] * v.A), note: "The step is at most 5 % from the exact k, so the Rjc the block gives is within 5 % of the datasheet." } : null; };
+F["fmat.name"] = () => ({ text: "k <k xy> <k z>, or k <k> when both are the same, after rounding to 10 % steps", inputs: [] });
+F["fmat.kxy"] = () => ({ text: "k xy step = 10^(round(24 × log10(k xy)) / 24), 3 digits", inputs: [] });
+F["fmat.kz"] = () => ({ text: "k z step = 10^(round(24 × log10(k z)) / 24), 3 digits", inputs: [] });
+F["fmat.usedBy"] = () => ({ text: "The chips (and layers) that use this material", inputs: [] });
 F["run.healthReasons"] = (c, k) => ({ text: "Each reason behind the health of the run, in plain words", inputs: [["health", "run.health", k]] });
 F["run.changes"] = () => ({ text: "Inputs of the run (a copy kept in the results file) compared with the inputs now: ambient, PCB, Pd per part, bodies, chip models, plates, surfaces, contacts, mesh", inputs: [] });
 F["runp.margin"] = (c, k) => { const ref = k.split("|")[1]; return isNum(runpCalc(c, k)?.marginC) ? { text: "Margin = Tj max - peak", inputs: [["Tj max", "part.tjMax", ref], ["peak", "runp.peak", k]], fn: v => v["Tj max"] - v.peak } : null; };

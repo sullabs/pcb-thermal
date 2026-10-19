@@ -1024,6 +1024,81 @@
         ]
       }
     },
+    "flow": {
+      "chips": {
+        "U1": {
+          "basis": "calibrated block",
+          "material": "User Defined\\PCBThermal\\k 19.6"
+        },
+        "U2": {
+          "basis": "calibrated block",
+          "material": "User Defined\\PCBThermal\\k 1.33"
+        },
+        "U3": {
+          "basis": "calibrated block",
+          "material": "User Defined\\PCBThermal\\k 13.3"
+        },
+        "U4": {
+          "basis": "calibrated block",
+          "material": "User Defined\\PCBThermal\\k 1.33"
+        },
+        "U5": {
+          "basis": "calibrated block",
+          "material": "User Defined\\PCBThermal\\k 2.15"
+        },
+        "U6": {
+          "basis": "package"
+        },
+        "L1": {
+          "basis": "package"
+        },
+        "L2": {
+          "basis": "package"
+        },
+        "J1": {
+          "basis": "package"
+        }
+      },
+      "materials": [
+        {
+          "name": "k 19.6",
+          "path": "User Defined\\PCBThermal\\k 19.6",
+          "kxy": 19.6,
+          "kz": 19.6,
+          "usedBy": [
+            "U1"
+          ]
+        },
+        {
+          "name": "k 1.33",
+          "path": "User Defined\\PCBThermal\\k 1.33",
+          "kxy": 1.33,
+          "kz": 1.33,
+          "usedBy": [
+            "U2",
+            "U4"
+          ]
+        },
+        {
+          "name": "k 13.3",
+          "path": "User Defined\\PCBThermal\\k 13.3",
+          "kxy": 13.3,
+          "kz": 13.3,
+          "usedBy": [
+            "U3"
+          ]
+        },
+        {
+          "name": "k 2.15",
+          "path": "User Defined\\PCBThermal\\k 2.15",
+          "kxy": 2.15,
+          "kz": 2.15,
+          "usedBy": [
+            "U5"
+          ]
+        }
+      ]
+    },
     "inputsHash": "0deb0323"
   },
   "checks": {

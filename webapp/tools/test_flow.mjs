@@ -5,6 +5,7 @@
 // F2. Mesh: simSetup.flow is valid, the smallest cell estimate matches RunFlow's rule and flags thin parts, tab 8
 //     shows the Flow mesh card, a mesh check pair is compared per chip on tab 9.
 // F3. Convergence: minTravels and goalCriteriaC are valid, default to 2 and 0.2, and drive the health reasons.
+// F4. Tj basis: k steps and material names, forSolidWorks.flow per chip, two-resistor layers, tjBasis on tab 9.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,7 +15,7 @@ import { makeValidator } from "./validate.mjs";
 import { calcProject } from "../src/calc/index.js";
 import { valueOf } from "../src/calc/formulas.js";
 import { runHealth } from "../src/calc/runs.js";
-import { flowSettings } from "../src/calc/flow.js";
+import { flowSettings, kStep, flowMaterial, tjBasisOf } from "../src/calc/flow.js";
 import { tabStates, blockingProblems } from "../src/page/tabs.js";
 import { openIssues } from "../src/page/report.js";
 import { Explain } from "../src/page/explain.js";
@@ -142,6 +143,47 @@ const flowRun = (over = {}) => ({
   check(c.value("run.goalsLoose", r.name) === "U2 max" && Math.abs(c.value("run.worstDelta", r.name) - 0.36) < 1e-9, "goals still moving and the largest delta on the page");
   const t8 = show("SimTab", c);
   check(t8.includes('data-term="flow.minTravels"') && t8.includes('data-term="flow.goalCriteria"'), "tab 8 has the convergence inputs");
+}
+
+// ---------- F4 ----------
+{
+  check(kStep(1) === 1 && kStep(10) === 10 && kStep(20.44) === 19.6, "k steps: 1, 10 exact, 20.44 to 19.6", [kStep(1), kStep(10), kStep(20.44)]);
+  let worst = 0;
+  for (let k = 0.2; k < 400; k *= 1.013) worst = Math.max(worst, Math.abs(kStep(k) / k - 1));
+  check(worst < 0.05, `every step within 5 % of k (worst ${(worst * 100).toFixed(2)} %)`);
+  const m = flowMaterial(20.76, 0.3287);
+  check(m.name === "k 21.5 0.316" && m.path === "User Defined\\PCBThermal\\k 21.5 0.316" && flowMaterial(5).name === "k 5.11", "material names: k xy k z, or one k when the same", [m, flowMaterial(5)]);
+
+  const c0 = ctxOf(P);
+  const fl = c0.calc.fsNow.flow;
+  valid("project.schema.json", { ...P, forSolidWorks: { ...c0.calc.fsNow, computedAt: NOW } }, "project.json with forSolidWorks.flow");
+  check(fl.chips.U1.basis === "calibrated block" && fl.chips.U1.material.endsWith("k 19.6") && fl.chips.L1.basis === "package" && !fl.chips.J1 === !P.forSolidWorks.bodies.some(b => b.refDes === "J1"), "U1 calibrated block (k 19.6), L1 package", fl.chips);
+  check(fl.materials.some(x => x.name === "k 1.33" && x.usedBy.join() === "U2,U4"), "U2 and U4 share the material k 1.33", fl.materials);
+  const u1 = c0.calc.simChips.find(x => x.refDes === "U1");
+  check(Math.abs(c0.value("fchip.rjcStep", "U1") - (u1.hMm * 1000) / (19.6 * u1.areaMm2)) < 1e-9 && Math.abs(c0.value("fchip.rjcStep", "U1") / 0.5 - 1) < 0.05, "Rjc given by the U1 step is within 5 % of 0.5 C/W", c0.value("fchip.rjcStep", "U1"));
+
+  // two-resistor U1 (Rjb typed): three layer materials
+  const P2 = structuredClone(P);
+  P2.parts.find(x => x.refDes === "U1").rjbCW = 5;
+  P2.simSetup.chips.find(x => x.refDes === "U1").model = "Two-resistor";
+  const c2 = ctxOf(P2);
+  const ly = c2.calc.fsNow.flow.chips.U1;
+  const t = 0.1 * u1.hMm;
+  check(ly.basis === "two-resistor" && ly.layers.core.endsWith("k 100") && ly.layers.top.endsWith(`k ${kStep((t * 1000) / (0.5 * u1.areaMm2))}`) && ly.layers.bottom.endsWith(`k ${kStep((t * 1000) / (5 * u1.areaMm2))}`), "two-resistor U1: bottom from Rjb, top from Rjc, core 100", ly);
+
+  const fsT = { ...c0.calc.fsNow };
+  const thermal = { name: "PT_X", studyType: "Thermal", status: "read", inputs: { forSolidWorks: fsT }, parts: { U1: { peakC: 80 }, L1: { peakC: 70 } } };
+  check(tjBasisOf(thermal, "U1") === "calibrated block" && tjBasisOf(thermal, "L1") === "package", "Thermal run: basis from the run's chip models");
+  check(tjBasisOf({ studyType: "Flow", parts: { U1: { peakC: 1 } } }, "U1") === "package", "Flow run from before F4: package");
+  const fr = flowRun({ name: "FL_20261019_2350", unresolved: [], warnings: [], heatAppliedW: 6.67, energyBalancePct: 0.1, parts: { U1: { peakC: 91.6, tjBasis: "calibrated block" }, L1: { peakC: 99, tjBasis: "package" } } });
+  const res = { ...R, runs: [...R.runs, fr] };
+  valid("results.schema.json", res, "results.json with tjBasis per part");
+  const c = ctxOf({ ...P, simSetup: { ...P.simSetup, studyType: "Flow" } }, C, res);
+  check(c.calc.runs[fr.name].parts.U1.tjBasis === "calibrated block" && c.calc.runs[fr.name].parts.L1.tjBasis === "package", "Flow run: basis as Run Flow wrote it");
+  const t9 = show("ResultsTab", c);
+  check(t9.includes('data-term="runp.tjBasis"') && t9.includes("package, no "), "tab 9 shows the Tj basis and marks package parts");
+  const t8 = show("SimTab", c);
+  check(t8.includes("Flow materials") && t8.includes("Make these once in Flow") && t8.includes("k 19.6"), "tab 8 lists the Flow materials to make");
 }
 
 console.log(`Flow plan: ${n - fails} of ${n} checks passed.`);

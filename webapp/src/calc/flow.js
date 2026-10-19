@@ -5,6 +5,9 @@
 //   flowMinCellMm(settings, domain)  -> estimated smallest solid cell (mm); same rule as MinCellMm in RunFlow.bas
 //   flowCheck(project, calc)         -> { settings, domain, minCellMm, thin: [{ refDes, hMm }] }
 //   meshCheckResult(run, runs, limit) -> the change per chip between the two runs of a mesh check
+//   kStep(k), flowMaterial(kxy, kz)  -> k in 10 % steps (24 per decade) and the user material named after it
+//   flowForSw(project, calc, fs)     -> forSolidWorks.flow: per chip its Tj basis and material(s), and the materials list
+//   tjBasisOf(run, ref)              -> "calibrated block" | "two-resistor" | "package" for a run's part
 
 import { isNum } from "./util.js";
 
@@ -52,6 +55,47 @@ export function flowCheck(project, calc) {
     }
   }
   return { settings, domain, minCellMm, thin };
+}
+
+// Flow cannot take a k from the API (F0, S4): only a material path from its Engineering Database. So every k is
+// rounded to a step of 10 % and the material is named after it; the same step is reused by every project.
+export const kStep = k => +(10 ** (Math.round(24 * Math.log10(k)) / 24)).toPrecision(3);
+export function flowMaterial(kxy, kz = kxy) {
+  const a = kStep(kxy), b = kStep(kz);
+  const name = a === b ? `k ${a}` : `k ${a} ${b}`;
+  return { name, path: `User Defined\\PCBThermal\\${name}`, kxy: a, kz: b };
+}
+
+// Chips with heat in the Flow project: a block with the Rjc k (calibrated block), the three bodies of a two-resistor
+// chip (Run Thermal Study makes them; layer k = t / (theta × A), core kCore), or the generic package material.
+export function flowForSw(project, calc, fs) {
+  const mats = new Map(), chips = {};
+  const use = (m, who) => { if (!mats.has(m.path)) mats.set(m.path, { ...m, usedBy: [] }); mats.get(m.path).usedBy.push(who); return m.path; };
+  const ss = project.simSetup || {};
+  const frac = isNum(ss.layerFrac) ? ss.layerFrac : 0.1, kCore = isNum(ss.kCore) ? ss.kCore : 100;
+  for (const [ref, q] of Object.entries(fs.heat)) {
+    if (!(q > 0) || !fs.bodies.some(b => b.refDes === ref)) continue;
+    const c = calc.simChips.find(x => x.refDes === ref);
+    if (c?.model === "Two-resistor" && c.rjcCW > 0 && c.rjbCW > 0 && c.hMm > 0 && c.areaMm2 > 0) {
+      const t = frac * c.hMm, k = th => (t * 1000) / (th * c.areaMm2);
+      chips[ref] = { basis: "two-resistor", layers: { bottom: use(flowMaterial(k(c.rjbCW)), `${ref} bottom`), core: use(flowMaterial(kCore), `${ref} core`), top: use(flowMaterial(k(c.rjcCW)), `${ref} top`) } };
+    } else if (c && isNum(c.kz) && c.kz > 0) {
+      chips[ref] = { basis: "calibrated block", material: use(flowMaterial(c.kxy > 0 ? c.kxy : c.kz, c.kz), ref) };
+    } else chips[ref] = { basis: "package" };
+  }
+  return { chips, materials: [...mats.values()] };
+}
+
+// What a run's peak means. Flow runs since F4 say it; older Flow runs used a generic plastic block (package).
+// Thermal runs: from the chip models in the run's own copy of forSolidWorks.
+export function tjBasisOf(run, ref) {
+  const own = run.parts?.[ref]?.tjBasis;
+  if (own) return own;
+  if (run.studyType === "Flow") return "package";
+  const c = (run.inputs?.forSolidWorks?.chips || []).find(x => x.refDes === ref);
+  if (c?.model === "Two-resistor" && c.rjcCW > 0 && c.rjbCW > 0) return "two-resistor";
+  if (c && c.kz > 0) return "calibrated block";
+  return "package";
 }
 
 // Mesh check (F2): RunFlow solves at level N and N+1 and stores both runs with meshCheck.pairWith pointing at the

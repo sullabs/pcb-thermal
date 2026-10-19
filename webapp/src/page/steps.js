@@ -243,6 +243,7 @@ function SimView({ c }) {
       <p class="hint">${type === "Flow" ? "Flow: the macro builds the Flow project itself (air, gravity, radiation, materials, a heat source and goals per chip) and sets heat and ambient. Surfaces and contacts below are for Thermal studies only." : "Thermal: SolidWorks Simulation, steady state, h and radiation on the outer faces."}</p>
     <//>
     ${type === "Flow" && html`<${FlowMeshCard} c=${c} f=${ss.flow || {}} setSim=${setSim} locked=${locked} />`}
+    ${type === "Flow" && html`<${FlowMaterialsCard} c=${c} />`}
     <${Card} title="Air and surfaces">
       <table class="grid limits"><thead><tr><th></th><th><${L} t="surf.pcbTopH">h</${L}></th><th><${L} t="surf.pcbTopEps">emissivity</${L}></th></tr></thead>
       <tbody>${SURF.map(([g, th, te, name]) => g.startsWith("spreader") ? html`<tr><td>${name}</td>
@@ -288,6 +289,22 @@ function FlowMeshCard({ c, f, setSim, locked }) {
   <//>`;
 }
 
+// Flow materials (F4, F5): what each chip becomes in Flow and the user materials to have in the Engineering Database.
+function FlowMaterialsCard({ c }) {
+  const fl = c.calc.fsNow?.flow;
+  if (!fl) return null;
+  const refs = Object.keys(fl.chips);
+  return html`<${Card} title="Flow materials">
+    <${Scroll}><table class="grid"><thead><tr><th><${L} t="part.refDes" /></th><th><${L} t="fchip.basis" /></th><th><${L} t="fchip.material" /></th><th class="num"><${L} t="sim.rjc" /></th><th class="num"><${L} t="fchip.rjcStep" /></th></tr></thead>
+    <tbody>${refs.map(r => { const i = String(c.calc.simChips.findIndex(x => x.refDes === r)); return html`<tr><td><${V} t="part.refDes" k=${r} v=${r} /></td><td class=${fl.chips[r].basis === "package" ? "warn" : ""}><${V} t="fchip.basis" k=${r} /></td><td><${V} t="fchip.material" k=${r} /></td>
+      <td class="num">${i !== "-1" ? html`<${V} t="sim.rjc" k=${i} d=${2} />` : ""}</td><td class="num"><${V} t="fchip.rjcStep" k=${r} d=${2} /></td></tr>`; })}</tbody></table><//>
+    ${fl.materials.length > 0 && html`<h4>Make these once in Flow (Tools > Flow Simulation > Tools > Engineering Database > Materials > Solids > User Defined, folder PCBThermal)</h4>
+      <${Scroll}><table class="grid"><thead><tr><th><${L} t="fmat.name" /></th><th class="num"><${L} t="fmat.kxy" /></th><th class="num"><${L} t="fmat.kz" /></th><th><${L} t="fmat.usedBy" /></th></tr></thead>
+      <tbody>${fl.materials.map((m, i) => html`<tr><td><${V} t="fmat.name" k=${String(i)} /></td><td class="num"><${V} t="fmat.kxy" k=${String(i)} /></td><td class="num"><${V} t="fmat.kz" k=${String(i)} /></td><td><${V} t="fmat.usedBy" k=${String(i)} /></td></tr>`)}</tbody></table><//>
+      <p class="hint">Conductivity anisotropic (axial with axis Z) when k xy and k z differ. Density 2000 kg/m³ and specific heat 1000 J/(kg K) for every one: a steady state result does not depend on them. A material that is missing makes Run Flow use the generic one and say so; the chip is then marked package on tab 9.</p>`}
+  <//>`;
+}
+
 // Mesh check of a run (F2): the change of every chip peak between the two levels.
 function MeshCheck({ c, run, rc }) {
   const m = rc.meshCheck;
@@ -297,7 +314,7 @@ function MeshCheck({ c, run, rc }) {
   return html`<div class="meshcheck"><h4>Mesh check: level ${m.coarseLevel} (${m.coarse}) against level ${m.fineLevel} (${m.fine})</h4>
     <p><span class=${`status ${m.ok ? "ok" : m.ok === false ? "watch" : ""}`}><${V} t="run.meshCheckOk" k=${run.name} /></span> ${m.ok ? "Every chip moved less than the limit: the mesh is fine enough." : m.ok === false ? marked(`Moved by the limit or more: ${m.over.join(", ")}. Use the finer level, or a finer local mesh, and check again.`) : ""}</p>
     ${refs.length > 0 && html`<table class="grid"><thead><tr><th><${L} t="part.refDes" /></th><th class="num"><${L} t="runp.meshDelta" /></th></tr></thead>
-      <tbody>${refs.map(k => html`<tr><td>${k}</td><td class=${`num ${m.over.includes(k) ? "warn" : ""}`}><${V} t="runp.meshDelta" k=${`${run.name}|${k}`} d=${2} /></td></tr>`)}</tbody></table>`}</div>`;
+      <tbody>${refs.map(k => html`<tr><td><${V} t="part.refDes" k=${k} v=${k} /></td><td class=${`num ${m.over.includes(k) ? "warn" : ""}`}><${V} t="runp.meshDelta" k=${`${run.name}|${k}`} d=${2} /></td></tr>`)}</tbody></table>`}</div>`;
 }
 
 // ---------- 9 Results ----------
@@ -325,12 +342,12 @@ function ResultsView({ c }) {
         <div><${Facts} ctx=${c} rows=${[[, "run.energyBalance", run.name, 2], [, "run.balanceOk", run.name], [, "run.pcbMin", run.name, 1], [, "run.pcbMax", run.name, 1], [, "run.spreaderMin", run.name, 1], [, "run.spreaderMax", run.name, 1], [, "run.meshGlobal", run.name], [, "run.meshFine", run.name], [, "run.nodes", run.name], [, "run.elements", run.name], [, "run.meshLevel", run.name], [, "run.localMesh", run.name], [, "run.heatRequested", run.name, 2], [, "run.heatApplied", run.name, 2], [, "run.solverFinished", run.name], [, "run.travels", run.name, 2], [, "run.worstDelta", run.name, 2], [, "run.goalsLoose", run.name], [, "run.iterations", run.name], [, "run.cellsTotal", run.name], [, "run.cellsSolid", run.name], [, "run.cellsFluid", run.name]]} /></div>
       </div>
       ${c.learn && html`<${RunReading} c=${c} run=${run} rc=${rc} />`}
-      ${refs.length > 0 && html`<${Scroll}><table class="grid"><thead><tr><th><${L} t="part.refDes" /></th><th class="num"><${L} t="part.tjMax" /></th><th class="num"><${L} t="runp.peak" /></th><th class="num"><${L} t="runp.avg" /></th>
+      ${refs.length > 0 && html`<${Scroll}><table class="grid"><thead><tr><th><${L} t="part.refDes" /></th><th class="num"><${L} t="part.tjMax" /></th><th class="num"><${L} t="runp.peak" /></th><th class="num"><${L} t="runp.avg" /></th><th><${L} t="runp.tjBasis" /></th>
         <th class="num"><${L} t="runp.margin" /></th><th><${L} t="runp.status" /></th><th class="num"><${L} t="runp.hand" /></th><th class="num"><${L} t="runp.gap" /></th></tr></thead>
         <tbody>${refs.map(k => { const key = `${run.name}|${k}`; const r = rc.parts?.[k] || {}; return html`<tr>
           <td><${V} t="part.refDes" k=${k} v=${k} /></td><td class="num">${parts.get(k) && isNum(parts.get(k).tjMaxC) ? html`<${V} t="part.tjMax" k=${k} d=${0} />` : ""}</td>
-          <td class=${`num ${r.status === "FAIL" ? "warn" : ""}`}><${V} t="runp.peak" k=${key} d=${1} /></td><td class="num"><${V} t="runp.avg" k=${key} d=${1} /></td>
-          <td class="num"><${V} t="runp.margin" k=${key} d=${1} /></td><td><${V} t="runp.status" k=${key} /></td>
+          <td class=${`num ${r.status === "FAIL" ? "warn" : ""}`}><${V} t="runp.peak" k=${key} d=${1} /></td><td class="num"><${V} t="runp.avg" k=${key} d=${1} /></td><td class=${r.tjBasis === "package" ? "warn" : ""}>${r.tjBasis === "package" ? html`<${V} t="runp.tjBasis" k=${key} v="package, no Rjc" />` : html`<${V} t="runp.tjBasis" k=${key} />`}</td>
+          <td class="num"><${V} t="runp.margin" k=${key} d=${1} /></td><td><${V} t="runp.status" k=${key} />${r.tjBasis === "package" && isNum(r.marginC) ? html` <span class="hint">(package temperature: Tj is higher)</span>` : ""}</td>
           <td class="num"><${V} t="runp.hand" k=${key} d=${1} />${r.handFrom === "thermal solution" ? html` <span class="hint">plate</span>` : ""}</td><td class="num"><${V} t="runp.gap" k=${key} d=${1} /></td></tr>`; })}</tbody></table><//>`}
       <${Plot} c=${c} run=${run} />
     <//>

@@ -142,6 +142,8 @@ travels only and rely on F1 to flag `delta` above `goalCriteriaC`.
 
 ## F4. Junction temperature on Flow runs
 
+**Status: done 2026-10-19. The API cannot make a material (F0, S4), so the page names one user material per k step (10 %, 24 per decade; Rjc within 5 %) in forSolidWorks.flow and lists them on tab 8; the user makes each once in the Engineering Database (no shipped database file: its format is not documented). Two-resistor chips use the three layer bodies Run Thermal Study makes, with source and goals on the core body. Every part gets tjBasis; tab 9 marks package parts. Live acceptance not run yet.**
+
 **Problem.** RunFlow stores the peak of a generic plastic block as Sim Tj. The Thermal study uses a block calibrated to
 Rjc (`calc/sim.js`, k z = H / (Rjc x A)) or the M8 two-resistor body, so its peak means Tj and the Flow peak does not.
 
@@ -246,7 +248,7 @@ orientation or air speed does not match the h it assumes (the page's h values ar
 | F1 health | S1 | medium | without it no Flow number can be trusted | done 2026-10-19 |
 | F2 mesh | S2, F1 | medium | removes the unresolved parts F1 will show | done 2026-10-19 |
 | F3 convergence | S3, F1 | small | | done 2026-10-19 |
-| F4 Tj | S4 | medium | changes the number compared with Tj max | open |
+| F4 Tj | S4 | medium | changes the number compared with Tj max | done 2026-10-19 |
 | F5 materials | S4 to S6 | medium | | open |
 | F8 fixes | none | small | can go any time, good first warm-up | open |
 | F6 environment | S7 | medium | | open |

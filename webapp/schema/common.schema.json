@@ -70,6 +70,7 @@
     "timMode": { "enum": ["Body", "Contact R"], "description": "Body = the TIM is a solid part in the model. Contact R = the TIM is a thermal contact resistance only." },
     "plateHeightMode": { "enum": ["Auto", "Manual"], "description": "Auto = plate face set by the tallest covered chip plus its TIM. Manual = the height typed in." },
     "chipModel": { "enum": ["Block", "Two-resistor"], "description": "How a chip is modelled in the study: one block with a calibrated k, or a two-resistor (Rjc, Rjb) model." },
+    "tjBasis": { "enum": ["calibrated block", "two-resistor", "package"], "description": "What a simulated chip peak means: calibrated block or two-resistor core = Tj; package = the package temperature (no Rjc, or a generic material)." },
     "studyType": { "enum": ["Thermal", "Flow"], "description": "Thermal = SolidWorks Simulation steady state. Flow = SolidWorks Flow Simulation." },
     "surface": {
       "type": "object",

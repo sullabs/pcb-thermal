@@ -16,7 +16,7 @@ import { spreaderPlate, plateForSolidWorks } from "./spreader.js";
 import { thermalSolution } from "./solution.js";
 import { simChips } from "./sim.js";
 import { runResults, inputsHash } from "./runs.js";
-import { flowCheck } from "./flow.js";
+import { flowCheck, flowForSw } from "./flow.js";
 import { isNum, put } from "./util.js";
 
 export const CALC_VERSION = "0.1.0";
@@ -88,6 +88,8 @@ export function forSolidWorks(project, calc, now) {
     if (pl?.enabled && calc.spreader[side]) plates[side] = plateForSolidWorks(pl, calc.spreader[side]);
   }
   if (Object.keys(plates).length) fs.plates = plates;
+  const flow = flowForSw(project, calc, fs);
+  if (Object.keys(flow.chips).length) fs.flow = flow;
   fs.inputsHash = inputsHash(fs);
   return fs;
 }
