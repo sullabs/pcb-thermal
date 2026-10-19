@@ -250,8 +250,8 @@ def("bbp.gap", "Gap", "", "C", "calculated", "Hand Tj minus simulated Tj.");
 def("build.assembly", "Assembly", "", "", "cad", "The SolidWorks assembly Build Board made.");
 def("build.date", "Build date", "", "", "cad", "When Build Board ran.");
 def("build.mode", "Build mode", "", "", "cad", "New: built from nothing. Update: only what changed since the last build.");
-def("build.wanted", "Wanted", "", "", "cad", "Bodies the build was asked for (included bodies plus the PCB).");
-def("build.added", "Added", "", "", "cad", "Bodies built new.");
+def("build.wanted", "Wanted", "", "", "cad", "Bodies the build was asked for: the included bodies. The PCB is not counted here.");
+def("build.added", "Added", "", "", "cad", "Parts built new. The PCB part counts here too, so a first build adds one more than Wanted. The assembly file is not counted.");
 def("build.moved", "Moved", "", "", "cad", "Bodies moved to a new position.");
 def("build.resized", "Resized", "", "", "cad", "Bodies built again with a new size.");
 def("build.suppressed", "Suppressed", "", "", "cad", "Bodies taken out of the model because they are no longer included.");
@@ -326,6 +326,8 @@ def("file.project", "Project file", "", "", "input", "<prefix>_project.json: eve
 def("file.cad", "CAD file", "", "", "cad", "<prefix>_cad.json: what SolidWorks knows (the import, the build, the changes). The page makes it empty for a new project; after that only the macros write it.");
 def("file.results", "Results file", "", "", "run", "<prefix>_results.json: the simulation runs. The page makes it empty for a new project; after that only the macros write it.");
 
+def("file.sw", "SolidWorks file", "", "", "cad", "The part or assembly file Build Board saves for this row, in the output folder (CAD unless set otherwise).");
+def("file.swFound", "File found", "", "", "cad", "Whether the file is in the output folder now. Missing: run Build Board again, or the file was moved or renamed.");
 def("file.partsList", "Parts list", "", "", "input", "A table of parts pasted from Excel or a text file: one row per load, the first row names the columns.",
   "Columns it reads: RefDes, Part number, Class, Package, Tj max, Rja, Rjc, Rjb, Ta override, Label, Rail, Method, Vin, Iin, Vout, Iout, Efficiency, R, Pd. Other columns are left out. Rows with the same RefDes make one part with several loads. Copy the current list to get the layout.");
 

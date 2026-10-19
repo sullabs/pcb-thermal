@@ -95,6 +95,15 @@ export async function readText(dir, path) {
   return f ? f.text() : undefined;
 }
 
+// Names of the files in a folder below the project folder ("CAD"); [] when the folder is not there.
+export async function listNames(dir, path) {
+  let d = dir;
+  try { for (const p of path.split("/").filter(Boolean)) d = await d.getDirectoryHandle(p); } catch { return []; }
+  const out = [];
+  for await (const [name, h] of d.entries()) if (h.kind === "file") out.push(name);
+  return out;
+}
+
 async function write(dir, name, text) {
   const h = await dir.getFileHandle(name, { create: true });
   const w = await h.createWritable(); // writes a temporary file, swapped in on close: never half written

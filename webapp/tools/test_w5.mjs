@@ -24,6 +24,8 @@ import { tabStates, blockingProblems, TABS } from "../src/page/tabs.js";
 import { Explain } from "../src/page/explain.js";
 import * as Views from "../src/page/views.js";
 import { LEARN } from "../src/terms/learn.js";
+import { editPlace } from "../src/page/where.js";
+import { swFiles, withFound, swPrefix, swFolder, safeFile } from "../src/page/swfiles.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ex = path.join(here, "..", "..", "example", "RaspberryPi4");
@@ -168,7 +170,42 @@ const close = (a, b) => (a === undefined && b === undefined) || (typeof a === "n
   check(link.includes("Add a body by hand") && link.includes('data-term="stack.cuT"') && link.includes('data-term="pcbov.h"') && link.includes('data-term="body.check"'), "link tab has bodies by hand, PCB size and stack, and the body check");
   const imp = show("ImportTab", true);
   check(imp.includes('data-term="set.pcbNameContains"') && imp.includes('data-term="set.minSize"'), "import tab has the import settings");
-  check(tri.includes('data-term="limit.criticalMargin"') && bare.includes('data-term="surf.pcbTopH"') && bare.includes('data-term="hand.compareRun"'), "flag limits on tab 4, air and surfaces and the compare run on tab 5");
+  // Change it in the Explain panel: every field on every tab is found on that tab, with its own term and key.
+  {
+    const TAB_FN = { ProjectTab: 0, PartsTab: 1, ImportTab: 2, LinkTab: 3, TriageTab: 4, BareTab: 5, BuildTab: 6, SpreaderTab: 7, SimTab: 8, ResultsTab: 9, ChangesTab: 10 };
+    const wrong = []; let fields = 0;
+    for (const [fn, n] of Object.entries(TAB_FN)) {
+      const out = show(fn, false);
+      const re = /data-term="([^"]+)" data-key="([^"]*)"[^>]*>(?:(?!<\/?span)[\s\S]){0,400}?<(?:input|select|textarea)\b|<(?:input|select|textarea)\b[^>]*data-term="([^"]+)" data-key="([^"]*)"/g;
+      for (const m of out.matchAll(re)) {
+        const t = m[1] || m[3], k = m[2] ?? m[4] ?? "";
+        if (t.startsWith("file.")) continue;
+        fields++;
+        const pl = editPlace(ctx, t, k);
+        if (!pl || pl.tab !== n || pl.t !== t || (pl.k || "") !== k) wrong.push(`${t} ${k} on tab ${n}: ${JSON.stringify(pl)}`);
+      }
+    }
+    check(fields > 100 && !wrong.length, `Change it finds all ${fields} fields on their tab`, wrong.slice(0, 5));
+    const ov = editPlace(ctx, "pcb.l", ""), bb = editPlace(ctx, "bbp.l", "U1");
+    check(ov?.tab === 3 && ov.t === "pcbov.l" && bb?.tab === 3 && bb.t === "bodyset.l" && ctx.calc.bodies.find(b => b.key === bb.k)?.refDes === "U1", "PCB L and a part L lead to their overwrite fields on tab 3");
+    check(editPlace(ctx, "bb.area", "") === null, "a calculated value has no Change it button");
+  }
+  // SolidWorks files on tab 6: names as Build Board writes them, found or missing from a folder listing.
+  {
+    const sw = swFiles(ctx.project, ctx.cad, ctx.calc);
+    const pre = swPrefix(ctx.project);
+    const inc = ctx.calc.bodies.filter(b => b.include);
+    check(sw.folder === "CAD" && sw.rows[0].kind === "assembly" && sw.rows[0].file.toLowerCase().endsWith(".sldasm") && sw.rows[1].file === pre + "PCB.sldprt", "tab 6 files: assembly and PCB in the CAD folder");
+    check(inc.every(b => sw.rows.some(r => r.key === b.key && r.file === pre + "P_" + safeFile(b.key) + ".sldprt")), "tab 6 files: one part file per included body, named as Build Board names it");
+    check(safeFile("a b/c.d-e_f") === "a_b_c_d-e_f" && swPrefix({ board: { name: "My board" }, settings: {} }) === "My_board_" && swPrefix({ board: { name: "x" }, settings: { filePrefix: "SA_" } }) === "SA_", "file prefix follows PJ_Prefix and PT_SafeFile");
+    check(swFolder({ settings: { outputFolder: "out\\cad\\" } }) === "out/cad" && swFolder({ settings: { outputFolder: "D:\\x" } }) === null, "output folder: relative kept, absolute not checked");
+    const part = sw.rows.find(r => r.kind === "part");
+    const got = withFound(sw.rows, [sw.rows[0].file, sw.rows[1].file.toUpperCase(), pre + "P_old_body.sldprt", "other.txt"], pre);
+    check(got[0].found === true && got[1].found === true && got.find(r => r.key === part.key).found === false && got.some(r => r.kind === "extra" && r.name === "old_body") && !got.some(r => r.file === "other.txt"),
+      "found, missing (case ignored as on Windows) and part files left from an earlier build");
+  }
+  const proj = show("ProjectTab", true);
+  check(proj.includes('data-term="limit.criticalMargin"') && !tri.includes('data-term="limit.criticalMargin"') && bare.includes('data-term="surf.pcbTopH"') && bare.includes('data-term="hand.compareRun"'), "flag limits on tab 0 (not tab 4), air and surfaces and the compare run on tab 5");
   // A load without its inputs says what its method needs.
   const noVin = setIn(P, ["parts", 0, "loads", 0, "vinV"], undefined);
   const nctx = { project: noVin, cad: C, results: R, calc: calcProject(noVin, C, R) };

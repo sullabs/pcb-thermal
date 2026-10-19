@@ -11,6 +11,7 @@ import * as V from "./views.js";
 import { calcProject } from "../calc/index.js";
 import { valueOf } from "../calc/formulas.js";
 import { Explain, Tip, ExplainPanel } from "./explain.js";
+import { findField } from "./where.js";
 import { workbookToProject } from "../io/workbook_import.js";
 import { validateProject, validateCad, validateResults } from "virtual:validators";
 import EXAMPLE from "virtual:example";
@@ -76,6 +77,23 @@ function App() {
   const example = mode === "example";
   const fctx = useMemo(() => (calcOk ? { project, cad, results, calc: calcOk } : null), [project, cad, results, calcOk]);
   const openExplain = useCallback((t, k = "") => setExplain(s => [...s.slice(-30), { t, k }]), []);
+  // "Change it" in the Explain panel: open the tab, open the body's Edit row if needed, then focus the field.
+  const goEdit = useCallback(pl => {
+    setTab(pl.tab);
+    let n = 0;
+    const step = () => {
+      if (pl.body) window.dispatchEvent(new CustomEvent("pt-open-body", { detail: pl.body }));
+      const main = document.querySelector("main");
+      const f = pl.t && main && findField(main, pl.t, pl.k || "");
+      if (!f) { if (pl.t && ++n < 12) setTimeout(step, 50); return; }
+      f.scrollIntoView({ block: "center" });
+      f.focus({ preventScroll: true });
+      const box = f.closest("td, label") || f;
+      box.classList.add("flash");
+      setTimeout(() => box.classList.remove("flash"), 1800);
+    };
+    setTimeout(step, 30);
+  }, []);
   const explainCtx = useMemo(() => ({ ctx: fctx, open: openExplain, showFx }), [fctx, openExplain, showFx]);
   const states = useMemo(() => tabStates({ project, cad, results, calc: calcOk, canSave: canSave || example }), [project, cad, results, calcOk, canSave, example]);
 
@@ -372,7 +390,8 @@ function App() {
   </div>`;
   const backupCard = mode === "folder" && backups.length > 0 && html`<p>Open a backup: ${backups.slice(0, 7).map(b => html` <button class="small" onClick=${() => openBackup(b)}>${b.slice(-13, -5)}</button>`)}</p>`;
 
-  const ctx = { project, cad, results, calc: calcOk, states, value: (t, k) => (fctx ? valueOf(fctx, t, k) : undefined), folder: example ? "built-in example (read only)" : dir?.name, edit, editFn, go: setTab, locked: st.locked || example, now, learn, openExample,
+  const listFolder = useMemo(() => (dir && mode === "folder" ? path => F.listNames(dir, path) : null), [dir, mode]);
+  const ctx = { project, cad, results, calc: calcOk, states, listFolder, value: (t, k) => (fctx ? valueOf(fctx, t, k) : undefined), folder: example ? "built-in example (read only)" : dir?.name, edit, editFn, go: setTab, locked: st.locked || example, now, learn, openExample,
     blocking: calcOk ? blockingProblems(project, calcOk) : [], folderCard, backupCard, files };
   const View = { project: V.ProjectTab, parts: V.PartsTab, import: V.ImportTab, link: V.LinkTab, triage: V.TriageTab, bare: V.BareTab,
     build: V.BuildTab, spreader: V.SpreaderTab, sim: V.SimTab, results: V.ResultsTab, changes: V.ChangesTab, help: V.HelpTab }[st.id];
@@ -410,7 +429,7 @@ function App() {
         : needsProject && !calcOk ? html`<${Card} title="The calculation stopped"><p class="warn">${calc?.error}</p><//>`
         : html`<fieldset class="content" disabled=${st.locked || example}>${View(ctx)}</fieldset>`}
     </main>
-    <${ExplainPanel} at=${explain[explain.length - 1]} ctx=${fctx} onOpen=${openExplain} canBack=${explain.length > 1}
+    <${ExplainPanel} at=${explain[explain.length - 1]} ctx=${fctx} onOpen=${openExplain} onEdit=${goEdit} canBack=${explain.length > 1}
       onBack=${() => setExplain(s => s.slice(0, -1))} onClose=${() => setExplain([])} onHelp=${() => setTab(11)} />
     </div>
     <${Tip} />

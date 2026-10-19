@@ -8,6 +8,7 @@ import { html, NumField, TextField, Select, Check, Card, unitText } from "./ui.j
 import { V, L, marked, Explain, fmtValue } from "./explain.js";
 import { CLASSES, METHODS, CLASS_METHOD } from "../calc/constants.js";
 import { duplicatePart, deletePart, renameRefDes, nextPartId, setIn, withSimSetup, addManualBody } from "./model.js";
+import { swFiles, withFound } from "./swfiles.js";
 import { SHEET_COLS, sheetRows, insertPart, movePart, addLoad, moveLoad, deleteLoad, pasteCells, isBlock } from "./sheet.js";
 import { readPartsList, applyPartsList, partsListText, suggestLinks, LIST_HEADER } from "./lists.js";
 import { valueOf } from "../calc/formulas.js";
@@ -26,6 +27,22 @@ function Facts({ ctx, rows }) {
 const date = s => (s ? s.replace("T", " ") : s);
 
 // ---------- 0 Project ----------
+// Flag limits: CRITICAL and Watch, read by tab 4 (flags) and tab 5 (Tight). On tab 0 with the board settings.
+function FlagLimits(c) {
+  const { project: p, locked } = c;
+  const lim = p.settings.flagLimits;
+  const setLim = (lvl, f, label, v) => v !== undefined && c.edit(label, ["settings", "flagLimits", lvl, f], v, `limit.${lvl}.${f}`);
+  return html`
+    <${Card} title="Flag limits">
+      <p class="hint">A part gets a flag when any one of its numbers crosses a limit. Tab 4 shows the flags; the CRITICAL margin also sets Tight on tab 5.</p>
+      <table class="grid limits"><thead><tr><th></th><th><${L} t="part.margin">margin below</${L}></th><th><${L} t="part.density">density above</${L}></th><th><${L} t="part.share">share above</${L}></th></tr></thead>
+      <tbody>${[["critical", "CRITICAL", "limit.critical"], ["watch", "Watch", "limit.watch"]].map(([lvl, word, t]) => html`<tr><td><${V} t="part.flag" v=${word} /></td>
+        <td><${NumField} term=${t + "Margin"} value=${lim[lvl].marginBelowC} unit="dC" label=${word + " margin limit"} rule=${{ required: true }} disabled=${locked} onCommit=${v => setLim(lvl, "marginBelowC", word + " margin limit", v)} /></td>
+        <td><${NumField} term=${t + "Density"} value=${lim[lvl].densityAboveWcm2} unit="W/cm²" accepts="none" label=${word + " density limit"} rule=${{ required: true, min: 0 }} disabled=${locked} onCommit=${v => setLim(lvl, "densityAboveWcm2", word + " density limit", v)} /></td>
+        <td><${NumField} term=${t + "Share"} value=${lim[lvl].shareAbove} unit="" label=${word + " share limit"} width="4em" rule=${{ required: true, min: 0, max: 1 }} disabled=${locked} onCommit=${v => setLim(lvl, "shareAbove", word + " share limit", v)} /></td></tr>`)}</tbody></table>
+    <//>`;
+}
+
 export function ProjectTab(c) {
   const { project: p, cad, results, states, folder } = c;
   const files = c.files || names("");
@@ -53,7 +70,8 @@ export function ProjectTab(c) {
           <dt><${L} t="file.results" /></dt><dd><${V} t="file.results" v=${`${files.results}: ` + (results?.runs?.length ? `${results.runs.length} runs, last ${results.runs[results.runs.length - 1].name}` : "no runs yet")} /></dd>
         </dl>
         ${c.backupCard}
-      <//>`}`;
+      <//>
+      ${FlagLimits(c)}`}`;
 }
 export const stateWord = s => ({ locked: "locked", ready: "to do", done: "done", attention: "needs attention" }[s.status]);
 
@@ -409,18 +427,61 @@ export function ImportTab(c) {
       <//>` : html`<p class="hint">No import yet.</p>`}`;
 }
 
+// The board seen from the top and, when there are bottom side bodies, from below (mirrored left to right, as
+// the board looks when turned over). A turned body (rotDeg, ownL, ownW from the import) is drawn turned.
 export function BoardDrawing({ calc }) {
   const p = calc.pcb;
   if (!(p.l > 0 && p.w > 0)) return null;
+  const bodies = calc.bodies.filter(b => isNum(b.box.xMin) && isNum(b.box.yMin) && b.box.l > 0 && b.box.w > 0);
+  const top = bodies.filter(b => b.side !== "Bottom");
+  const bottom = bodies.filter(b => b.side === "Bottom" || b.side === "Through");
+  const hasBottom = bodies.some(b => b.side === "Bottom");
+  // One frame for both views, wide enough for bodies that hang over the board edge (connectors).
+  const xs = [0, p.l], ys = [0, p.w];
+  for (const b of bodies) for (const [x, y] of footprint(b).pts) { xs.push(x); ys.push(y); }
+  const ext = { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
+  return html`<div class="boards">
+      <${BoardView} p=${p} bodies=${top} ext=${ext} title="Top view" note="seen from above" />
+      ${hasBottom && html`<${BoardView} p=${p} bodies=${bottom} ext=${ext} mirror title="Bottom view" note="seen from below, so left and right are swapped" />`}
+    </div>
+    <div class="hint legend">
+      <span><svg viewBox="0 0 14 10"><rect class="pcb" x=".5" y=".5" width="13" height="9" /></svg> board</span>
+      <span><svg viewBox="0 0 14 10"><rect class="body linked" x=".5" y=".5" width="13" height="9" /></svg> body linked to a part (tab 3), label is its RefDes</span>
+      <span><svg viewBox="0 0 14 10"><rect class="body" x=".5" y=".5" width="13" height="9" /></svg> body not linked to a part</span>
+      <span><svg viewBox="0 0 14 10"><rect class="body skip" x=".5" y=".5" width="13" height="9" /></svg> body left out of the model (Include off)</span>
+      <span><svg viewBox="0 0 14 10"><rect class="body linked turned" x=".5" y=".5" width="13" height="9" /></svg> turned body, drawn at its angle</span>
+    </div>`;
+}
+
+// Same test as PT_ShapeIsRotated in the macros: draw the turned shape only when it still fits the box used.
+function footprint(b) {
+  const x = b.box, cx = x.xMin + x.l / 2, cy = x.yMin + x.w / 2;
+  const a = (b.rotDeg || 0) * Math.PI / 180, c = Math.abs(Math.cos(a)), s = Math.abs(Math.sin(a));
+  const turned = Math.abs(b.rotDeg || 0) >= 0.05 && b.ownL > 0 && b.ownW > 0
+    && Math.abs(b.ownL * c + b.ownW * s - x.l) <= 0.02 && Math.abs(b.ownL * s + b.ownW * c - x.w) <= 0.02;
+  const hx = (turned ? b.ownL : x.l) / 2, hy = (turned ? b.ownW : x.w) / 2, an = turned ? a : 0;
+  const pts = [[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]]
+    .map(([dx, dy]) => [cx + dx * Math.cos(an) - dy * Math.sin(an), cy + dx * Math.sin(an) + dy * Math.cos(an)]);
+  return { cx, cy, pts, turned, short: Math.min(hx, hy) * 2 };
+}
+
+function BoardView({ p, bodies, ext, mirror, title, note }) {
   const pad = 2;
-  return html`<svg class="board" viewBox=${`${-pad} ${-pad} ${p.l + 2 * pad} ${p.w + 2 * pad}`} role="img" aria-label="Top view of the board and its bodies">
-    <g transform=${`translate(0 ${p.w}) scale(1 -1)`}>
+  // Board X right and Y up; screen Y down. The bottom view also swaps X.
+  const sx = x => (mirror ? p.l - x : x), sy = y => p.w - y;
+  const fp = bodies.map(b => ({ b, f: footprint(b) }));
+  return html`<figure class="board-view">
+    <figcaption><b>${title}</b> <span class="hint">${note}</span></figcaption>
+    <svg class="board" viewBox=${`${(mirror ? p.l - ext.x1 : ext.x0) - pad} ${p.w - ext.y1 - pad} ${ext.x1 - ext.x0 + 2 * pad} ${ext.y1 - ext.y0 + 2 * pad}`} role="img" aria-label=${`${title} of the board and its bodies`}>
       <rect class="pcb" x="0" y="0" width=${p.l} height=${p.w} />
-      ${calc.bodies.filter(b => isNum(b.box.xMin) && b.box.l > 0).map(b => html`<rect class=${`body ${b.include ? "" : "skip"} ${b.side === "Bottom" ? "bottom" : ""} ${b.refDes ? "linked" : ""}`}
-        x=${b.box.xMin} y=${b.box.yMin} width=${b.box.l} height=${b.box.w}><title>${b.refDes ? b.refDes + ": " : ""}${b.name}</title></rect>`)}
-    </g>
-  </svg>
-  <p class="hint legend"><span class="sw linked"></span> linked to a part <span class="sw"></span> not linked <span class="sw bottom"></span> bottom side <span class="sw skip"></span> not included</p>`;
+      ${fp.map(({ b, f }) => html`<polygon class=${`body ${b.include ? "" : "skip"} ${b.refDes ? "linked" : ""} ${f.turned ? "turned" : ""}`}
+        points=${f.pts.map(([x, y]) => `${sx(x).toFixed(2)},${sy(y).toFixed(2)}`).join(" ")}><title>${b.refDes ? b.refDes + ": " : ""}${b.name}${f.turned ? ` (turned ${Math.round(b.rotDeg * 10) / 10}°)` : ""}</title></polygon>`)}
+      <g class="hint tags">
+        ${fp.filter(({ b, f }) => b.refDes && f.short >= 2).map(({ b, f }) => html`<text x=${sx(f.cx).toFixed(2)} y=${sy(f.cy).toFixed(2)}
+          font-size=${Math.min(3, Math.max(1.2, f.short * 0.45)).toFixed(2)}>${b.refDes}</text>`)}
+      </g>
+    </svg>
+  </figure>`;
 }
 
 // ---------- 3 Link bodies ----------
@@ -434,6 +495,7 @@ function LinkView({ c }) {
   const { project: p, calc, locked } = c;
   const [show, setShow] = useState("all");
   const [open, setOpen] = useState(null);
+  useEffect(() => { const f = e => setOpen(e.detail); window.addEventListener("pt-open-body", f); return () => window.removeEventListener("pt-open-body", f); }, []);
   const refs = p.parts.map(x => x.refDes);
   const noBody = p.parts.filter(x => isNum(calc.register.parts[x.refDes]?.pdW) && !calc.bodies.some(b => b.refDes === x.refDes)).map(x => x.refDes);
   const sugg = suggestLinks(p, calc);
@@ -533,8 +595,6 @@ export function TriageTab(c) {
   const { project: p, calc, locked } = c;
   const t = calc.triage, rails = calc.rails;
   const problems = c.blocking;
-  const lim = p.settings.flagLimits;
-  const setLim = (lvl, f, label, v) => v !== undefined && c.edit(label, ["settings", "flagLimits", lvl, f], v, `limit.${lvl}.${f}`);
   const top = t.byPd.find(r => isNum(calc.register.parts[r]?.pdW));
   const dense = t.byDensity.find(r => isNum(calc.register.parts[r]?.densityWcm2));
   return html`
@@ -559,14 +619,7 @@ export function TriageTab(c) {
       <${Facts} ctx=${c} rows=${[[, "rails.sum", "", 3], [, "rails.noRail", "", 3], [, "rails.measured", "", 2], [, "rails.unaccounted", "", 2], [, "rails.unaccountedFrac", "", 3]]} />
       ${!isNum(rails.measuredW) && html`<p class="hint">Type the measured board input power on tab 0 to check that the parts account for all of it.</p>`}
     <//>
-    <${Card} title="Flag limits">
-      <p class="hint">A part gets a flag when any one of its numbers crosses a limit. The same limits set Tight on tab 5.</p>
-      <table class="grid limits"><thead><tr><th></th><th><${L} t="part.margin">margin below</${L}></th><th><${L} t="part.density">density above</${L}></th><th><${L} t="part.share">share above</${L}></th></tr></thead>
-      <tbody>${[["critical", "CRITICAL", "limit.critical"], ["watch", "Watch", "limit.watch"]].map(([lvl, word, t]) => html`<tr><td><${V} t="part.flag" v=${word} /></td>
-        <td><${NumField} term=${t + "Margin"} value=${lim[lvl].marginBelowC} unit="dC" label=${word + " margin limit"} rule=${{ required: true }} disabled=${locked} onCommit=${v => setLim(lvl, "marginBelowC", word + " margin limit", v)} /></td>
-        <td><${NumField} term=${t + "Density"} value=${lim[lvl].densityAboveWcm2} unit="W/cm²" accepts="none" label=${word + " density limit"} rule=${{ required: true, min: 0 }} disabled=${locked} onCommit=${v => setLim(lvl, "densityAboveWcm2", word + " density limit", v)} /></td>
-        <td><${NumField} term=${t + "Share"} value=${lim[lvl].shareAbove} unit="" label=${word + " share limit"} width="4em" rule=${{ required: true, min: 0, max: 1 }} disabled=${locked} onCommit=${v => setLim(lvl, "shareAbove", word + " share limit", v)} /></td></tr>`)}</tbody></table>
-    <//>`;
+    <p class="hint">The flag limits are on <button class="link" onClick=${() => c.go(0)}>tab 0</button>.</p>`;
 }
 
 // ---------- 5 Hand check: bare board ----------
@@ -676,13 +729,45 @@ function NetDrawing({ k }) {
 
 // ---------- 6 Build model ----------
 export function BuildTab(c) {
+  return html`<${BuildView} c=${c} />`;
+}
+function BuildView({ c }) {
   const b = c.cad?.build;
+  const sw = useMemo(() => swFiles(c.project, c.cad, c.calc), [c.project, c.cad, c.calc]);
+  const [names, setNames] = useState(null);
+  useEffect(() => {
+    let live = true;
+    setNames(null);
+    if (c.listFolder && sw.folder) c.listFolder(sw.folder).then(n => live && setNames(n || []), () => live && setNames([]));
+    return () => { live = false; };
+  }, [c.listFolder, sw.folder, c.cad]);
+  const rows = names ? withFound(sw.rows, names, sw.prefix) : sw.rows;
+  const added = b?.counts?.added, wanted = b?.counts?.wanted;
+  const found = r => r.found === true ? html`<span class="status ok" data-status="found">found</span>`
+    : r.found === false ? html`<span class="status watch" data-status="missing">missing</span>` : html`<span class="hint">not checked</span>`;
+  const why = !c.listFolder ? "Files are checked when the project is opened from its folder (not by hand, not the example)."
+    : !sw.folder ? "The output folder is outside the project folder, so the page cannot look in it." : "";
   return html`
     <${Card} title="In SolidWorks: 3 Build Board"><p>Builds one box per included body and the PCB plate, in a new assembly. <${L} t="build.included" />: <${V} t="build.included" />.</p><//>
     ${b ? html`<${Card} title="Last build">
       <${Facts} ctx=${c} rows=${[[, "build.assembly"], [, "build.date", "", undefined, date(b.date)], [, "build.mode"], [, "build.wanted"], [, "build.added"], [, "build.moved"], [, "build.resized"], [, "build.suppressed"], [, "build.broughtBack"], [, "build.failed"], [, "build.overlaps"]]} />
+      ${isNum(added) && isNum(wanted) && added > 0 && html`<p class="hint">Added counts the PCB part too, so a first build adds one more than Wanted (the assembly file is not counted).</p>`}
       ${(b.bodies || []).filter(x => x.status !== "built").map(x => html`<p class="warn">${shortName(x.name)}: <${V} t="buildbody.status" k=${x.key} />${x.reason ? ", " + x.reason : ""}</p>`)}
-    <//>` : html`<p class="hint">No build yet.</p>`}`;
+    <//>` : html`<p class="hint">No build yet.</p>`}
+    <${Card} title="SolidWorks files of this project">
+      <p class="hint">The assembly, the PCB and one part per included body, as Build Board names them in ${sw.folder ? html`the <code>${sw.folder}</code> folder` : "the output folder"}. ${why}</p>
+      <${Scroll}><table class="grid swfiles">
+        <thead><tr><th><${L} t="body.name" /></th><th><${L} t="body.refDes" /></th><th><${L} t="body.include" /></th><th><${L} t="buildbody.status" /></th><th><${L} t="file.sw" /></th><th><${L} t="file.swFound" /></th></tr></thead>
+        <tbody>${rows.map(r => html`<tr class=${r.kind === "part" && !r.included ? "dim" : ""}>
+          <td>${r.kind === "part" ? html`<${V} t="body.name" k=${r.key} v=${shortName(r.name)} />` : html`<b>${r.kind === "extra" ? r.file : r.name}</b>`}</td>
+          <td>${r.refDes ? html`<${V} t="body.refDes" k=${r.key} />` : ""}</td>
+          <td>${r.kind === "part" ? html`<${V} t="body.include" k=${r.key} v=${r.included} />` : r.kind === "extra" ? html`<span class="hint">no: left out after an earlier build</span>` : ""}</td>
+          <td>${r.status ? html`<${V} t="buildbody.status" k=${r.key} v=${r.status} />${r.reason ? html` <span class="hint">${r.reason}</span>` : ""}` : ""}</td>
+          <td><${V} t="file.sw" k=${r.key} v=${r.file} /></td>
+          <td>${found(r)}</td>
+        </tr>`)}</tbody>
+      </table><//>
+    <//>`;
 }
 
 // ---------- 7 Spreader ----------

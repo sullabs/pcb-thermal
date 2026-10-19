@@ -33,7 +33,8 @@ code { background: var(--panel2); padding: 0 4px; border-radius: 3px; }
 .save.dirty { color: var(--watch); }
 .spacer { flex: 1; }
 
-.tabs { display: flex; gap: 4px; padding: 8px 16px 0; overflow-x: auto; border-bottom: 1px solid var(--line); background: var(--panel); }
+.tabs { display: flex; gap: 4px; padding: 8px 16px 0; overflow-x: auto; scrollbar-width: none; background: var(--panel); }
+.tabs::-webkit-scrollbar { display: none; }
 .tab { border-radius: 6px 6px 0 0; border-bottom: 0; white-space: nowrap; font-size: 13px; position: relative; }
 .tab .n { display: inline-block; min-width: 1.4em; text-align: center; border-radius: 9px; background: var(--line); font-size: 11px; }
 .tab.done .n { background: var(--ok-bg); color: var(--ok); }
@@ -43,7 +44,7 @@ code { background: var(--panel2); padding: 0 4px; border-radius: 3px; }
 .lock { font-size: 11px; }
 .badge { background: var(--watch); color: #000; border-radius: 8px; padding: 0 6px; font-size: 11px; }
 
-main { padding: 12px 16px 80px; max-width: 1400px; }
+main { padding: 12px 16px 80px; }
 h2 { margin: 6px 0 12px; font-size: 20px; }
 h3 { margin: 0 0 8px; font-size: 15px; }
 fieldset.content { border: 0; margin: 0; padding: 0; min-width: 0; }
@@ -90,16 +91,23 @@ table.grid { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: 1
 .next { font-size: 15px; }
 .empty-folder { margin: 10px 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .problems ul { margin: 4px 0; font-size: 12px; }
-svg.board { width: 100%; max-width: 900px; background: var(--panel2); border-radius: 6px; }
-svg.board .pcb { fill: #2f6b3a; stroke: #3f8a4c; stroke-width: .3; }
-svg.board .body { fill: #6c7686; fill-opacity: .8; stroke: #c9d1dc; stroke-width: .15; }
-svg.board .body.linked { fill: var(--accent); }
-svg.board .body.bottom { fill-opacity: .3; stroke-dasharray: .8 .5; }
-svg.board .body.skip { fill: none; stroke: var(--locked); }
-.legend .sw { display: inline-block; width: 12px; height: 10px; background: #6c7686; margin: 0 4px 0 10px; vertical-align: middle; }
-.legend .sw.linked { background: var(--accent); }
-.legend .sw.bottom { opacity: .35; }
-.legend .sw.skip { background: none; border: 1px solid var(--locked); }
+/* 2 Import geometry: top view and, with bottom side bodies, a mirrored bottom view; turned bodies drawn at their angle */
+.boards { display: flex; flex-wrap: wrap; gap: 12px 20px; }
+.board-view { flex: 1 1 420px; max-width: 900px; margin: 0; }
+.board-view figcaption { margin-bottom: 4px; }
+svg.board { width: 100%; background: var(--panel2); border-radius: 6px; }
+svg.board .pcb, .legend .pcb { fill: #2f6b3a; stroke: #3f8a4c; stroke-width: .3; }
+svg.board .body, .legend .body { fill: #6c7686; fill-opacity: .85; stroke: #c9d1dc; stroke-width: .15; }
+svg.board .body.linked, .legend .body.linked { fill: var(--accent); }
+svg.board .body.skip, .legend .body.skip { fill: none; stroke: var(--locked); stroke-dasharray: .8 .5; }
+svg.board .body.turned, .legend .body.turned { stroke: var(--watch); stroke-width: .35; }
+svg.board .tags text { fill: var(--accent-text); font-weight: 700; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 6px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend svg { width: 22px; height: 16px; }
+.legend .body, .legend .pcb { stroke-width: 1; }
+.legend .body.turned { stroke-width: 1.6; }
+.legend .body.skip { stroke-dasharray: 2.5 1.5; }
 .msgs { position: fixed; right: 16px; bottom: 36px; display: flex; flex-direction: column; gap: 6px; max-width: 460px; z-index: 5; }
 .msg { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 6px; padding: 8px 12px; box-shadow: 0 4px 14px rgba(0,0,0,.3); }
 .msg.error { border-left-color: var(--crit); }
@@ -130,6 +138,9 @@ abbr.gl { text-decoration: underline dotted; text-underline-offset: 2px; cursor:
 .explain h4 { margin: 12px 0 4px; font-size: 13px; color: var(--muted); }
 .explain .sym { color: var(--accent); font-weight: 400; margin-left: 4px; }
 .ex-value { font-size: 18px; font-weight: 600; margin: 4px 0; }
+/* The field the Explain panel's Change it button went to */
+.flash { animation: flash 1.8s ease-out; }
+@keyframes flash { 0%, 40% { box-shadow: 0 0 0 3px var(--accent); background-color: color-mix(in srgb, var(--accent) 25%, transparent); } 100% { box-shadow: 0 0 0 3px transparent; } }
 .mono { font: 12px/1.4 Consolas, "Cascadia Mono", monospace; background: var(--panel2); padding: 6px 8px; border-radius: 4px; margin: 4px 0; overflow-wrap: anywhere; }
 .ex-in { padding-left: 18px; margin: 2px 0; }
 .ex-in li { margin: 2px 0; }
@@ -220,6 +231,58 @@ table.sheet { border-collapse: separate; border-spacing: 0; font-size: 13px; min
 .sheet tbody.drop-after tr:last-child td, .sheet tbody.drop-after td[rowspan] { box-shadow: inset 0 -3px 0 var(--accent); }
 .sheet tr.drop-before td:not([rowspan]) { box-shadow: inset 0 3px 0 var(--watch); }
 .sheet tr.drop-after td:not([rowspan]) { box-shadow: inset 0 -3px 0 var(--watch); }
+/* Compact sheet: smaller text, tight cells and narrower columns so the whole register fits the window width */
+table.sheet, .sheet .field { font-size: 12px; }
+.sheet thead th { padding: 2px 3px; white-space: normal; line-height: 1.15; vertical-align: bottom; }
+.sheet thead tr:first-child th { height: 16px; font-size: 11px; vertical-align: middle; }
+.sheet thead tr:nth-child(2) th { top: 17px; }
+.sheet th .unit { font-size: 10px; }
+.sheet thead th .lbl { display: inline; }
+.sheet .status { padding: 0 3px; font-size: 11px; }
+.sheet .field input, .sheet select { padding: 2px 3px; height: 22px; min-width: 0; }
+.sheet td.calc, .sheet tbody.odd td.calc { padding: 2px 4px; }
+.sheet td.rownum, .sheet thead th.rownum-h { min-width: 38px; }
+.sheet td.refcol { left: 38px; }
+.sheet td[data-col] { min-width: 0 !important; }
+.sheet td.num .field input { width: 3.4em !important; }
+.sheet td[data-col=refDes] input { width: 5em !important; }
+.sheet td[data-col=partNumber] input { width: 8em !important; }
+.sheet td[data-col=class] select { width: 7.5em; }
+.sheet td[data-col=package] input { width: 5.5em !important; }
+.sheet td[data-col=label] input { width: 8em !important; }
+.sheet td[data-col=rail] input { width: 4.5em !important; }
+.sheet td[data-col=method] select { width: 8.5em; }
+.sheet td[data-col=efficiency] input { width: 2.8em !important; }
+.sheet td[data-col=notes] { width: 100%; }
+.sheet td[data-col=notes] input { width: 100% !important; min-width: 7em; }
+/* Sheet sections: each group of columns (part, datasheet, loads, results, notes) has its own tint and a divider */
+table.sheet { --t-part: #4f8cff; --t-ds: #a070ff; --t-load: #e09a20; --t-res: #20b090; --t-notes: #8a94a6; }
+.sheet td:is([data-col=refDes], [data-col=partNumber], [data-col=class], [data-col=package]),
+.sheet thead tr:nth-child(2) th:nth-child(-n+4), .sheet thead tr.groups th:nth-child(2) { --tint: var(--t-part); }
+.sheet td:is([data-col=tjMaxC], [data-col=rjaCW], [data-col=rjcCW], [data-col=rjbCW], [data-col=taOverrideC]),
+.sheet thead tr:nth-child(2) th:nth-child(n+5):nth-child(-n+9), .sheet thead tr.groups th:nth-child(3) { --tint: var(--t-ds); }
+.sheet td:is(.grip-c, [data-col=label], [data-col=rail], [data-col=method], [data-col=vinV], [data-col=iinA], [data-col=voutV], [data-col=ioutA], [data-col=efficiency], [data-col=rOhm], [data-col=pdMeasuredW]),
+.sheet thead tr:nth-child(2) th:nth-child(n+10):nth-child(-n+19), .sheet thead tr.groups th:is(:nth-child(4), :nth-child(5)) { --tint: var(--t-load); }
+.sheet td.calc, .sheet thead tr:nth-child(2) th:nth-child(n+20):nth-child(-n+24), .sheet thead tr.groups th:nth-child(6) { --tint: var(--t-res); }
+.sheet td[data-col=notes], .sheet thead tr:nth-child(2) th:nth-child(25), .sheet thead tr.groups th:nth-child(7) { --tint: var(--t-notes); }
+table.sheet tbody td:not(.rownum) { background: color-mix(in srgb, var(--panel) 90%, var(--tint, var(--panel)) 10%); }
+table.sheet tbody.odd td:not(.rownum) { background: color-mix(in srgb, var(--panel) 82%, var(--tint, var(--panel)) 18%); }
+table.sheet thead th:not(.rownum-h) { background: color-mix(in srgb, var(--panel2) 75%, var(--tint, var(--panel2)) 25%); }
+table.sheet thead tr.groups th:not(.rownum-h) { color: color-mix(in srgb, var(--text) 60%, var(--tint, var(--text)) 40%); box-shadow: inset 0 3px 0 var(--tint, transparent); }
+.sheet :is(td[data-col=tjMaxC], td.grip-c, td[data-col=pdMeasuredW] + td.calc, td[data-col=notes]),
+.sheet thead tr:nth-child(2) th:is(:nth-child(5), :nth-child(20), :nth-child(25)),
+.sheet thead tr.groups th:is(:nth-child(3), :nth-child(4), :nth-child(6), :nth-child(7)) { border-left: 2px solid color-mix(in srgb, var(--line) 40%, var(--text) 60%); }
+@media (max-width: 1500px) {
+  table.sheet, .sheet .field { font-size: 11px; }
+  .sheet td.num .field input { width: 3em !important; }
+  .sheet td[data-col=refDes] input { width: 4.5em !important; }
+  .sheet td[data-col=partNumber] input, .sheet td[data-col=label] input { width: 6.5em !important; }
+  .sheet td[data-col=class] select { width: 6.5em; }
+  .sheet td[data-col=package] input { width: 4.5em !important; }
+  .sheet td[data-col=rail] input { width: 4em !important; }
+  .sheet td[data-col=method] select { width: 7em; }
+  .sheet td[data-col=notes] input { min-width: 5em; }
+}
 .addrow { display: block; width: 100%; border: 0; border-top: 1px dashed var(--line); border-radius: 0; background: none; color: var(--muted); text-align: left; padding: 6px 12px; position: sticky; left: 0; }
 .addrow:hover { color: var(--accent); background: var(--panel2); }
 .sheet-menu { position: fixed; z-index: 20; min-width: 210px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.4); display: flex; flex-direction: column; }

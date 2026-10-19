@@ -11,6 +11,7 @@ import { html } from "./ui.js";
 import { TERMS, GLOSSARY, STATUS } from "../terms/catalogue.js";
 import { valueOf, evaluate, usedBy } from "../calc/formulas.js";
 import { isNum } from "../calc/util.js";
+import { editPlace } from "./where.js";
 
 export const Explain = createContext({ ctx: null, open: () => {}, showFx: false });
 
@@ -150,7 +151,7 @@ export function Tip() {
 }
 
 // ---------- the Explain panel ----------
-export function ExplainPanel({ at, ctx, onOpen, onBack, onClose, canBack, onHelp }) {
+export function ExplainPanel({ at, ctx, onOpen, onEdit, onBack, onClose, canBack, onHelp }) {
   if (!at) return null;
   const { t, k } = at;
   const term = TERMS[t] || { label: t, short: "No explanation yet." };
@@ -158,6 +159,7 @@ export function ExplainPanel({ at, ctx, onOpen, onBack, onClose, canBack, onHelp
   const e = ctx && term.kind === "calculated" ? evaluate(ctx, t, k) : null;
   const users = ctx ? usedBy(ctx, t, k).slice(0, 30) : [];
   const where = k ? ` · ${keyText(ctx, t, k)}` : "";
+  const place = ctx ? editPlace(ctx, t, k) : null;
   return html`<aside class="explain" aria-label="Explain">
     <div class="ex-head">
       ${canBack && html`<button class="small" onClick=${onBack} title="Back to the value you came from">Back</button>`}
@@ -166,6 +168,7 @@ export function ExplainPanel({ at, ctx, onOpen, onBack, onClose, canBack, onHelp
     <h3>${term.label}${term.sym && term.sym !== term.label ? html` <span class="sym">${term.sym}</span>` : ""}</h3>
     <p class="hint">${KIND[term.kind] || ""}${term.unit ? ` · ${term.unit}` : ""}${where}</p>
     <p class="ex-value">${val === undefined || val === "" ? html`<span class="hint">blank</span>` : withUnit(val, t)}</p>
+    ${place && html`<p><button class="small primary" title=${place.why} onClick=${() => onEdit(place)}>Change it on tab ${place.tab}</button></p>`}
     <p>${marked(term.short)}</p>
     ${term.long && html`<p>${marked(term.long)}</p>`}
     ${term.range && html`<p class="hint">Typical: ${term.range[0]} to ${term.range[1]} ${term.unit}.${isNum(val) && (val < term.range[0] || val > term.range[1]) ? html` <span class="warn">This value is outside it: check it.</span>` : ""}</p>`}
