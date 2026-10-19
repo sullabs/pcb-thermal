@@ -47,6 +47,7 @@ export function calcProject(project, cad = {}, results = {}) {
     const s = project.handCheck?.[side === "top" ? "solutionTop" : "solutionBottom"];
     if (s) out.solution[side] = thermalSolution(project, s, rows, reg);
   }
+  out.heatNoBody = heatNoBody(project, out);
   out.fsNow = forSolidWorks(project, out, "");
   out.flow = flowCheck(project, out);
   out.runs = runResults(project, results, out, out.fsNow);
@@ -54,6 +55,14 @@ export function calcProject(project, cad = {}, results = {}) {
   out.build = { hashNow: out.fsNow?.inputsHash, hashBuilt: built };
   if (cad?.build && built && out.fsNow) out.build.outOfDate = built !== out.fsNow.inputsHash;
   return out;
+}
+
+// Parts with heat but no included body: their heat is not in any model (Flow plan F8). Accepted on tab 6 with a
+// tick (project.checks["heat-no-body/<RefDes>"]); until then forSolidWorks.openChecks makes the macros refuse.
+export const heatNoBodyKey = ref => `heat-no-body/${ref}`;
+export function heatNoBody(project, calc) {
+  return project.parts.filter(x => calc.register.parts[x.refDes]?.pdW > 0 && !calc.bodies.some(b => b.include && b.refDes === x.refDes && fullBox(b.box)))
+    .map(x => ({ refDes: x.refDes, pdW: calc.register.parts[x.refDes].pdW, accepted: !!project.checks?.[heatNoBodyKey(x.refDes)] }));
 }
 
 export function forSolidWorks(project, calc, now) {
@@ -88,6 +97,8 @@ export function forSolidWorks(project, calc, now) {
     if (pl?.enabled && calc.spreader[side]) plates[side] = plateForSolidWorks(pl, calc.spreader[side]);
   }
   if (Object.keys(plates).length) fs.plates = plates;
+  const open = (calc.heatNoBody || []).filter(x => !x.accepted).map(x => `${x.refDes} has ${+x.pdW.toPrecision(3)} W of heat but no body in the model. Add a body, or set its heat to 0 on purpose.`);
+  if (open.length) fs.openChecks = open;
   const flow = flowForSw(project, calc, fs);
   if (Object.keys(flow.chips).length) fs.flow = flow;
   fs.inputsHash = inputsHash(fs);

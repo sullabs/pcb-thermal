@@ -233,6 +233,8 @@ orientation or air speed does not match the h it assumes (the page's h values ar
 
 ## F8. Small fixes
 
+**Status: done 2026-10-19. Heat with no body: tab 6 card with an on-purpose tick (project.checks heat-no-body/<RefDes>), open ones in forSolidWorks.openChecks and PJ_RefuseIfUnchecked refuses on them (all macros). Goal matching: GoalRef takes a goal whose first word is a RefDes and no other word is one. Report: solver state, cells and travels at the top (done with F1).**
+
 - **Heat with no body** (J1, 0.05 W): page check on tab 6 before Build Board: "J1 has heat but no body in the model.
   Add a body, or set its heat to 0 on purpose." Stored in `project.json checks`, and the macros already refuse while
   checks are unticked.
@@ -252,7 +254,7 @@ orientation or air speed does not match the h it assumes (the page's h values ar
 | F3 convergence | S3, F1 | small | | done 2026-10-19 |
 | F4 Tj | S4 | medium | changes the number compared with Tj max | done 2026-10-19 |
 | F5 materials | S4 to S6 | medium | | done 2026-10-19 |
-| F8 fixes | none | small | can go any time, good first warm-up | open |
+| F8 fixes | none | small | can go any time, good first warm-up | done 2026-10-19 |
 | F6 environment | S7 | medium | | open |
 | F7 compare | F1, F4 | medium | page only | open |
 

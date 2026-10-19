@@ -68,6 +68,8 @@ export function macroChecks(id, c) {
     const inc = calc.bodies.filter(b => b.include).length;
     out.push(ok(inc > 0, inc ? `${plural(inc, "included body", "included bodies")} to build` : "Include at least one body on tab 3.", 3));
     out.push(ok(!!calc.fsNow, calc.fsNow ? "PCB size and k known" : "The PCB size or k is not known yet: check tab 3.", 3));
+    const hnb = (calc.heatNoBody || []).filter(x => !x.accepted).map(x => x.refDes);
+    out.push(ok(!hnb.length, hnb.length ? `Heat with no body: ${hnb.join(", ")}. Add a body or tick it on tab 6, then save.` : "No part with heat is left without a body (or it is ticked as on purpose)", 6));
     const savedAfter = !cad.import?.date || (p.savedAt && p.savedAt >= cad.import.date);
     out.push(ok(savedAfter, savedAfter ? "Saved after the last import" : "Save after the last Import STEP: Build Board builds from what the page worked out on Save.", undefined));
     const probs = calc.geometry.bodies.filter(b => b.include && b.check && b.check !== "OK" && !/overhang/i.test(b.check)).length;
@@ -90,8 +92,9 @@ export function macroChecks(id, c) {
     const type = p.simSetup?.studyType || "Thermal";
     out.push(ok(type === (id === "SetupSim" ? "Thermal" : "Flow"), `Study type on this tab: ${type}${type === (id === "SetupSim" ? "Thermal" : "Flow") ? "" : `. This button needs ${id === "SetupSim" ? "Thermal" : "Flow"}.`}`, 8));
     if (calc.build?.outOfDate) out.push(ok(false, "The bodies or the PCB changed after the last build: run Build Board again first.", 6));
-    const heatNoBody = p.parts.filter(x => calc.register.parts[x.refDes]?.pdW > 0 && !calc.bodies.some(b => b.include && b.refDes === x.refDes)).length;
-    out.push(ok(!heatNoBody, heatNoBody ? `${plural(heatNoBody, "part")} with Pd but no included body: their heat is not in the model` : "Every part with Pd has a body", 3, true));
+    const hnbOpen = (calc.heatNoBody || []).filter(x => !x.accepted).map(x => x.refDes);
+    const hnbOk = (calc.heatNoBody || []).filter(x => x.accepted).map(x => x.refDes);
+    out.push(ok(!hnbOpen.length, hnbOpen.length ? `Heat with no body: ${hnbOpen.join(", ")}. Add a body or tick it on tab 6, then save. The macro refuses until then.` : hnbOk.length ? `Heat with no body on purpose: ${hnbOk.join(", ")} (not in the model)` : "Every part with Pd has a body", 6));
     const plates = ["top", "bottom"].filter(s => p.spreader?.[s]?.enabled);
     if (plates.length) out.push(ok(!!cad.spreaderBuild, cad.spreaderBuild ? "Spreader built" : "A plate is enabled but Build Spreader has not run: the study will be a bare board study.", 7, true));
     if (id === "SetupSim") {

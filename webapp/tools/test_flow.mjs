@@ -7,6 +7,7 @@
 // F3. Convergence: minTravels and goalCriteriaC are valid, default to 2 and 0.2, and drive the health reasons.
 // F4. Tj basis: k steps and material names, forSolidWorks.flow per chip, two-resistor layers, tjBasis on tab 9.
 // F5. PCB, TIM, spreader materials, radiative surfaces and contacts from the page, with the simplifications noted.
+// F8. Heat with no body: listed on tab 6, accepted with a tick, open ones in forSolidWorks.openChecks (macros refuse).
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +19,7 @@ import { valueOf } from "../src/calc/formulas.js";
 import { runHealth } from "../src/calc/runs.js";
 import { flowSettings, kStep, flowMaterial, tjBasisOf, flowEmissivity } from "../src/calc/flow.js";
 import { tabStates, blockingProblems } from "../src/page/tabs.js";
+import { macroChecks } from "../src/page/swcard.js";
 import { openIssues } from "../src/page/report.js";
 import { Explain } from "../src/page/explain.js";
 import * as Views from "../src/page/views.js";
@@ -210,6 +212,28 @@ const flowRun = (over = {}) => ({
   check(f2.notes.some(x => /folded into each TIM/.test(x)) && f2.notes.some(x => /PCB emissivity: top 0.9, bottom 0.8/.test(x)), "simplifications are noted", f2.notes);
   const t8 = show("SimTab", ctxOf({ ...P2, simSetup: { ...P2.simSetup, studyType: "Flow" } }));
   check(t8.includes('data-term="fsw.pcbMat"') && t8.includes('data-term="fsw.contactR"') && t8.includes("And these radiative surfaces") && t8.includes("is folded into each"), "tab 8 lists what goes to Flow, the radiative surfaces and the notes");
+}
+
+// ---------- F8 ----------
+{
+  const c0 = ctxOf(P);
+  check(c0.calc.heatNoBody.length === 0 && !c0.calc.fsNow.openChecks, "RPi4 example: every part with heat has a body");
+  const P2 = structuredClone(P);
+  const key = Object.keys(P2.bodies).find(k => P2.bodies[k].refDes === "J1");
+  P2.bodies[key].include = false;
+  const c2 = ctxOf(P2);
+  const j1 = c2.calc.heatNoBody.find(x => x.refDes === "J1");
+  check(j1 && !j1.accepted && c2.calc.fsNow.openChecks?.[0]?.startsWith("J1 has 0.0547 W of heat but no body in the model."), "J1 left out: open check with its heat", c2.calc.fsNow.openChecks);
+  valid("project.schema.json", { ...P2, forSolidWorks: { ...c2.calc.fsNow, computedAt: NOW } }, "project.json with openChecks");
+  const bb = macroChecks("BuildBoard", c2);
+  check(bb.some(x => !x.ok && /Heat with no body: J1/.test(x.text)), "Build Board card refuses while J1 is open", bb.map(x => x.text));
+  const t6 = show("BuildTab", c2);
+  check(t6.includes("Heat with no body") && t6.includes('data-term="hnb.accepted"') && t6.includes("Build Board and the studies refuse"), "tab 6 lists J1 with a tick box");
+  const P3 = { ...P2, checks: { ...(P2.checks || {}), "heat-no-body/J1": { at: NOW } } };
+  const c3 = ctxOf(P3);
+  check(c3.calc.heatNoBody[0].accepted && !c3.calc.fsNow.openChecks, "ticked: no open check left");
+  valid("project.schema.json", { ...P3, forSolidWorks: { ...c3.calc.fsNow, computedAt: NOW } }, "project.json with the accepted check");
+  check(macroChecks("RunFlow", c3).some(x => x.ok && /on purpose: J1/.test(x.text)), "Run Flow card says J1 is left out on purpose");
 }
 
 console.log(`Flow plan: ${n - fails} of ${n} checks passed.`);

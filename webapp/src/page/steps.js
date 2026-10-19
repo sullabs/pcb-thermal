@@ -42,6 +42,7 @@ function BuildView({ c }) {
       <p><${L} t="build.included" />: <${V} t="build.included" /></p>
       ${c.calc.build?.outOfDate && html`<p class="warn"><b>Out of date:</b> the PCB or the bodies changed on the page after the last build. Save, then run Build Board again.</p>`}
     <//>
+    <${HeatNoBody} c=${c} />
     ${b ? html`<${Card} title="Last build" cls=${failed.length || c.calc.build?.outOfDate ? "attention" : ""}>
       ${failed.length > 0 && html`<div class="problems"><p class="warn"><b>Failed first:</b></p>${failed.map(x => html`<p class="warn">${shortName(x.name)}: ${x.reason || "no reason given"}</p>`)}</div>`}
       <${Facts} ctx=${c} rows=${[[, "build.assembly"], [, "build.date", "", undefined, date(b.date)], [, "build.mode"], [, "build.wanted"], [, "build.added"], [, "build.moved"], [, "build.resized"], [, "build.suppressed"], [, "build.broughtBack"], [, "build.failed"], [, "build.overlaps"], [, "build.outOfDate"]]} />
@@ -203,6 +204,20 @@ function SolutionCard({ c, side }) {
     </table><//>
     ${detail && o.parts[detail] && html`<div class="stack"><h4>Stack of ${detail}</h4><${Facts} ctx=${c} rows=${SOL_STACK.map(([t, d]) => [, t, `${side}|${detail}`, d]).concat([[, "solp.dtStack", `${side}|${detail}`, 2]])} /></div>`}
     <p class="hint">Blank local spreader fields mean no local spreader. <button class="small danger" disabled=${locked} onClick=${() => c.editFn(`Remove the ${side} plate hand check`, q => removeSolution(q, side))}>Remove this hand check</button></p>
+  <//>`;
+}
+
+// Parts with heat but no body (Flow plan F8): add a body on tab 3, or tick that it is on purpose.
+function HeatNoBody({ c }) {
+  const list = c.calc.heatNoBody || [];
+  if (!list.length) return null;
+  const open = list.filter(x => !x.accepted).length;
+  return html`<${Card} title="Heat with no body" cls=${open ? "attention" : ""}>
+    <p>${open ? marked(`${plural(open, "part")} with heat ${open === 1 ? "has" : "have"} no body in the model, so no study sees that heat. Add a body on tab 3, or tick that it is on purpose. Build Board and the studies refuse until then.`) : "Every part with heat and no body is ticked as on purpose."}</p>
+    <table class="grid"><thead><tr><th><${L} t="part.refDes" /></th><th class="num"><${L} t="hnb.pd" /></th><th><${L} t="hnb.accepted" /></th></tr></thead>
+    <tbody>${list.map(x => html`<tr><td><${V} t="part.refDes" k=${x.refDes} v=${x.refDes} /></td><td class="num"><${V} t="hnb.pd" k=${x.refDes} d=${3} /></td>
+      <td><${Check} term="hnb.accepted" tkey=${x.refDes} value=${x.accepted} label=${"No body on purpose, " + x.refDes} disabled=${c.locked} onCommit=${v => c.edit(v ? `${x.refDes}: no body on purpose` : `${x.refDes}: no body, not on purpose`, ["checks", `heat-no-body/${x.refDes}`], v ? { at: c.now() } : undefined)} /></td></tr>`)}</tbody></table>
+    <p class="hint">Save after ticking: the macros read the ticks from the project file.</p>
   <//>`;
 }
 

@@ -385,7 +385,7 @@ Sub main()
         If gup = "SERV HEATF" Then qConv = graw: hasConv = True
         If gup = "RADIATION ENERGY DELTA" Then qRad = graw: hasRad = True
         gk = GoalKind(gname)
-        gref = FindRef(gname, heat)
+        gref = GoalRef(gname, heat)
         grp = ""
         If gref = "" Then grp = FindGroup(gname)
         nGoals = nGoals + 1
@@ -1598,6 +1598,19 @@ Function FindRef(ByVal txt As String, ByVal refs As Object) As String
             If refs.Exists(CStr(w(i))) Then FindRef = CStr(w(i)): Exit Function
         End If
     Next
+End Function
+
+' RefDes of a chip goal (F8): the first word is a RefDes and no other word is one, so the macro's own "U1 max" and a
+' user goal "U1 case" map to U1, but "U1 to U2 delta" maps to nothing. "" otherwise.
+Function GoalRef(ByVal txt As String, ByVal refs As Object) As String
+    Dim w As Variant, i As Long
+    w = Words(txt)
+    If UBound(w) < 0 Then Exit Function
+    If Not refs.Exists(CStr(w(0))) Then Exit Function
+    For i = 1 To UBound(w)
+        If refs.Exists(CStr(w(i))) Then Exit Function
+    Next
+    GoalRef = CStr(w(0))
 End Function
 
 ' "SPREADER" or "PCB" when the goal name has that word, else ""

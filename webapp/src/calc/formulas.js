@@ -422,6 +422,8 @@ export const VALUES = {
   "frad.name": (c, k) => c.calc.fsNow?.flow?.radiative?.[+k]?.name,
   "frad.eps": (c, k) => c.calc.fsNow?.flow?.radiative?.[+k]?.emissivity,
   "frad.usedBy": (c, k) => c.calc.fsNow?.flow?.radiative?.[+k]?.usedBy?.join(", "),
+  "hnb.pd": (c, k) => c.calc.heatNoBody?.find(x => x.refDes === k)?.pdW,
+  "hnb.accepted": (c, k) => c.calc.heatNoBody?.find(x => x.refDes === k)?.accepted,
   "flow.minTravels": c => c.calc.flow?.settings.minTravels,
   "flow.goalCriteria": c => c.calc.flow?.settings.goalCriteriaC,
   "run.goalsLoose": (c, k) => { const r = runOf(c, k), lim = c.calc.flow?.settings.goalCriteriaC; if (!r?.goalsHealth || !isNum(lim)) return undefined; const l = Object.entries(r.goalsHealth).filter(([, g]) => g.deltaC > lim).map(([n]) => n); return l.length ? l.join(", ") : "none"; },
@@ -804,6 +806,7 @@ F["fsw.contactA"] = (c, k) => ({ text: k === "partToPcb" ? "A = sum of L × W of
 F["frad.name"] = () => ({ text: "e <emissivity, 2 decimals>", inputs: [] });
 F["frad.eps"] = () => ({ text: "Emissivity rounded to 2 decimals", inputs: [] });
 F["frad.usedBy"] = () => ({ text: "The component groups that get this radiative surface", inputs: [] });
+F["hnb.pd"] = (c, k) => ({ text: "Pd of the part (tab 1)", inputs: [["Pd", "part.pd", k]], fn: v => v.Pd });
 F["run.healthReasons"] = (c, k) => ({ text: "Each reason behind the health of the run, in plain words", inputs: [["health", "run.health", k]] });
 F["run.changes"] = () => ({ text: "Inputs of the run (a copy kept in the results file) compared with the inputs now: ambient, PCB, Pd per part, bodies, chip models, plates, surfaces, contacts, mesh", inputs: [] });
 F["runp.margin"] = (c, k) => { const ref = k.split("|")[1]; return isNum(runpCalc(c, k)?.marginC) ? { text: "Margin = Tj max - peak", inputs: [["Tj max", "part.tjMax", ref], ["peak", "runp.peak", k]], fn: v => v["Tj max"] - v.peak } : null; };

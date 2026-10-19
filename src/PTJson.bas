@@ -272,7 +272,21 @@ End Function
 ' Build macros call this first. True = refuse: cad.json has change records the user has not ticked on the page.
 ' The user has been told which ones.
 Public Function PJ_RefuseIfUnchecked(ByVal cad As Object, ByVal macroName As String) As Boolean
-    Dim ch As Object, it As Variant, cnt As Long, s As String, idS As String
+    Dim ch As Object, it As Variant, cnt As Long, s As String, idS As String, oc As Object
+    ' page checks not yet accepted (forSolidWorks.openChecks, for example heat with no body)
+    Set oc = PJ_Obj(PJ_Project, "forSolidWorks/openChecks")
+    If Not oc Is Nothing Then
+        For Each it In oc
+            cnt = cnt + 1
+            If cnt <= 8 Then s = s & "  " & CStr(it) & vbCrLf
+        Next
+        If cnt > 0 Then
+            PT_Msg macroName & " did not run. Nothing was changed." & vbCrLf & vbCrLf & s & vbCrLf & _
+                   "Fix it on the page (tab 6, Heat with no body), save, and run again.", vbExclamation, macroName
+            PJ_RefuseIfUnchecked = True
+            Exit Function
+        End If
+    End If
     Set ch = PJ_Obj(cad, "changes")
     If ch Is Nothing Then Exit Function
     For Each it In ch

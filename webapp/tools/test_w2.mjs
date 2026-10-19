@@ -188,9 +188,9 @@ for (const [xlsx, expFile] of CASES) {
     report("sim setup: k z per chip", probs);
   }
 
-  // forSolidWorks from the module = the workbook's grey cells the macros read today (flow is page only: the workbook has no Flow block).
+  // forSolidWorks from the module = the workbook's grey cells the macros read today (flow and openChecks are page only).
   {
-    const { inputsHash: _h, flow: _f, ...fsCalc0 } = forSolidWorks(project, C, NOW) || {};
+    const { inputsHash: _h, flow: _f, openChecks: _o, ...fsCalc0 } = forSolidWorks(project, C, NOW) || {};
     const fsCalc = forSolidWorks(project, C, NOW) && fsCalc0;
     const fsBook = project.forSolidWorks;
     if (!fsBook) check(!fsCalc, "forSolidWorks: none, as in the workbook");

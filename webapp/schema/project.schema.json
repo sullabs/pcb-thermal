@@ -194,7 +194,7 @@
 
     "checks": {
       "type": "object",
-      "description": "Change records the user has checked, by change id (cad.json changes[]).",
+      "description": "Change records the user has checked, by change id (cad.json changes[]), and page checks the user has accepted (heat-no-body/<RefDes>: a part with heat and no body, on purpose).",
       "additionalProperties": {
         "type": "object",
         "required": ["at"],
@@ -426,7 +426,8 @@
             "bottom": { "$ref": "#/$defs/plateForSw" }
           }
         },
-        "flow": { "$ref": "#/$defs/flowForSw" }
+        "flow": { "$ref": "#/$defs/flowForSw" },
+        "openChecks": { "type": "array", "items": { "type": "string" }, "description": "Page checks not yet accepted on the page (tab 6). The macros refuse while there is one." }
       }
     },
     "flowContact": {
