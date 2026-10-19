@@ -13,7 +13,10 @@ Option Explicit
 '                       column AG shows hand minus simulation.
 '   Plot                picture of the first result plot, CAD\results\<run>.png
 '
-' Needs module PTCommon in the same macro, and a copy of PCB_thermal_TEMPLATE.xlsx.
+' Project folder (page, W7): pick <prefix>_project.json at the start. The run is the newest thermal run of
+' <prefix>_results.json not read yet (Run Thermal Study added it); its temperatures, energy balance and plot go into
+' that run, status "read". Tab 9 of the page shows it.
+' Needs modules PTCommon and PTJson in the same macro. Old workbooks: a copy of PCB_thermal_TEMPLATE.xlsx.
 ' =====================================================================================
 
 Const MACRO_NAME As String = "ReadResults"
@@ -22,22 +25,49 @@ Const swsCelsius As Long = 2
 Const swsUnitSI As Long = 0
 
 Dim notes As Collection
+Dim jsonMode As Boolean
 
 Sub main()
     Set swApp = Application.SldWorks
     PT_Trace MACRO_NAME & ": started (VBA macro)."
     Set notes = New Collection
+    jsonMode = False
 
-    Dim xl As Object, wb As Object
-    Set xl = PT_GetExcel()
-    Set wb = PT_PickWorkbook(xl, MACRO_NAME, "Sim setup|Sim results|Thermal solution|Component register")
-    If wb Is Nothing Then Exit Sub
-    If Not PT_NeedNames(wb, "Sim_RunName|Sim_MeshGlobal|Sim_MeshFine|Sim_Surfaces|Res_Header|TS_SimTj|Reg_RefDes|Reg_QUsed|" & _
-                            "Reg_TotalQ|Spr_Chips|Set_Prefix|Set_OutputFolder|Set_AsmName", MACRO_NAME) Then Exit Sub
-    xl.Calculate
-
-    Dim runName As String
-    runName = PT_NameStr(wb, "Sim_RunName", "")
+    ' ---------- project folder (page) or workbook ----------
+    Dim xl As Object, wb As Object, rf As Object, rfPath As String, jRun As Object, runName As String, qReg As Double
+    Select Case PJ_PickSource(MACRO_NAME)
+        Case "json"
+            jsonMode = True
+        Case "xlsx"
+        Case Else
+            Exit Sub
+    End Select
+    If jsonMode Then
+        rfPath = PJ_Dir & "\" & PJ_File("results")
+        Set rf = PJ_ReadOwn(PJ_File("results"), "pcb-thermal/results")
+        If rf Is Nothing Then
+            PT_Msg "ReadResults did not run. " & rfPath & " could not be read:" & vbCrLf & PT_LastErr, vbExclamation, MACRO_NAME
+            Exit Sub
+        End If
+        Set jRun = RunToRead(rf)
+        If jRun Is Nothing Then
+            PT_Msg "ReadResults did not run. " & rfPath & " has no thermal run waiting to be read." & vbCrLf & _
+                   "Run the study first (Run Thermal Study, button 6).", vbExclamation, MACRO_NAME
+            Exit Sub
+        End If
+        runName = PJ_Str(jRun, "name", "")
+        qReg = HeatTotal(PJ_Obj(jRun, "inputs/forSolidWorks/heat"))
+        If qReg <= 0 Then qReg = HeatTotal(PJ_Obj(PJ_Project, "forSolidWorks/heat"))
+    Else
+        Set xl = PT_GetExcel()
+        Set wb = PT_PickWorkbook(xl, MACRO_NAME, "Sim setup|Sim results|Thermal solution|Component register", PJ_WbPath)
+        If wb Is Nothing Then Exit Sub
+        If Not PT_NeedNames(wb, "Sim_RunName|Sim_MeshGlobal|Sim_MeshFine|Sim_Surfaces|Res_Header|TS_SimTj|Reg_RefDes|Reg_QUsed|" & _
+                                "Reg_TotalQ|Spr_Chips|Set_Prefix|Set_OutputFolder|Set_AsmName", MACRO_NAME) Then Exit Sub
+        xl.Calculate
+        runName = PT_NameStr(wb, "Sim_RunName", "")
+        qReg = PT_NameNum(wb, "Reg_TotalQ", 0)
+    End If
     If runName = "" Then
         PT_Msg "ReadResults did not run. Sim setup has no run name: run SetupSim first.", vbExclamation, MACRO_NAME
         Exit Sub
@@ -45,7 +75,7 @@ Sub main()
 
     ' ---------- study ----------
     Dim asm As Object, asmPath As String, simDoc As Object, study As Object, res As Object
-    asmPath = PT_AsmPath(wb)
+    If jsonMode Then asmPath = PJ_AsmPath() Else asmPath = PT_AsmPath(wb)
     Set asm = PT_OpenAsm(asmPath)
     If asm Is Nothing Then
         PT_Msg "ReadResults did not run. No thermal assembly at" & vbCrLf & asmPath, vbExclamation, MACRO_NAME
@@ -59,7 +89,7 @@ Sub main()
     Set study = PT_FindStudy(simDoc, runName)
     If study Is Nothing Then
         PT_Msg "ReadResults did not run. The assembly has no study named " & runName & "." & vbCrLf & _
-               "Run SetupSim, or type an existing study name in the run name cell of Sim setup.", vbExclamation, MACRO_NAME
+               IIf(jsonMode, "Run Run Thermal Study again (button 6).", "Run SetupSim, or type an existing study name in the run name cell of Sim setup."), vbExclamation, MACRO_NAME
         Exit Sub
     End If
     On Error Resume Next
@@ -113,7 +143,7 @@ Sub main()
     If Not IsEmpty(t) Then pcbMin = t(0): pcbMax = t(1)
 
     ' ---------- energy balance: heat in vs heat out of the whole model ----------
-    Dim hp As Variant, errC As Long, balance As Double, hasBal As Boolean, qIn As Double, qOut As Double, qReg As Double
+    Dim hp As Variant, errC As Long, balance As Double, hasBal As Boolean, qIn As Double, qOut As Double
     If pcbBodies.Count > 0 Then
         hp = res.GetHeatPowerOrEnergy2(False, PT_ToArray(pcbBodies), swsUnitSI, 1, 1, errC)
         If errC = 0 And Not IsEmpty(hp) Then
@@ -122,7 +152,6 @@ Sub main()
             ' (register total), so the imbalance is |register total - |net|| as a percentage of the register total.
             qIn = Abs(hp(3)): qOut = Abs(hp(4))
             notes.Add "Heat flow, whole model: in " & Format(qIn, "0.000") & " W, out " & Format(qOut, "0.000") & " W, net " & Format(hp(5), "0.000") & " W."
-            qReg = PT_NameNum(wb, "Reg_TotalQ", 0)
             If qReg > 0.000001 Then
                 balance = Round(Abs(qReg - Abs(hp(5))) / qReg * 100#, 2): hasBal = True
             ElseIf qOut > 0.000001 Then
@@ -135,7 +164,7 @@ Sub main()
 
     ' ---------- plot picture ----------
     Dim plotPath As String, pn As Variant, errs As Long, warns As Long
-    plotPath = PT_OutputFolder(wb) & "results\"
+    If jsonMode Then plotPath = PJ_OutputFolder() & "results\" Else plotPath = PT_OutputFolder(wb) & "results\"
     PT_MakeDirs Left(plotPath, Len(plotPath) - 1)
     plotPath = plotPath & runName & ".png"
     On Error Resume Next
@@ -149,6 +178,18 @@ Sub main()
     End If
     If plotPath = "" Then notes.Add "No plot picture saved (no result plot, or the picture could not be written)."
     On Error GoTo 0
+
+    ' ---------- results file (page) ----------
+    If jsonMode Then
+        WriteRunJson jRun, peak, avg, sprBodies.Count > 0, sprMin, sprMax, pcbBodies.Count > 0, pcbMin, pcbMax, hasBal, balance, plotPath
+        If Not PJ_SaveOwn(rf, PJ_File("results"), MACRO_NAME) Then
+            PT_Msg "ReadResults read the study, but " & rfPath & " could not be written:" & vbCrLf & PT_LastErr, vbExclamation, MACRO_NAME
+            Exit Sub
+        End If
+        PT_Msg "Written to:" & vbCrLf & rfPath & vbCrLf & "(run " & runName & ", tab 9 of the page)" & vbCrLf & vbCrLf & SummaryText(runName, peak.Count, _
+               sprTop.Count > 0 And sprBot.Count > 0, sprBodies.Count > 0, sprMin, sprMax, pcbMin, pcbMax, hasBal, balance, plotPath), vbInformation, MACRO_NAME
+        Exit Sub
+    End If
 
     ' ---------- Excel ----------
     Dim hdr As Object, ws As Object, r As Long, c As Long, lastR As Long, sv As Variant
@@ -246,4 +287,85 @@ Function TempStats(ByVal res As Object, ByVal bodies As Collection) As Variant
     Next
     If n = 0 Then Exit Function
     TempStats = Array(tmin, tmax, tsum / n)
+End Function
+
+' ================================================================= project folder (page) mode
+' The newest thermal run of results.json that was made but not read yet.
+Function RunToRead(ByVal rf As Object) As Object
+    Dim runs As Object, it As Variant
+    Set runs = PJ_Obj(rf, "runs")
+    If runs Is Nothing Then Exit Function
+    For Each it In runs
+        If PJ_Str(it, "studyType", "") = "Thermal" And PJ_Str(it, "status", "") <> "read" Then Set RunToRead = it
+    Next
+End Function
+
+' Sum of the heat per RefDes (W) of a forSolidWorks heat object, 0 when there is none.
+Function HeatTotal(ByVal h As Object) As Double
+    Dim it As Variant
+    If h Is Nothing Then Exit Function
+    For Each it In h.Keys
+        HeatTotal = HeatTotal + PJ_Num(h, CStr(it), 0)
+    Next
+End Function
+
+' Puts what was read into the run: status read, PCB and spreader min and max, energy balance, per RefDes peak and
+' average (RefDes written as on the page), the plot picture and the notes.
+Sub WriteRunJson(ByVal jRun As Object, ByVal peak As Object, ByVal avg As Object, ByVal hasSpr As Boolean, ByVal sprMin As Double, _
+                 ByVal sprMax As Double, ByVal hasPcb As Boolean, ByVal pcbMin As Double, ByVal pcbMax As Double, ByVal hasBal As Boolean, _
+                 ByVal balance As Double, ByVal plotPath As String)
+    Dim refNames As Object, pl As Object, it As Variant, refU As Variant, refS As String, parts As Object, p As Object, mm As Object
+    Dim nl As Collection, old As Object
+    Set refNames = CreateObject("Scripting.Dictionary")
+    Set pl = PJ_Obj(PJ_Project, "parts")
+    If Not pl Is Nothing Then
+        For Each it In pl
+            refS = PJ_Str(it, "refDes", "")
+            If refS <> "" And Not refNames.Exists(UCase(refS)) Then refNames.Add UCase(refS), refS
+        Next
+    End If
+    PJ_Put jRun, "status", "read"
+    If hasSpr Then
+        Set mm = PJ_Dict(): PJ_Put mm, "maxC", Round(sprMax, 2): PJ_Put mm, "minC", Round(sprMin, 2)
+        PJ_Put jRun, "spreader", mm
+    End If
+    If hasPcb Then
+        Set mm = PJ_Dict(): PJ_Put mm, "maxC", Round(pcbMax, 2): PJ_Put mm, "minC", Round(pcbMin, 2)
+        PJ_Put jRun, "pcb", mm
+    End If
+    If hasBal Then PJ_Put jRun, "energyBalancePct", balance
+    Set parts = PJ_Dict()
+    For Each refU In peak.Keys
+        If refNames.Exists(CStr(refU)) Then refS = refNames(CStr(refU)) Else refS = CStr(refU)
+        Set p = PJ_Dict()
+        PJ_Put p, "peakC", Round(peak(refU), 2)
+        If avg.Exists(refU) Then PJ_Put p, "avgC", Round(avg(refU), 2)
+        PJ_Put parts, refS, p
+    Next
+    PJ_Put jRun, "parts", parts
+    If plotPath <> "" Then PJ_Put jRun, "plotFile", plotPath
+    Set nl = New Collection
+    Set old = PJ_Obj(jRun, "notes")
+    If Not old Is Nothing Then
+        For Each it In old: nl.Add CStr(it): Next
+    End If
+    For Each it In notes: nl.Add CStr(it): Next
+    If nl.Count > 0 Then PJ_Put jRun, "notes", nl
+End Sub
+
+Function SummaryText(ByVal runName As String, ByVal nRead As Long, ByVal bothPlates As Boolean, ByVal hasSpr As Boolean, _
+                     ByVal sprMin As Double, ByVal sprMax As Double, ByVal pcbMin As Double, ByVal pcbMax As Double, _
+                     ByVal hasBal As Boolean, ByVal balance As Double, ByVal plotPath As String) As String
+    Dim s As String, q As Variant, n As Long
+    s = "Study " & runName & ": " & nRead & " parts with a RefDes read." & vbCrLf & _
+        IIf(bothPlates, "Spreaders (both plates) ", "Spreader ") & IIf(hasSpr, Round(sprMin, 1) & " to " & Round(sprMax, 1) & " C", "none") & ", PCB " & _
+        Round(pcbMin, 1) & " to " & Round(pcbMax, 1) & " C." & vbCrLf & _
+        "Energy imbalance " & IIf(hasBal, balance & " %", "not read") & " (should be within 2 %)." & vbCrLf
+    If plotPath <> "" Then s = s & "Plot: " & plotPath & vbCrLf
+    For Each q In notes
+        n = n + 1
+        If n > 5 Then Exit For
+        s = s & "- " & q & vbCrLf
+    Next
+    SummaryText = s
 End Function

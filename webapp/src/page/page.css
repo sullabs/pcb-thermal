@@ -303,3 +303,76 @@ table.sheet thead tr.groups th:not(.rownum-h) { color: color-mix(in srgb, var(--
 .new-project { margin: 10px 0; }
 .new-project input[aria-invalid="true"] { border-color: var(--crit); }
 label.button.disabled { opacity: .45; pointer-events: none; }
+/* W7: SolidWorks cards, plates, hand check with a plate, runs */
+.card.sw { border-left: 4px solid var(--accent); }
+fieldset.content > .card.sw { flex: 1 1 100%; }
+.sw-head { display: flex; gap: 12px; align-items: flex-start; }
+.sw-head p { margin: 0 0 6px; }
+.sw-icon { flex: none; image-rendering: pixelated; border-radius: 4px; background: #fff; padding: 2px; }
+.sw h4 { margin: 8px 0 4px; font-size: 13px; color: var(--muted); }
+.sw-checks p.chk { margin: 2px 0; }
+.chk .mark { display: inline-block; width: 1.3em; text-align: center; font-weight: 700; }
+.chk.ok .mark { color: var(--ok); }
+.chk.bad .mark { color: var(--crit); }
+.chk.bad { color: var(--text); }
+.chk.soft .mark { color: var(--watch); }
+.sw-press { background: var(--panel2); border-radius: 6px; padding: 6px 10px; }
+.sw-wait { color: var(--accent); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.spin { width: 12px; height: 12px; border: 2px solid var(--accent); border-right-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.built { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 6px; }
+fieldset.content > .card:has(table.chips, table.sol, table.runs) { flex: 1 1 100%; }
+.reading { border-left: 4px solid var(--accent); background: var(--panel2); border-radius: 6px; padding: 6px 10px; margin: 8px 0; }
+.reading p { margin: 3px 0; }
+.stack { background: var(--panel2); border-radius: 6px; padding: 6px 10px; margin-top: 6px; }
+.plot img { max-width: 100%; border-radius: 6px; border: 1px solid var(--line); background: #fff; }
+.plot { margin: 8px 0 0; }
+table.sol .field input { width: 3.6em !important; }
+/* W8: Help */
+.help { display: block; }
+.help-toc { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-bottom: 12px; }
+.help-sec { scroll-margin-top: 110px; max-width: 980px; }
+.help-sec p, .help-sec ol { margin: 6px 0; }
+.help-tab { border-top: 1px solid var(--line); padding-top: 6px; margin-top: 8px; scroll-margin-top: 110px; }
+.help-tab h4 { margin: 4px 0; }
+dl.trouble dt { font-weight: 600; margin-top: 8px; }
+dl.trouble dd { margin: 2px 0 0 0; }
+dl.gloss { margin: 0; }
+.g-entry { border-top: 1px solid var(--line); padding: 5px 0; scroll-margin-top: 110px; }
+.g-entry dd { margin: 2px 0 0; }
+.g-entry dd p { margin: 2px 0; }
+.g-entry .sym { color: var(--accent); }
+.g-entry .kind { font-size: 11px; color: var(--accent); margin-left: 6px; }
+/* W9: export menu and the report */
+.menu-wrap { position: relative; }
+.export-menu { position: absolute; right: 0; top: 110%; z-index: 20; min-width: 220px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.4); display: flex; flex-direction: column; gap: 4px; }
+.export-menu button { text-align: left; }
+.print-root { background: #fff; color: #000; min-height: 100vh; }
+.print-bar { position: sticky; top: 0; background: #eef1f5; border-bottom: 1px solid #ccc; padding: 8px 16px; display: flex; gap: 10px; align-items: center; z-index: 2; }
+.print-bar button { color: #000; background: #fff; border-color: #aaa; }
+.print-bar button.primary { background: #1f6fd1; color: #fff; border-color: #1f6fd1; }
+.print-bar .hint { color: #444; }
+.report { max-width: 190mm; margin: 0 auto; padding: 12px 16px 40px; font: 11pt/1.4 "Segoe UI", system-ui, sans-serif; color: #000; }
+.report h1 { font-size: 24pt; margin: 30mm 0 4px; }
+.report .sub { font-size: 14pt; color: #444; margin: 0 0 16px; }
+.report h2 { font-size: 14pt; border-bottom: 2px solid #1f6fd1; padding-bottom: 2px; margin: 18px 0 8px; break-after: avoid; }
+.report h3 { font-size: 12pt; margin: 12px 0 4px; break-after: avoid; }
+.report .cover { break-after: page; }
+table.rep { border-collapse: collapse; width: 100%; font-size: 9pt; margin: 4px 0 10px; }
+table.rep th, table.rep td { border: 1px solid #bbb; padding: 2px 5px; text-align: left; }
+table.rep th { background: #eef1f5; }
+table.rep .num { text-align: right; font-variant-numeric: tabular-nums; }
+table.rep.facts { width: auto; }
+table.rep.facts th { font-weight: 600; min-width: 45mm; }
+table.rep tr.fail td { background: #fde8e8; }
+table.rep tr { break-inside: avoid; }
+.report figure { margin: 6px 0; break-inside: avoid; }
+.report figure img { max-width: 100%; border: 1px solid #ccc; }
+.report figcaption { font-size: 9pt; color: #444; }
+.report .notes { white-space: pre-wrap; font-size: 9pt; border-left: 3px solid #1f6fd1; padding-left: 8px; }
+.report .foot { font-size: 8pt; color: #555; margin-top: 16px; }
+@media print {
+  .print-bar { display: none; }
+  .report { max-width: none; padding: 0; }
+  @page { size: A4; margin: 15mm; }
+}

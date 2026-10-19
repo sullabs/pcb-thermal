@@ -124,7 +124,7 @@ for (const [name, f] of Object.entries(examples)) {
       // Numbers that are not values: tab numbers in buttons and headings, hints, code, notes, option texts, svg titles.
       const plain = ["button", "h2", "h3", "h4", "code", "option", "title", "textarea", "label", "p", "ol"].some(inside)
         && !inside("td") && !inside("dd");
-      const hint = x.stack.some(s => /\b(hint|warn|err|toolbar|legend)\b/.test(s.a.class || ""));
+      const hint = x.stack.some(s => /\b(hint|warn|err|toolbar|legend|help)\b/.test(s.a.class || ""));
       if (!termed && !plain && !hint) check(false, `${where}: number without a term: '${text.slice(0, 60)}'`, x.stack.map(s => s.tag + (s.a.class ? "." + s.a.class : "")).join(">"));
     }
   }

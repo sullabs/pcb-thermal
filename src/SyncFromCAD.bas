@@ -18,7 +18,11 @@ Option Explicit
 '                   touching chip and spreader, clearance cut missing or suppressed,
 '                   interference between bodies (parts going into the PCB are ignored).
 '
-' Needs module PTCommon in the same macro, and a copy of PCB_thermal_TEMPLATE.xlsx.
+' Project folder (page, W7): pick <prefix>_project.json at the start. Nothing is written to the project file (the
+' page owns it): what differs goes to <prefix>_cad.json asBuilt (boxes read back, the plates as built, failed
+' checks) and change records ("differs in SolidWorks", "check failed"). Tab 10 of the page offers to take the
+' SolidWorks sizes.
+' Needs modules PTCommon and PTJson in the same macro. Old workbooks: a copy of PCB_thermal_TEMPLATE.xlsx.
 ' =====================================================================================
 
 Const MACRO_NAME As String = "SyncFromCAD"
@@ -39,17 +43,29 @@ Dim tolPos As Double, tolSize As Double
 Dim notes As Collection
 Dim bottomSide As Boolean                ' the plate being synced is the one under the PCB
 Dim wsSide As Object                     ' Spreader bottom tab (its Spr_ and As_ names are tab-level)
+Dim failList As Collection               ' project folder mode: texts of the failed checks, for cad.json asBuilt
 
 Sub main()
     Set swApp = Application.SldWorks
     PT_Trace MACRO_NAME & ": started (VBA macro)."
     PT_LogReset
     Set notes = New Collection
+    Set failList = New Collection
     nOverride = 0: nConflict = 0: nDiffers = 0: nFailed = 0: nRepeat = 0
+
+    ' ---------- project folder (page) or workbook ----------
+    Select Case PJ_PickSource(MACRO_NAME)
+        Case "json"
+            RunProject
+            Exit Sub
+        Case "xlsx"
+        Case Else
+            Exit Sub
+    End Select
 
     Dim xl As Object, wb As Object
     Set xl = PT_GetExcel()
-    Set wb = PT_PickWorkbook(xl, MACRO_NAME, "CAD geometry|Spreader|Settings|Change log")
+    Set wb = PT_PickWorkbook(xl, MACRO_NAME, "CAD geometry|Spreader|Settings|Change log", PJ_WbPath)
     If wb Is Nothing Then Exit Sub
     If Not PT_NeedNames(wb, "Geo_Table|Geo_PCB_Used|Geo_PCB_Override|Spr_Chips|Spr_Cuts|Spr_ZUnder|Spr_Thickness|Spr_Density|" & _
                             "As_Area|As_TopArea|As_ExposedArea|As_Volume|As_Mass|As_Thickness|As_Holes|As_LastSync|" & _
@@ -141,6 +157,326 @@ xlFail:
            "The workbook was not saved. Close any cell you are editing, close the workbook without saving, and run again.", _
            vbExclamation, MACRO_NAME
 End Sub
+
+' ================================================================= project folder (page) mode
+' Compares the assembly with forSolidWorks (what the page asked for on its last Save) and writes cad.json asBuilt
+' and change records. The project file is never written: the page takes the SolidWorks sizes on tab 10.
+Sub RunProject()
+    Dim cad As Object, cadPath As String, ch As Object, it As Variant
+    cadPath = PJ_Dir & "\" & PJ_File("cad")
+    Set cad = PJ_ReadOwn(PJ_File("cad"), "pcb-thermal/cad")
+    If cad Is Nothing Then
+        PT_Msg "SyncFromCAD did not run. Nothing was changed." & vbCrLf & vbCrLf & cadPath & " could not be read:" & vbCrLf & PT_LastErr, _
+               vbExclamation, MACRO_NAME
+        Exit Sub
+    End If
+    If PJ_Obj(cad, "build") Is Nothing Or PJ_Obj(PJ_Project, "forSolidWorks") Is Nothing Then
+        PT_Msg "SyncFromCAD did not run. There is no build in " & cadPath & " yet, or the page has not saved its numbers." & vbCrLf & _
+               "Run Build Board first (button 3).", vbExclamation, MACRO_NAME
+        Exit Sub
+    End If
+    ' failed checks still waiting for a tick on the page: not added again
+    Set openFails = CreateObject("Scripting.Dictionary")
+    Set ch = PJ_Obj(cad, "changes")
+    If Not ch Is Nothing Then
+        For Each it In ch
+            If PJ_Str(it, "change", "") = "check failed" And Not PJ_Has(PJ_Project, "checks/" & PJ_Str(it, "id", "")) Then
+                If Not openFails.Exists(PJ_Str(it, "key", "") & "|" & PJ_Str(it, "field", "")) Then openFails.Add PJ_Str(it, "key", "") & "|" & PJ_Str(it, "field", ""), 1
+            End If
+        Next
+    End If
+    tolPos = PJ_Num(PJ_Project, "settings/tolPosMm", 0.05)
+    tolSize = PJ_Num(PJ_Project, "settings/tolSizeMm", 0.05)
+
+    Dim asm As Object, asmPath As String
+    asmPath = PJ_AsmPath()
+    Set asm = PT_OpenAsm(asmPath)
+    If asm Is Nothing Then
+        PT_Msg "SyncFromCAD did not run. No thermal assembly at" & vbCrLf & asmPath & vbCrLf & "Run Build Board first.", vbExclamation, MACRO_NAME
+        Exit Sub
+    End If
+    PT_ActivateDoc asm
+    PT_LeaveHeatOnly asm
+
+    Dim pcbHave As Object, pcbSupp As Object, partHave As Object, partSupp As Object
+    Dim sprHave As Object, sprSupp As Object, timHave As Object, timSupp As Object
+    Set pcbHave = CreateObject("Scripting.Dictionary"): Set pcbSupp = CreateObject("Scripting.Dictionary")
+    Set partHave = CreateObject("Scripting.Dictionary"): Set partSupp = CreateObject("Scripting.Dictionary")
+    Set sprHave = CreateObject("Scripting.Dictionary"): Set sprSupp = CreateObject("Scripting.Dictionary")
+    Set timHave = CreateObject("Scripting.Dictionary"): Set timSupp = CreateObject("Scripting.Dictionary")
+    Dim ab As Object, bodiesOut As Collection, plates As Object, side As Long, cSpr As Object, pl As Object, plOut As Object
+    Set ab = PJ_Dict()
+    Set bodiesOut = New Collection
+    Set plates = PJ_Dict()
+    On Error GoTo swFail
+    PT_ReadRoles asm, Array("PCB", "Part", "Spreader", "TIM"), Array(pcbHave, partHave, sprHave, timHave), _
+                 Array(pcbSupp, partSupp, sprSupp, timSupp)
+    RestoreSuppression pcbHave, pcbSupp
+    RestoreSuppression partHave, partSupp
+    RestoreSuppression sprHave, sprSupp
+    RestoreSuppression timHave, timSupp
+    SyncPcbJson pcbHave, pcbSupp
+    SyncPartsJson partHave, partSupp, bodiesOut
+    For side = 0 To 1
+        bottomSide = (side = 1)
+        Set pl = PJ_Obj(PJ_Project, "forSolidWorks/plates/" & IIf(bottomSide, "bottom", "top"))
+        Set cSpr = PickSpreader(sprHave, sprSupp, bottomSide)
+        If cSpr Is Nothing Then
+            If Not pl Is Nothing Then notes.Add IIf(bottomSide, "Bottom", "Top") & " plate is enabled on the page but there is no active spreader part for it: run Build Spreader."
+        ElseIf pl Is Nothing Then
+            notes.Add "A " & IIf(bottomSide, "bottom", "top") & " spreader is in the assembly but its plate is not enabled on the page: it was not checked."
+        Else
+            Set plOut = SyncSpreaderJson(cSpr, pl, timHave, timSupp)
+            If Not plOut Is Nothing Then PJ_Put plates, IIf(bottomSide, "bottom", "top"), plOut
+        End If
+    Next
+    CheckInterference asm
+    On Error GoTo 0
+
+    ' ---------- cad.json ----------
+    Dim fl As Collection, nLog As Long
+    Set fl = New Collection
+    For Each it In failList: fl.Add CStr(it): Next
+    PJ_Put ab, "date", PJ_Now()
+    If plates.Count > 0 Then PJ_Put ab, "plates", plates
+    PJ_Put ab, "bodies", bodiesOut
+    PJ_Put ab, "failedChecks", fl
+    PJ_Put cad, "asBuilt", ab
+    nLog = PJ_FlushChanges(cad)
+    If Not PJ_SaveOwn(cad, PJ_File("cad"), MACRO_NAME) Then
+        PT_Msg "SyncFromCAD read the assembly, but " & cadPath & " could not be written:" & vbCrLf & PT_LastErr, vbExclamation, MACRO_NAME
+        Exit Sub
+    End If
+
+    Dim s As String, k As Long
+    s = "Written to:" & vbCrLf & cadPath & vbCrLf & "(the page reloads it on its own: tab 7 Spreader and tab 10 Changes)" & vbCrLf & vbCrLf & _
+        "Read from " & asmPath & vbCrLf & vbCrLf & _
+        bodiesOut.Count & " bodies differ from the page. Take their SolidWorks sizes on tab 10, or run Build Board to put the page's sizes back." & vbCrLf & _
+        nDiffers & " spreader values differ from tab 7." & vbCrLf & _
+        nFailed & " checks failed" & IIf(nRepeat > 0, " (" & nRepeat & " already waiting for a tick, not added again)", "") & "." & vbCrLf
+    If nLog > 0 Then s = s & nLog & " change records written. Tick them on tab 10 of the page." & vbCrLf Else s = s & "Nothing to report." & vbCrLf
+    For Each it In notes
+        k = k + 1
+        If k > 6 Then s = s & "(more notes in the log)" & vbCrLf: Exit For
+        s = s & "- " & it & vbCrLf
+        PT_Trace MACRO_NAME & ": " & it
+    Next
+    PT_Msg s, IIf(nFailed > 0 Or bodiesOut.Count > 0, vbExclamation, vbInformation), MACRO_NAME
+    Exit Sub
+
+swFail:
+    PT_Msg "SyncFromCAD stopped while reading SolidWorks: " & Err.Description & vbCrLf & "Nothing was written.", vbExclamation, MACRO_NAME
+End Sub
+
+Sub SyncPcbJson(ByVal have As Object, ByVal wasSupp As Object)
+    Dim c As Object, bx As Variant, k As Long, fields As Variant, want As Double, it As Variant
+    fields = Array("l", "w", "h")
+    For Each it In have.Keys
+        If Not wasSupp(it) Then Set c = have(it)
+    Next
+    If c Is Nothing Then
+        CheckFailed "pcb", "PCB", "", "No active PCB part in the thermal assembly"
+        Exit Sub
+    End If
+    bx = PT_CompBox(c)
+    If IsEmpty(bx) Then Exit Sub
+    If Abs(bx(0)) > tolPos Or Abs(bx(1)) > tolPos Or Abs(bx(2)) > tolPos Then
+        CheckFailed "pcb", "PCB", "", "The PCB corner is not at the origin any more (" & Round(bx(0), 3) & ", " & _
+                    Round(bx(1), 3) & ", " & Round(bx(2), 3) & "). Every part is placed from that corner: move it back."
+    End If
+    For k = 0 To 2
+        want = PJ_Num(PJ_Project, "forSolidWorks/pcb/" & fields(k), 0)
+        If Abs(bx(3 + k) - want) > tolSize Then
+            PT_LogAdd MACRO_NAME, "pcb", "PCB", "", "differs in SolidWorks", "PCB " & UCase(fields(k)), Round(want, 3), Round(bx(3 + k), 3)
+            notes.Add "PCB " & UCase(fields(k)) & " is " & Round(bx(3 + k), 3) & " mm in SolidWorks, " & Round(want, 3) & " mm on the page (tab 3, PCB size)."
+        End If
+    Next
+End Sub
+
+' Each built part against the box the page asked for (cut at the board surface, as Build Board builds it).
+' A body that differs goes to asBuilt bodies with the box read from SolidWorks.
+Sub SyncPartsJson(ByVal have As Object, ByVal wasSupp As Object, ByVal out As Collection)
+    Dim bl As Object, it As Variant, b As Variant, wantB As Object, keyS As String, bx As Variant, k As Long, diff As Boolean
+    Dim usedB(5) As Double, pcbT As Double, fields As Variant, tol As Double, rec As Object, nameS As String
+    fields = Array("xMin", "yMin", "zMin", "l", "w", "h")
+    pcbT = PJ_Num(PJ_Project, "forSolidWorks/pcb/h", 0)
+    Set bl = PJ_Obj(PJ_Project, "forSolidWorks/bodies")
+    For Each it In have.Keys
+        If Not wasSupp(it) Then
+            keyS = CStr(it)
+            Set wantB = Nothing
+            If Not bl Is Nothing Then
+                For Each b In bl
+                    If PJ_Str(b, "key", "") = keyS Then Set wantB = b: Exit For
+                Next
+            End If
+            If wantB Is Nothing Then
+                notes.Add "Part " & keyS & " is in the assembly but not included on the page. Run Build Board to suppress it."
+            Else
+                nameS = PJ_Str(wantB, "name", keyS)
+                bx = PT_CompBox(have(it))
+                If Not IsEmpty(bx) And PJ_Num(wantB, "rotDeg", 0) = 0 Then
+                    For k = 0 To 5: usedB(k) = PJ_Num(wantB, "box/" & fields(k), 0): Next
+                    PT_ClipToBoard usedB, pcbT
+                    diff = False
+                    For k = 0 To 5
+                        If k < 3 Then tol = tolPos Else tol = tolSize
+                        If Abs(bx(k) - usedB(k)) > tol Then
+                            diff = True
+                            PT_LogAdd MACRO_NAME, keyS, nameS, PJ_Str(wantB, "refDes", ""), "differs in SolidWorks", CStr(fields(k)), Round(usedB(k), 3), Round(bx(k), 3)
+                        End If
+                    Next
+                    If diff Then
+                        Set rec = PJ_Dict()
+                        PJ_Put rec, "key", keyS
+                        PJ_Put rec, "box", PJ_Box(bx(0), bx(1), bx(2), bx(3), bx(4), bx(5))
+                        out.Add rec
+                    End If
+                End If
+            End If
+        End If
+    Next
+End Sub
+
+' One plate against forSolidWorks plates top or bottom (pl). Returns the cad.json asBuilt plate record.
+Function SyncSpreaderJson(ByVal c As Object, ByVal pl As Object, ByVal timHave As Object, ByVal timSupp As Object) As Object
+    Dim md As Object, ad As Variant, tz As Double, plate As String
+    Dim fTop As Object, fUnder As Object, zTop As Double, zUnder As Double, thick As Double
+    Dim mp As Object, vol As Double, surf As Double, topArea As Double, upArea As Double, contactArea As Double, holes As Long
+    Dim zuX As Double, tX As Double, dens As Double, d As Object, chipsOut As Collection
+    plate = IIf(bottomSide, "Bottom spreader", "Spreader")
+    Set md = c.GetModelDoc2
+    ad = c.Transform2.ArrayData
+    tz = ad(11) * 1000#
+    zuX = PJ_Num(pl, "faceZMm", 0)
+    tX = PJ_Num(pl, "thicknessMm", 0)
+    dens = PJ_Num(pl, "densityKgM3", 2700)
+
+    Set fTop = FaceByName(md, "Top")
+    Set fUnder = FaceByName(md, "Underside")
+    If fTop Is Nothing Or fUnder Is Nothing Then
+        CheckFailed IIf(bottomSide, "spreader_bottom", "spreader"), plate, "", "The " & LCase(plate) & " has no face named " & IIf(fTop Is Nothing, "Top", "Underside") & _
+                    ". Run Build Spreader again to name the faces."
+        Exit Function
+    End If
+    zTop = FaceZ(fTop) + tz
+    zUnder = FaceZ(fUnder) + tz
+    thick = Abs(zTop - zUnder)
+    topArea = fTop.GetArea * 1000000#
+    upArea = UpFacingArea(md, bottomSide)
+    holes = ClosedCircles(fTop)
+    Set mp = md.Extension.CreateMassProperty
+    vol = mp.Volume * 1000000000#
+    surf = mp.SurfaceArea * 1000000#
+    If Abs(zUnder - zuX) > tolPos Then Differs "PT_Under", plate & " underside height", "", "Z", zuX, zUnder
+    If Abs(thick - tX) > tolSize Then Differs "PT_Plate", plate & " plate thickness", "", "Thickness", tX, thick
+
+    Set chipsOut = New Collection
+    contactArea = SyncChipsJson(md, pl, tz, zUnder, timHave, timSupp, chipsOut)
+
+    Dim cl As Object, it As Variant, fName As String, f As Object
+    Set cl = PJ_Obj(pl, "cuts")
+    If Not cl Is Nothing Then
+        For Each it In cl
+            fName = "Clear_" & PT_SafeFile(PJ_Str(it, "key", ""))
+            Set f = PT_FindFeature(md, fName)
+            If f Is Nothing Then
+                CheckFailed PJ_Str(it, "key", ""), PJ_Str(it, "name", ""), "", "Clearance cut " & fName & " is missing. Run Build Spreader."
+            ElseIf f.IsSuppressed Then
+                CheckFailed PJ_Str(it, "key", ""), PJ_Str(it, "name", ""), "", "Clearance cut " & fName & " is suppressed but the part is included."
+            End If
+        Next
+    End If
+
+    Set d = PJ_Dict()
+    PJ_Put d, "outlineAreaMm2", Round(topArea, 1)
+    PJ_Put d, "topAreaMm2", Round(upArea, 1)
+    PJ_Put d, "exposedAreaMm2", Round(PJ_Pos(surf - contactArea), 1)
+    PJ_Put d, "volumeMm3", Round(vol, 1)
+    PJ_Put d, "massG", Round(vol * 0.000000001 * dens * 1000#, 2)
+    PJ_Put d, "thicknessMm", Round(thick, 3)
+    PJ_Put d, "holes", holes
+    PJ_Put d, "chips", chipsOut
+    Set SyncSpreaderJson = d
+End Function
+
+' Pedestal heights and TIM thicknesses as found, and the contact checks, for the covered chips of pl.
+' Returns the area (mm2) of plate faces that touch a TIM or chip (not exposed to air).
+Function SyncChipsJson(ByVal md As Object, ByVal pl As Object, ByVal tz As Double, ByVal zUnder As Double, _
+                       ByVal timHave As Object, ByVal timSupp As Object, ByVal out As Collection) As Double
+    Dim cl As Object, bl As Object, it As Variant, b As Variant, bx As Object, refD As String, keyS As String
+    Dim pedX As Double, timX As Double, isBody As Boolean, chipTop As Double, cl0 As Double, cw0 As Double
+    Dim fC As Object, zC As Double, pedF As Double, area As Double, tb As Variant, timKey As String, timF As Double
+    Dim zChipSide As Double, zPlateSide As Double, rec As Object
+    Set cl = PJ_Obj(pl, "chips")
+    Set bl = PJ_Obj(PJ_Project, "forSolidWorks/bodies")
+    If cl Is Nothing Then Exit Function
+    For Each it In cl
+        refD = PJ_Str(it, "refDes", "")
+        keyS = PJ_Str(it, "key", "")
+        Set bx = Nothing
+        If Not bl Is Nothing Then
+            For Each b In bl
+                If PJ_Str(b, "key", "") = keyS Then Set bx = PJ_Obj(b, "box"): Exit For
+            Next
+        End If
+        If refD <> "" And Not bx Is Nothing Then
+            pedX = PJ_Num(it, "pedestalMm", 0)
+            timX = PJ_Num(it, "timTMm", 0)
+            isBody = (UCase(PJ_Str(it, "timMode", "Body")) = "BODY")
+            If bottomSide Then chipTop = PJ_Num(bx, "zMin", 0) Else chipTop = PJ_Num(bx, "zMin", 0) + PJ_Num(bx, "h", 0)
+            cl0 = PJ_Num(bx, "l", 0): cw0 = PJ_Num(bx, "w", 0)
+            timF = -1
+            If pedX > 0.0005 Then
+                Set fC = FaceByName(md, "Contact_" & PT_SafeFile(refD))
+                If fC Is Nothing Then
+                    CheckFailed "Ped_" & refD, "Pedestal for " & refD, refD, "No face Contact_" & refD & ": the pedestal is missing or suppressed."
+                    zC = zUnder: pedF = 0
+                Else
+                    zC = FaceZ(fC) + tz
+                    pedF = IIf(bottomSide, zC - zUnder, zUnder - zC)
+                    area = area + fC.GetArea * 1000000#
+                End If
+            Else
+                zC = zUnder: pedF = 0
+                area = area + cl0 * cw0
+            End If
+            If Abs(pedF - pedX) > tolSize Then Differs "Ped_" & refD, "Pedestal for " & refD, refD, "Pedestal h", pedX, pedF
+            If isBody Then
+                timKey = "tim_" & LCase(PT_SafeFile(refD))
+                If Not timHave.Exists(timKey) Then
+                    CheckFailed timKey, "TIM " & refD, refD, "No TIM part for " & refD & " in the assembly. Run Build Spreader."
+                ElseIf timSupp(timKey) Then
+                    CheckFailed timKey, "TIM " & refD, refD, "The TIM part for " & refD & " is suppressed."
+                Else
+                    tb = PT_CompBox(timHave(timKey))
+                    If Not IsEmpty(tb) Then
+                        timF = tb(5)
+                        If Abs(tb(5) - timX) > tolSize Then Differs timKey, "TIM " & refD, refD, "TIM t", timX, tb(5)
+                        If bottomSide Then
+                            zChipSide = tb(2) + tb(5): zPlateSide = tb(2)
+                        Else
+                            zChipSide = tb(2): zPlateSide = tb(2) + tb(5)
+                        End If
+                        If Abs(zChipSide - chipTop) > 0.01 Then CheckFailed timKey, "TIM " & refD, refD, _
+                            "TIM face on the chip is at Z " & Round(zChipSide, 3) & ", the chip face is at " & Round(chipTop, 3)
+                        If Abs(zPlateSide - zC) > 0.01 Then CheckFailed timKey, "TIM " & refD, refD, _
+                            "TIM face on the spreader is at Z " & Round(zPlateSide, 3) & ", the spreader is at " & Round(zC, 3)
+                    End If
+                End If
+            ElseIf Abs(IIf(bottomSide, chipTop - zC, zC - chipTop) - timX) > 0.01 Then
+                CheckFailed "Ped_" & refD, "Pedestal for " & refD, refD, "Gap between chip top and spreader is " & _
+                            Round(Abs(zC - chipTop), 3) & " mm, the contact resistance assumes " & Round(timX, 3)
+            End If
+            Set rec = PJ_Dict()
+            PJ_Put rec, "refDes", refD
+            PJ_Put rec, "pedestalMm", Round(IIf(pedF < 0, 0, pedF), 3)
+            If timF >= 0 Then PJ_Put rec, "timTMm", Round(timF, 3)
+            out.Add rec
+        End If
+    Next
+    SyncChipsJson = area
+End Function
 
 ' ================================================================= PCB and parts
 Sub SyncPcb(ByVal wb As Object, ByVal have As Object, ByVal wasSupp As Object)
@@ -430,6 +766,7 @@ End Sub
 
 Sub CheckFailed(ByVal keyS As String, ByVal nameS As String, ByVal refD As String, ByVal what As String)
     nFailed = nFailed + 1
+    failList.Add nameS & ": " & what
     If openFails.Exists(keyS & "|" & what) Then
         nRepeat = nRepeat + 1                       ' same failure is already waiting for a Yes: do not add a duplicate row
     Else

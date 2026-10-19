@@ -190,12 +190,13 @@ for (const [xlsx, expFile] of CASES) {
 
   // forSolidWorks from the module = the workbook's grey cells the macros read today.
   {
-    const fsCalc = forSolidWorks(project, C, NOW);
+    const { inputsHash: _h, ...fsCalc0 } = forSolidWorks(project, C, NOW) || {};
+    const fsCalc = forSolidWorks(project, C, NOW) && fsCalc0;
     const fsBook = project.forSolidWorks;
     if (!fsBook) check(!fsCalc, "forSolidWorks: none, as in the workbook");
     else {
-      const { computedAt, computedBy, ...book } = fsBook;
-      report("forSolidWorks: same as the workbook (bodies, heat, chips, plates)", [...diff("fs", fsCalc, book), ...diff("fs(extra)", book, fsCalc ? (({ computedAt, computedBy, ...x }) => x)(fsCalc) : {})]);
+      const { computedAt, computedBy, inputsHash, ...book } = fsBook;
+      report("forSolidWorks: same as the workbook (bodies, heat, chips, plates)", [...diff("fs", fsCalc, book), ...diff("fs(extra)", book, fsCalc ? (({ computedAt, computedBy, inputsHash, ...x }) => x)(fsCalc) : {})]);
       const files = { project: { ...project, forSolidWorks: fsCalc }, cad, results };
       const v = validateFiles(files, ajv);
       check(v.length === 0, "project.json with the computed forSolidWorks validates" + (v.length ? ": " + v.slice(0, 3).join("; ") : ""));

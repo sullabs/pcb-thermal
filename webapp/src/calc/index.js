@@ -6,6 +6,8 @@
 //                                           spreader: {top, bottom}, solution: {top, bottom}, simChips }
 //   forSolidWorks(project, calc, now)  -> the forSolidWorks block of project.json, or undefined when the
 //                                         PCB size or k is not known yet
+//   calc.fsNow: forSolidWorks as Save would write it now; calc.runs: results per run (runs.js); calc.build: whether
+//   the model in SolidWorks was built from the PCB and bodies of now (cad.json build.inputsHash)
 
 import { register, triage, railBudget } from "./power.js";
 import { bodyTable, bodyOf, pcb, geometryChecks, fullBox } from "./geometry.js";
@@ -13,6 +15,7 @@ import { bareBoard } from "./network.js";
 import { spreaderPlate, plateForSolidWorks } from "./spreader.js";
 import { thermalSolution } from "./solution.js";
 import { simChips } from "./sim.js";
+import { runResults, inputsHash } from "./runs.js";
 import { isNum, put } from "./util.js";
 
 export const CALC_VERSION = "0.1.0";
@@ -43,6 +46,11 @@ export function calcProject(project, cad = {}, results = {}) {
     const s = project.handCheck?.[side === "top" ? "solutionTop" : "solutionBottom"];
     if (s) out.solution[side] = thermalSolution(project, s, rows, reg);
   }
+  out.fsNow = forSolidWorks(project, out, "");
+  out.runs = runResults(project, results, out, out.fsNow);
+  const built = cad?.build?.inputsHash;
+  out.build = { hashNow: out.fsNow?.inputsHash, hashBuilt: built };
+  if (cad?.build && built && out.fsNow) out.build.outOfDate = built !== out.fsNow.inputsHash;
   return out;
 }
 
@@ -78,5 +86,6 @@ export function forSolidWorks(project, calc, now) {
     if (pl?.enabled && calc.spreader[side]) plates[side] = plateForSolidWorks(pl, calc.spreader[side]);
   }
   if (Object.keys(plates).length) fs.plates = plates;
+  fs.inputsHash = inputsHash(fs);
   return fs;
 }

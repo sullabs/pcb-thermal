@@ -1,6 +1,6 @@
 # PCB thermal web app: design
 
-Status: design, agreed in outline on 2026-10-18. W1 to W5 are built (schemas, calculation module, page shell, term catalogue and Explain panel, tabs 1 to 5 and Learn mode). This replaces the Excel workbook as the place where the
+Status: design, agreed in outline on 2026-10-18. W1 to W9 are built (W6, W7 and W9 wait for the SolidWorks run and the user check). This replaces the Excel workbook as the place where the
 user works. The SolidWorks macros stay and keep doing the CAD and simulation work.
 
 ## 1. Goal
@@ -324,9 +324,9 @@ Per macro:
 | W4 | Term catalogue and Explain panel: hover text, abbreviations, formulas with numbers, trace | every value on every tab has a hover text and, if calculated, a formula. **Done 2026-10-18** (`src/terms/catalogue.js`, about 230 terms, glossary, status words; `src/calc/formulas.js`; `tools/test_w4.mjs` renders every tab for both RPi4 examples and checks each value, label and input has a term, and that every formula, worked out from its inputs, equals the calculated value: about 830 formulas) |
 | W5 | Tabs 1 to 5 complete (parts to bare board hand check), Learn mode texts | a new user can fill a board from a datasheet list without the workbook. **Done 2026-10-18** (Paste a parts list on tab 1, body suggestions and bodies by hand on tab 3, PCB stack, import settings, flag limits, air and surfaces, heat paths drawing per part on tab 5; `src/terms/learn.js`; `tools/test_w5.mjs` starts a new project, pastes the RPi4 list, links bodies from the suggestions and by hand, and gets the example's Pd, Tj est, flags and hand check Tj for every part) |
 | W6 | Macros on JSON: `PTJson.bas`, project folder, Import STEP and Build Board read and write JSON | RPi4: import and build from the page give the same model as from the workbook. **Code done 2026-10-19, waiting for the SolidWorks run** (`docs/HOWTO_W6.md`; the JSON reader and writer and the change report were checked on the RPi4 files through a VBScript copy, output valid against the schemas) |
-| W7 | Remaining macros on JSON, tabs 6 to 10, SolidWorks cards and file watching | full RPi4 run from the page: build, spreader, study, results |
-| W8 | Help page and glossary | every catalogue term in the glossary; each tab has its help section |
-| W9 | Exports: PDF report, workbook, archive | RPi4 report and workbook made and checked by the user |
+| W7 | Remaining macros on JSON, tabs 6 to 10, SolidWorks cards and file watching | full RPi4 run from the page: build, spreader, study, results. **Code done 2026-10-19, waiting for the SolidWorks run** (docs/HOWTO_W7.md; tabs 6 to 10 with editors for the plates, the hand check with a plate, the study and the chips; SolidWorks cards with checks and waiting on every step tab; Build Spreader, Sync CAD, Run Thermal Study, Read Results and Run Flow read project.json and write cad.json and results.json; out of date from the inputs hash and the inputs copy of each run; tools/test_w7.mjs) |
+| W8 | Help page and glossary | every catalogue term in the glossary; each tab has its help section. **Done 2026-10-19** (src/terms/help.js, src/page/help.js: the sections of section 7, one section per tab and per button, troubleshooting, a searchable glossary of every term, abbreviation and status word; tools/test_w8.mjs) |
+| W9 | Exports: PDF report, workbook, archive | RPi4 report and workbook made and checked by the user. **Code done 2026-10-19, waiting for the user check** (Export in the top bar: report preview printed to PDF, workbook made with SheetJS (already in the page, so no ExcelJS), archive as a plain zip written by the page (no JSZip); tools/test_w9.mjs) |
 
 The workbook and the current macros keep working until W7 is done.
 

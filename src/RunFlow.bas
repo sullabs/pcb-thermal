@@ -18,7 +18,10 @@ Option Explicit
 ' Add "max", "min" or "avg" to the name (no word means max). A goal whose name contains
 ' "spreader" or "pcb" is read as that part's max or min.
 '
-' Needs module PTCommon in the same macro, and a copy of PCB_thermal_TEMPLATE.xlsx.
+' Project folder (page, W7): pick <prefix>_project.json at the start. Heat per RefDes and the ambient come from
+' forSolidWorks, the study type from simSetup (must be Flow); the run (FL_date_time) with a copy of the inputs goes to
+' <prefix>_results.json, tab 9 of the page.
+' Needs modules PTCommon and PTJson in the same macro. Old workbooks: a copy of PCB_thermal_TEMPLATE.xlsx.
 ' Needs SOLIDWORKS Flow Simulation turned on (Tools > Add-Ins) and its API SDK installed.
 ' =====================================================================================
 
@@ -43,6 +46,9 @@ Const nikDependencyConstant As Long = 1
 Dim notes As Collection
 Dim lines As Collection
 Dim reWords As Object
+Dim jsonMode As Boolean
+Dim rptDir As String                     ' output folder and file prefix of the report
+Dim regTotal As Double                   ' heat of all parts (W), for the messages
 
 Sub main()
     Set swApp = Application.SldWorks
@@ -50,40 +56,75 @@ Sub main()
     Set notes = New Collection
     Set lines = New Collection
 
-    Dim xl As Object, wb As Object
-    Set xl = PT_GetExcel()
-    Set wb = PT_PickWorkbook(xl, MACRO_NAME, "Sim setup|Sim results|Thermal solution|Component register")
-    If wb Is Nothing Then Exit Sub
-    If Not PT_NeedNames(wb, "Sim_Type|Sim_Ambient|Sim_Surfaces|Res_Header|TS_SimTj|Reg_RefDes|Reg_QUsed|" & _
-                            "Reg_TotalQ|Spr_Chips|Set_Prefix|Set_OutputFolder|Set_AsmName", MACRO_NAME) Then Exit Sub
-    xl.Calculate
-    If UCase(PT_NameStr(wb, "Sim_Type", "Thermal")) <> "FLOW" Then
-        PT_Msg "RunFlow did not run. Study type on Sim setup is " & PT_NameStr(wb, "Sim_Type", "") & "." & vbCrLf & _
-               "Set it to Flow and run again.", vbExclamation, MACRO_NAME
-        Exit Sub
-    End If
-    If PT_RefuseIfUnchecked(wb, MACRO_NAME) Then Exit Sub
+    jsonMode = False: regTotal = 0
+    Dim xl As Object, wb As Object, rf As Object, rfPath As String, cad As Object
+    Select Case PJ_PickSource(MACRO_NAME)
+        Case "json"
+            jsonMode = True
+        Case "xlsx"
+        Case Else
+            Exit Sub
+    End Select
 
-    ' ---------- heat per RefDes from the register ----------
-    Dim heat As Object, rv As Variant, qv As Variant, i As Long, rk As String, totalQ As Double
+    ' ---------- heat per RefDes: forSolidWorks (page) or the register (workbook) ----------
+    Dim heat As Object, rv As Variant, qv As Variant, i As Long, rk As String, totalQ As Double, hj As Object, hk0 As Variant
     Set heat = CreateObject("Scripting.Dictionary")
-    rv = PT_Rng(wb, "Reg_RefDes").Value
-    qv = PT_Rng(wb, "Reg_QUsed").Value
-    For i = 1 To UBound(rv, 1)
-        rk = UCase(PT_Str(rv(i, 1)))
-        If rk <> "" Then
-            If Not heat.Exists(rk) Then heat.Add rk, 0#
-            heat(rk) = heat(rk) + PT_Num(qv(i, 1), 0)
+    If jsonMode Then
+        rfPath = PJ_Dir & "\" & PJ_File("results")
+        Set rf = PJ_ReadOwn(PJ_File("results"), "pcb-thermal/results")
+        Set cad = PJ_ReadOwn(PJ_File("cad"), "pcb-thermal/cad")
+        If rf Is Nothing Or cad Is Nothing Then
+            PT_Msg "RunFlow did not run. The results or cad file of the project could not be read:" & vbCrLf & PT_LastErr, vbExclamation, MACRO_NAME
+            Exit Sub
         End If
-    Next
+        If UCase(PJ_Str(PJ_Project, "simSetup/studyType", "Thermal")) <> "FLOW" Then
+            PT_Msg "RunFlow did not run. The study type on tab 8 of the page is " & PJ_Str(PJ_Project, "simSetup/studyType", "Thermal") & "." & vbCrLf & _
+                   "Set it to Flow, save, and run again.", vbExclamation, MACRO_NAME
+            Exit Sub
+        End If
+        If PJ_RefuseIfUnchecked(cad, MACRO_NAME) Then Exit Sub
+        Set hj = PJ_Obj(PJ_Project, "forSolidWorks/heat")
+        If Not hj Is Nothing Then
+            For Each hk0 In hj.Keys
+                rk = UCase(CStr(hk0))
+                If Not heat.Exists(rk) Then heat.Add rk, 0#
+                heat(rk) = heat(rk) + PJ_Num(hj, CStr(hk0), 0)
+            Next
+        End If
+        rptDir = PJ_OutputFolder() & PT_SafeFile(PJ_Prefix())
+    Else
+        Set xl = PT_GetExcel()
+        Set wb = PT_PickWorkbook(xl, MACRO_NAME, "Sim setup|Sim results|Thermal solution|Component register", PJ_WbPath)
+        If wb Is Nothing Then Exit Sub
+        If Not PT_NeedNames(wb, "Sim_Type|Sim_Ambient|Sim_Surfaces|Res_Header|TS_SimTj|Reg_RefDes|Reg_QUsed|" & _
+                                "Reg_TotalQ|Spr_Chips|Set_Prefix|Set_OutputFolder|Set_AsmName", MACRO_NAME) Then Exit Sub
+        xl.Calculate
+        If UCase(PT_NameStr(wb, "Sim_Type", "Thermal")) <> "FLOW" Then
+            PT_Msg "RunFlow did not run. Study type on Sim setup is " & PT_NameStr(wb, "Sim_Type", "") & "." & vbCrLf & _
+                   "Set it to Flow and run again.", vbExclamation, MACRO_NAME
+            Exit Sub
+        End If
+        If PT_RefuseIfUnchecked(wb, MACRO_NAME) Then Exit Sub
+        rv = PT_Rng(wb, "Reg_RefDes").Value
+        qv = PT_Rng(wb, "Reg_QUsed").Value
+        For i = 1 To UBound(rv, 1)
+            rk = UCase(PT_Str(rv(i, 1)))
+            If rk <> "" Then
+                If Not heat.Exists(rk) Then heat.Add rk, 0#
+                heat(rk) = heat(rk) + PT_Num(qv(i, 1), 0)
+            End If
+        Next
+        rptDir = PT_OutputFolder(wb) & PT_SafeFile(PT_Prefix(wb))
+    End If
+    For Each hk0 In heat.Keys: regTotal = regTotal + heat(hk0): Next
     If heat.Count = 0 Then
-        PT_Msg "RunFlow did not run. The Component register has no RefDes.", vbExclamation, MACRO_NAME
+        PT_Msg "RunFlow did not run. No part has heat (" & IIf(jsonMode, "tab 1 of the page", "Component register") & ").", vbExclamation, MACRO_NAME
         Exit Sub
     End If
 
     ' ---------- assembly and Flow project ----------
     Dim asm As Object, asmPath As String
-    asmPath = PT_AsmPath(wb)
+    If jsonMode Then asmPath = PJ_AsmPath() Else asmPath = PT_AsmPath(wb)
     Set asm = PT_OpenAsm(asmPath)
     If asm Is Nothing Then
         PT_Msg "RunFlow did not run. No thermal assembly at" & vbCrLf & asmPath, vbExclamation, MACRO_NAME
@@ -157,14 +198,21 @@ Sub main()
     Dim hk As Variant
     For Each hk In heat.Keys
         If heat(hk) > 0 And Not seen.Exists(CStr(hk)) Then
-            notes.Add CStr(hk) & " has " & Format(heat(hk), "0.00") & " W in the register but no Flow volume source with " & CStr(hk) & " in its name."
+            notes.Add CStr(hk) & " has " & Format(heat(hk), "0.00") & " W of heat but no Flow volume source with " & CStr(hk) & " in its name."
         End If
     Next
 
     ' ---------- ambient ----------
     Dim amb As Double, nAmb As Long
-    If PT_IsNum(PT_Rng(wb, "Sim_Ambient").Cells(1, 1).Value) Then
+    Dim hasAmb As Boolean
+    If jsonMode Then
+        hasAmb = PJ_IsNum(PJ_Project, "forSolidWorks/ambientC")
+        If hasAmb Then amb = PJ_Num(PJ_Project, "forSolidWorks/ambientC", 25)
+    ElseIf PT_IsNum(PT_Rng(wb, "Sim_Ambient").Cells(1, 1).Value) Then
+        hasAmb = True
         amb = CDbl(PT_Rng(wb, "Sim_Ambient").Cells(1, 1).Value)
+    End If
+    If hasAmb Then
         nAmb = SetInitialTemperature(fda, amb + 273.15)
         If nAmb > 0 Then
             lines.Add "initial temperature = " & Format(amb, "0.0") & " C (" & nAmb & " parameters)"
@@ -172,7 +220,7 @@ Sub main()
             notes.Add "Initial temperature was not set: no temperature parameter found in the initial conditions."
         End If
     Else
-        notes.Add "Ambient on Sim setup is not a number: initial temperature left as it is."
+        notes.Add "Ambient is not a number: initial temperature left as it is."
     End If
 
     If nSet = 0 Then
@@ -183,14 +231,14 @@ Sub main()
     ' ---------- solve or read ----------
     Dim runName As String, ans As Long, solved As Boolean, rh As Object
     runName = "FL_" & Format(Now, "yyyymmdd_hhnn")
-    ans = PT_Msg(nSet & " heat sources set, " & Format(applied, "0.00") & " W of " & Format(PT_NameNum(wb, "Reg_TotalQ", 0), "0.00") & " W in the register." & _
+    ans = PT_Msg(nSet & " heat sources set, " & Format(applied, "0.00") & " W of " & Format(regTotal, "0.00") & " W of heat on the parts." & _
                  vbCrLf & vbCrLf & "Yes = solve now (can take many minutes) and read the goals" & vbCrLf & _
                  "No = do not solve, read the goals of the last solved run" & vbCrLf & "Cancel = stop here", _
                  vbYesNoCancel + vbQuestion, MACRO_NAME)
     If ans = vbCancel Then
         md.Save
-        WriteReport wb, runName, CStr(fda.Name), applied, False
-        PT_Msg "Sources updated. Nothing solved, nothing written to Excel." & vbCrLf & "Report: " & ReportPath(wb, runName), vbInformation, MACRO_NAME
+        WriteReport runName, CStr(fda.Name), applied, False
+        PT_Msg "Sources updated. Nothing solved, nothing written to " & IIf(jsonMode, "the results file.", "Excel.") & vbCrLf & "Report: " & ReportPath(runName), vbInformation, MACRO_NAME
         GoTo done
     End If
     If ans = vbYes Then
@@ -262,12 +310,33 @@ Sub main()
         Set gl = ge.Next
     Loop
     If peak.Count = 0 And avg.Count = 0 Then
-        PT_Msg "RunFlow stopped. No goal name contains a RefDes. Nothing was written to Excel." & vbCrLf & _
+        PT_Msg "RunFlow stopped. No goal name contains a RefDes. Nothing was written." & vbCrLf & _
                "Rename the goals, for example 'U1 max' (see docs\HOWTO_M7.md).", vbExclamation, MACRO_NAME
         GoTo done
     End If
     md.Save
     On Error GoTo 0
+
+    ' ---------- results file (page) ----------
+    If jsonMode Then
+        Dim jr As Object, runs As Object
+        Set jr = FlowRun(runName, CStr(fda.Name), solved, asmPath, peak, avg, hSprMax And hSprMin, sprMin, sprMax, hPcbMax And hPcbMin, pcbMin, pcbMax)
+        WriteReport runName, CStr(fda.Name), applied, True
+        PJ_Put jr, "report", ReportPath(runName)
+        Set runs = PJ_Obj(rf, "runs")
+        If runs Is Nothing Then Set runs = New Collection
+        runs.Add jr
+        PJ_Put rf, "runs", runs
+        If Not PJ_SaveOwn(rf, PJ_File("results"), MACRO_NAME) Then
+            PT_Msg "RunFlow read the goals, but " & rfPath & " could not be written:" & vbCrLf & PT_LastErr, vbExclamation, MACRO_NAME
+            GoTo done
+        End If
+        PT_Msg "Written to:" & vbCrLf & rfPath & vbCrLf & "(run " & runName & ", tab 9 of the page)" & vbCrLf & vbCrLf & _
+               "Flow project " & CStr(fda.Name) & ": " & nSet & " heat sources set (" & Format(applied, "0.00") & " W), " & _
+               peak.Count & " chips with a peak goal, " & nGoals & " goals read." & vbCrLf & _
+               "Report: " & ReportPath(runName) & vbCrLf & ListNotes(), vbInformation, MACRO_NAME
+        GoTo done
+    End If
 
     ' ---------- Excel ----------
     Dim hdr As Object, ws As Object, r As Long, c As Long, lastR As Long, sv As Variant, refK As Variant
@@ -306,13 +375,13 @@ Sub main()
     xl.Calculate
     wb.Save
     On Error GoTo 0
-    WriteReport wb, runName, CStr(fda.Name), applied, True
+    WriteReport runName, CStr(fda.Name), applied, True
 
     Dim s As String
     s = "Written and saved to:" & vbCrLf & wb.FullName & vbCrLf & "(Sim results row " & r & ", Thermal solution column AF)" & vbCrLf & vbCrLf & _
         "Flow project " & CStr(fda.Name) & ": " & nSet & " heat sources set (" & Format(applied, "0.00") & " W), " & _
         peak.Count & " chips with a peak goal, " & nGoals & " goals read." & vbCrLf & _
-        "Report: " & ReportPath(wb, runName) & vbCrLf & ListNotes()
+        "Report: " & ReportPath(runName) & vbCrLf & ListNotes()
     PT_Msg s, vbInformation, MACRO_NAME
     GoTo done
 
@@ -497,18 +566,18 @@ Function ListNotes() As String
 End Function
 
 ' ---------------------------------------------------------------- report
-Function ReportPath(ByVal wb As Object, ByVal runName As String) As String
-    ReportPath = PT_OutputFolder(wb) & PT_SafeFile(PT_Prefix(wb)) & "RunFlow_" & runName & ".txt"
+Function ReportPath(ByVal runName As String) As String
+    ReportPath = rptDir & "RunFlow_" & runName & ".txt"
 End Function
 
-Sub WriteReport(ByVal wb As Object, ByVal runName As String, ByVal projName As String, ByVal applied As Double, ByVal readGoals As Boolean)
+Sub WriteReport(ByVal runName As String, ByVal projName As String, ByVal applied As Double, ByVal readGoals As Boolean)
     Dim fso As Object, ts As Object, q As Variant
     On Error Resume Next
     Set fso = CreateObject("Scripting.FileSystemObject")
-    Set ts = fso.CreateTextFile(ReportPath(wb, runName), True)
+    Set ts = fso.CreateTextFile(ReportPath(runName), True)
     ts.WriteLine "RunFlow " & runName & "  " & Format(Now, "yyyy-mm-dd hh:nn")
     ts.WriteLine "Flow project: " & projName
-    ts.WriteLine "Heat applied: " & Format(applied, "0.000") & " W of " & Format(PT_NameNum(wb, "Reg_TotalQ", 0), "0.000") & " W in the register"
+    ts.WriteLine "Heat applied: " & Format(applied, "0.000") & " W of " & Format(regTotal, "0.000") & " W of heat on the parts"
     ts.WriteLine "Goals read: " & IIf(readGoals, "yes", "no")
     ts.WriteLine ""
     For Each q In lines: ts.WriteLine q: Next
@@ -516,3 +585,56 @@ Sub WriteReport(ByVal wb As Object, ByVal runName As String, ByVal projName As S
     For Each q In notes: ts.WriteLine "NOTE " & q: Next
     ts.Close
 End Sub
+
+' ---------------------------------------------------------------- results file (page)
+' results.json run of this Flow solve: goals per RefDes (a part needs its max goal), PCB and spreader goals, and a
+' copy of the inputs. RefDes are written as on the page.
+Function FlowRun(ByVal runName As String, ByVal projName As String, ByVal solved As Boolean, ByVal asmPath As String, _
+                 ByVal peak As Object, ByVal avg As Object, ByVal hasSpr As Boolean, ByVal sprMin As Double, ByVal sprMax As Double, _
+                 ByVal hasPcb As Boolean, ByVal pcbMin As Double, ByVal pcbMax As Double) As Object
+    Dim d As Object, inp As Object, parts As Object, p As Object, mm As Object, refK As Variant, refS As String
+    Dim refNames As Object, pl As Object, it As Variant, nl As Collection
+    Set refNames = CreateObject("Scripting.Dictionary")
+    Set pl = PJ_Obj(PJ_Project, "parts")
+    If Not pl Is Nothing Then
+        For Each it In pl
+            refS = PJ_Str(it, "refDes", "")
+            If refS <> "" And Not refNames.Exists(UCase(refS)) Then refNames.Add UCase(refS), refS
+        Next
+    End If
+    Set d = PJ_Dict()
+    PJ_Put d, "name", runName
+    PJ_Put d, "date", PJ_Now()
+    PJ_Put d, "studyType", "Flow"
+    PJ_Put d, "study", "Flow " & projName & IIf(solved, "", " (last run)")
+    PJ_Put d, "status", "read"
+    PJ_Put d, "assembly", asmPath
+    Set inp = PJ_Dict()
+    PJ_Put inp, "forSolidWorks", PJ_Obj(PJ_Project, "forSolidWorks")
+    PJ_Put inp, "simSetup", PJ_Obj(PJ_Project, "simSetup")
+    PJ_Put d, "inputs", inp
+    If hasSpr Then
+        Set mm = PJ_Dict(): PJ_Put mm, "maxC", Round(sprMax, 2): PJ_Put mm, "minC", Round(sprMin, 2)
+        PJ_Put d, "spreader", mm
+    End If
+    If hasPcb Then
+        Set mm = PJ_Dict(): PJ_Put mm, "maxC", Round(pcbMax, 2): PJ_Put mm, "minC", Round(pcbMin, 2)
+        PJ_Put d, "pcb", mm
+    End If
+    Set parts = PJ_Dict()
+    For Each refK In peak.Keys
+        If refNames.Exists(CStr(refK)) Then refS = refNames(CStr(refK)) Else refS = CStr(refK)
+        Set p = PJ_Dict()
+        PJ_Put p, "peakC", Round(peak(refK), 2)
+        If avg.Exists(refK) Then PJ_Put p, "avgC", Round(avg(refK), 2)
+        PJ_Put parts, refS, p
+    Next
+    PJ_Put d, "parts", parts
+    Set nl = New Collection
+    For Each it In avg.Keys
+        If Not peak.Exists(it) Then nl.Add CStr(it) & ": only an average goal (" & Format(avg(it), "0.0") & " C). Add a max goal to see it on the page."
+    Next
+    For Each it In notes: nl.Add CStr(it): Next
+    If nl.Count > 0 Then PJ_Put d, "notes", nl
+    Set FlowRun = d
+End Function

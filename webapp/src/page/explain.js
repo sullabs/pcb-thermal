@@ -184,6 +184,6 @@ export function ExplainPanel({ at, ctx, onOpen, onEdit, onBack, onClose, canBack
     </div>`}
     ${term.kind === "calculated" && !e && html`<p class="hint">Not worked out yet: an input is missing.</p>`}
     ${users.length > 0 && html`<h4>Used by</h4><ul class="ex-in">${users.map(([ut, uk]) => html`<li><button class="link" onClick=${() => onOpen(ut, uk)}>${TERMS[ut]?.label || ut}</button>${uk && uk !== k ? html` <span class="hint">${keyText(ctx, ut, uk)}</span>` : ""}</li>`)}</ul>`}
-    ${term.help && html`<p><button class="link" onClick=${onHelp}>Help: more on this</button></p>`}
+    ${term.help && html`<p><button class="link" onClick=${() => onHelp(term.help)}>Help: more on this</button></p>`}
   </aside>`;
 }

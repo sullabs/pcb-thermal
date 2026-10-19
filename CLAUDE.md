@@ -21,14 +21,14 @@ Read `PLAN.md` first. It is the spec. This file is the short list of rules that 
 - **Direction since 2026-10-18: a web page replaces the workbook as the user interface.** Spec: `docs/WEBAPP_DESIGN.md`
   (milestones W1 to W9). The page is one HTML file, `webapp/dist/PCB_Thermal.html`, opened from disk in Chrome or Edge,
   with every library inside it. It writes only `project.json`; the macros write only `cad.json` and `results.json`. Schemas:
-  `webapp/schema/`. The workbook and the current macros keep working until W7.
+  `webapp/schema/`. Since W7 every macro works on a project folder too (it asks at the start); old workbooks still work.
 - Page source is `webapp/src/page/` (Preact and htm, no JSX). `npm run build` in `webapp/` makes `dist/PCB_Thermal.html`;
   commit the rebuilt file with every page change. `npm run serve` serves the repo on localhost for browser checks.
 - Node tools in `webapp/` (`npm test`, converter, validator) are for development here only. The user's PC never needs
   Node, npm or Python: only the built HTML file ships.
 - **Branch `webpage` is the user package** (what users download): `PCB_Thermal.html` at the top, `macros\` with
-  `PCBThermal.swp`, the `.bas` files it holds (PTCommon, PTJson, ImportStep, BuildBoard, UpdateMacros), the toolbar
-  setup (3 buttons) and icons, and a user `README.md`. **Every change to the page or to one of those macros must also
+  `PCBThermal.swp`, the `.bas` files it holds (PTCommon, PTJson, ImportStep, BuildBoard, BuildSpreader, SyncFromCAD, SetupSim,
+  RunFlow, ReadResults, UpdateMacros), the toolbar setup (8 buttons) and icons, and a user `README.md`. **Every change to the page or to one of those macros must also
   be brought to `webpage` in the same session**: copy the rebuilt `webapp/dist/PCB_Thermal.html` and the changed
   `.bas` files there, rebuild `PCBThermal.swp` in SolidWorks (Update Macros; ask before driving SolidWorks), commit
   and push. A macro that moves to project files joins the package (`.bas`, button in `SetupToolbar.ps1`, icons,

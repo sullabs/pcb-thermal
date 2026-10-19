@@ -104,6 +104,16 @@ export async function listNames(dir, path) {
   return out;
 }
 
+// A file below the project folder ("CAD/results/PT_x.png") as a File, or null. Case is ignored, as on Windows.
+export async function readFile(dir, path) {
+  let d = dir;
+  const parts = path.split("/").filter(Boolean);
+  try { for (const p of parts.slice(0, -1)) d = await d.getDirectoryHandle(p); } catch { return null; }
+  const want = parts[parts.length - 1].toLowerCase();
+  for await (const [name, h] of d.entries()) if (h.kind === "file" && name.toLowerCase() === want) return h.getFile();
+  return null;
+}
+
 async function write(dir, name, text) {
   const h = await dir.getFileHandle(name, { create: true });
   const w = await h.createWritable(); // writes a temporary file, swapped in on close: never half written

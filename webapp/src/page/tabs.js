@@ -73,10 +73,23 @@ export function tabStates({ project, cad = {}, results = {}, calc, canSave }) {
     link: () => { const n = withPd.filter(x => !linked.includes(x)).length; return n ? ["attention", `${n} part${n === 1 ? "" : "s"} with Pd have no body`] : ["done"]; },
     triage: () => (blocking.length ? ["attention", `${blocking.length} problem${blocking.length === 1 ? "" : "s"}`] : ["done"]),
     bare: () => { const f = calc.bareBoard.board.fail || 0; return f ? ["attention", `${f} part${f === 1 ? "" : "s"} FAIL`] : ["done"]; },
-    build: () => (cad.build ? (cad.build.counts?.failed ? ["attention", `${cad.build.counts.failed} failed`] : ["done"]) : ["ready", "Waiting for Build Board"]),
-    spreader: () => (cad.spreaderBuild ? ["done"] : ["ready", "Optional"]),
-    sim: () => (runs.length ? ["done", `${runs.length} run${runs.length === 1 ? "" : "s"}`] : ["ready", "Waiting for a run"]),
-    results: () => ["ready", `${runs.length} run${runs.length === 1 ? "" : "s"}`],
+    build: () => (!cad.build ? ["ready", "Waiting for Build Board"] : cad.build.counts?.failed ? ["attention", `${cad.build.counts.failed} failed`]
+      : calc.build?.outOfDate ? ["attention", "out of date: the PCB or bodies changed after the last build"] : ["done"]),
+    spreader: () => (!project.spreader ? ["ready", "Optional"] : cad.spreaderBuild ? ["done"] : ["ready", "Waiting for Build Spreader"]),
+    sim: () => {
+      if (!runs.length) return ["ready", "Waiting for a run"];
+      const type = project.simSetup?.studyType || "Thermal";
+      const last = [...runs].reverse().find(r => r.studyType === type);
+      const ch = last && calc.runs?.[last.name]?.changes;
+      return ch?.length ? ["attention", `inputs changed after run ${last.name}`] : ["done", `${runs.length} run${runs.length === 1 ? "" : "s"}`];
+    },
+    results: () => {
+      const last = runs[runs.length - 1], r = last && calc.runs?.[last.name];
+      if (!r) return ["ready"];
+      if (r.pass === "FAIL") return ["attention", `${r.fails} part${r.fails === 1 ? "" : "s"} over Tj max in ${last.name}`];
+      if (r.balanceOk === false) return ["attention", `energy balance of ${last.name} above 2 %`];
+      return r.pass === "PASS" ? ["done", `${last.name} PASS`] : ["ready", `${runs.length} run${runs.length === 1 ? "" : "s"}`];
+    },
     changes: () => (open ? ["attention", `${open} to tick`] : ["done"]),
     help: () => ["ready"],
   };

@@ -15,6 +15,14 @@ import { findField } from "./where.js";
 import { workbookToProject } from "../io/workbook_import.js";
 import { validateProject, validateCad, validateResults } from "virtual:validators";
 import EXAMPLE from "virtual:example";
+import ICONS from "virtual:icons";
+import { MACROS, marker } from "./swcard.js";
+import { swFolder } from "./swfiles.js";
+import { helpSection } from "./help.js";
+import { Report } from "./report.js";
+import { exportWorkbook } from "../io/export_xlsx.js";
+import { makeZip } from "../io/zip.js";
+import { safeFile } from "./swfiles.js";
 
 const store = {
   get: k => { try { return localStorage.getItem("pcbt." + k); } catch { return null; } },
@@ -50,6 +58,11 @@ function App() {
   const [showFx, setShowFx] = useState(store.get("fx") === "1");
   const [learn, setLearn] = useState(store.get("learn") !== "0");   // on until the user turns it off
   const [explain, setExplain] = useState([]);     // stack of { t, k }: the last is shown, Back pops
+  const [helpAt, setHelpAt] = useState(null);    // Help section to scroll to
+  const [waits, setWaits] = useState({});
+  const [exp, setExp] = useState(false);          // Export menu open
+  const [expRuns, setExpRuns] = useState("last"); // runs for the report and workbook: "last" or "all"
+  const [printing, setPrinting] = useState(null); // report preview: { runs, images }         // SolidWorks cards: macro id -> { since, marker } after "I pressed it"
   const stamps = useRef({});
   const project = hist.present;
   const dirty = !!project && project !== savedRef;
@@ -111,6 +124,7 @@ function App() {
       ...(rj ? schemaProblems(validateResults, n.results, rj) : []),
     ];
     setProblems(probs);
+    setWaits({});
     setHist(historyInit(pj));
     setSavedRef(pj);
     setSavedAt(pj?.savedAt || null);
@@ -330,6 +344,70 @@ function App() {
     return () => clearInterval(id);
   }, [mode, dir, pre]);
 
+  // SolidWorks cards: stop waiting when the macro's file shows it has run, and say what it did.
+  const setWait = useCallback((id, mark) => setWaits(w => { const n = { ...w }; if (mark === null) delete n[id]; else n[id] = { since: now(), marker: mark }; return n; }), []);
+  useEffect(() => {
+    for (const [id, w] of Object.entries(waits)) {
+      if (marker(id, cad, results) === w.marker) continue;
+      setWait(id, null);
+      const runs = results?.runs || [], last = runs[runs.length - 1];
+      const what = id === "ImportStep" ? `${cad.import?.bodies?.length ?? 0} bodies, PCB ${cad.import?.pcb?.box ? [cad.import.pcb.box.l, cad.import.pcb.box.w, cad.import.pcb.box.h].map(x => +x.toFixed(2)).join(" × ") + " mm" : "not found"}`
+        : id === "BuildBoard" ? `${cad.build?.counts?.failed ? cad.build.counts.failed + " failed, " : ""}${cad.build?.counts?.wanted ?? 0} bodies wanted`
+        : id === "SyncFromCAD" ? `${cad.asBuilt?.bodies?.length ?? 0} bodies differ, ${cad.asBuilt?.failedChecks?.length ?? 0} checks failed`
+        : id === "BuildSpreader" ? ["top", "bottom"].filter(s => cad.spreaderBuild?.[s]).map(s => `${s} plate ${cad.spreaderBuild[s].pedestals ?? 0} pedestals, ${(cad.spreaderBuild[s].failures || []).length} problems`).join("; ")
+        : last ? `run ${last.name}, ${last.status}` : "";
+      say(`${MACROS[id].name} finished: ${what}.`);
+    }
+  }, [cad, results]);
+  const imageUrl = useCallback(async rel => {
+    if (!dir || mode !== "folder") return null;
+    try { const f = await F.readFile(dir, rel); return f ? URL.createObjectURL(f) : null; } catch { return null; }
+  }, [dir, mode]);
+
+  // ---------- export (design 9) ----------
+  const runChoice = () => { const runs = live.current.results?.runs || []; return expRuns === "all" ? runs.map(r => r.name) : runs.length ? [runs[runs.length - 1].name] : []; };
+  const baseName = () => (pre || "") + safeFile(project?.board?.name || "board") + "_" + today();
+  const doReport = async () => {
+    setExp(false);
+    const runs = runChoice(), images = {};
+    for (const r of (results?.runs || []).filter(x => runs.includes(x.name) && x.plotFile)) {
+      const u = await imageUrl(`${swFolder(project) || "CAD"}/results/${r.plotFile.split(/[\\/]/).pop()}`);
+      if (u) images[r.name] = u;
+    }
+    setPrinting({ runs, images });
+  };
+  const doXlsx = () => {
+    setExp(false);
+    try {
+      const wb = exportWorkbook(XLSX, fctx, runChoice());
+      const bytes = XLSX.write(wb, { type: "array", bookType: "xlsx", compression: true });
+      F.download(baseName() + ".xlsx", new Uint8Array(bytes), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      say(`Workbook ${baseName()}.xlsx downloaded: ${wb.SheetNames.length} tabs, values only, a note on every header.`);
+    } catch (e) { console.error(e); say("The workbook could not be made: " + e.message, "error"); }
+  };
+  const doZip = async () => {
+    setExp(false);
+    try {
+      const n = F.names(pre), t = now(), files = [];
+      files.push({ name: n.project, data: JSON.stringify(projectForSave(project, cad, results, t), null, 2) + "\n" });
+      if (cad && Object.keys(cad).length) files.push({ name: n.cad, data: JSON.stringify(cad, null, 2) + "\n" });
+      if (results) files.push({ name: n.results, data: JSON.stringify(results, null, 2) + "\n" });
+      let extra = 0;
+      if (dir && mode === "folder") {
+        const out = swFolder(project);
+        for (const [path, re] of out ? [[out, /\.txt$/i], [out + "/results", /\.(png|jpe?g|bmp)$/i]] : []) {
+          for (const name of await F.listNames(dir, path)) {
+            if (!re.test(name)) continue;
+            const f = await F.readFile(dir, path + "/" + name);
+            if (f) { files.push({ name: path + "/" + name, data: new Uint8Array(await f.arrayBuffer()), date: new Date(f.lastModified) }); extra++; }
+          }
+        }
+      }
+      F.download(baseName() + "_archive.zip", makeZip(files), "application/zip");
+      say(`Archive ${baseName()}_archive.zip downloaded: the three project files${extra ? ` and ${extra} reports and pictures` : ""}.`);
+    } catch (e) { console.error(e); say("The archive could not be made: " + e.message, "error"); }
+  };
+
   // Keys and leaving the page.
   useEffect(() => {
     const onKey = e => {
@@ -392,10 +470,20 @@ function App() {
 
   const listFolder = useMemo(() => (dir && mode === "folder" ? path => F.listNames(dir, path) : null), [dir, mode]);
   const ctx = { project, cad, results, calc: calcOk, states, listFolder, value: (t, k) => (fctx ? valueOf(fctx, t, k) : undefined), folder: example ? "built-in example (read only)" : dir?.name, edit, editFn, go: setTab, locked: st.locked || example, now, learn, openExample,
-    blocking: calcOk ? blockingProblems(project, calcOk) : [], folderCard, backupCard, files };
+    blocking: calcOk ? blockingProblems(project, calcOk) : [], folderCard, backupCard, files,
+    dirty, mode, tab, helpAt, waits, setWait, icons: ICONS, imageUrl: mode === "folder" ? imageUrl : null, outFolder: project ? swFolder(project) : "CAD" };
   const View = { project: V.ProjectTab, parts: V.PartsTab, import: V.ImportTab, link: V.LinkTab, triage: V.TriageTab, bare: V.BareTab,
     build: V.BuildTab, spreader: V.SpreaderTab, sim: V.SimTab, results: V.ResultsTab, changes: V.ChangesTab, help: V.HelpTab }[st.id];
   const needsProject = !["project", "help"].includes(st.id);
+
+  if (printing && fctx) return html`<div class="print-root">
+      <div class="print-bar">
+        <button class="primary" onClick=${() => window.print()}>Print or save as PDF</button>
+        <button onClick=${() => { for (const u of Object.values(printing.images)) URL.revokeObjectURL(u); setPrinting(null); }}>Back to the page</button>
+        <span class="hint">In the print window choose Save as PDF as the printer. The report is always light.</span>
+      </div>
+      <${Report} ctx=${fctx} runs=${printing.runs} images=${printing.images} now=${now()} />
+    </div>`;
 
   return html`
     <header class="top">
@@ -409,7 +497,16 @@ function App() {
       <button aria-pressed=${learn} class=${learn ? "on" : ""} onClick=${() => setLearn(!learn)} title="Show what each step is for, what to look at, and a plain reading of the results">Learn</button>
       <button aria-pressed=${showFx} class=${showFx ? "on" : ""} onClick=${() => setShowFx(!showFx)} title="Write the formula, with your numbers, under every calculated value">Show formulas</button>
       <button onClick=${() => setTheme(theme === "dark" ? "light" : "dark")} title="Switch between dark and light">${theme === "dark" ? "Light" : "Dark"}</button>
-      <button onClick=${() => setTab(11)}>Help</button>
+      <span class="menu-wrap">
+        <button aria-expanded=${exp} disabled=${!fctx} onClick=${() => setExp(!exp)} title="Report (PDF), workbook (.xlsx) or project archive (.zip)">Export</button>
+        ${exp && html`<div class="export-menu" role="menu">
+          <label class="hint">Runs: <select value=${expRuns} onChange=${e => setExpRuns(e.currentTarget.value)} aria-label="Runs to export"><option value="last">the last run</option><option value="all">all runs</option></select></label>
+          <button role="menuitem" onClick=${doReport}>Report (PDF)</button>
+          <button role="menuitem" onClick=${doXlsx}>Workbook (.xlsx)</button>
+          <button role="menuitem" onClick=${doZip}>Project archive (.zip)</button>
+        </div>`}
+      </span>
+      <button onClick=${() => { setHelpAt(null); setTab(11); }}>Help</button>
     </header>
     <nav class="tabs" role="tablist">
       ${states.map(s => html`<button role="tab" aria-selected=${s.n === tab} class=${`tab ${s.status} ${s.n === tab ? "on" : ""}`}
@@ -427,10 +524,10 @@ function App() {
       ${learn && html`<${V.LearnBox} id=${st.id} />`}
       ${needsProject && !project ? html`<p class="hint">Open a project on tab 0 first.</p>`
         : needsProject && !calcOk ? html`<${Card} title="The calculation stopped"><p class="warn">${calc?.error}</p><//>`
-        : html`<fieldset class="content" disabled=${st.locked || example}>${View(ctx)}</fieldset>`}
+        : html`<fieldset class="content" disabled=${(st.locked || example) && st.id !== "help"}>${View(ctx)}</fieldset>`}
     </main>
     <${ExplainPanel} at=${explain[explain.length - 1]} ctx=${fctx} onOpen=${openExplain} onEdit=${goEdit} canBack=${explain.length > 1}
-      onBack=${() => setExplain(s => s.slice(0, -1))} onClose=${() => setExplain([])} onHelp=${() => setTab(11)} />
+      onBack=${() => setExplain(s => s.slice(0, -1))} onClose=${() => setExplain([])} onHelp=${id => { setHelpAt(helpSection(id)); setTab(11); }} />
     </div>
     <${Tip} />
     <//>

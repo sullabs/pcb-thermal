@@ -1,7 +1,7 @@
 // Tab contents. Every value is a <V> and every label a <L> with a term id from the catalogue, so it has a hover
 // text, opens the Explain panel, and shows its formula when Show formulas is on (tools/test_w4.mjs checks this).
 // Tabs that keep their own view state (open editors, the selected part) render a small component, because the
-// page calls each tab as a plain function. The SolidWorks cards come with W7.
+// page calls each tab as a plain function. Tabs 6 to 10 and their SolidWorks cards are in steps.js.
 
 import { useState, useMemo, useContext, useEffect } from "preact/hooks";
 import { html, NumField, TextField, Select, Check, Card, unitText } from "./ui.js";
@@ -17,14 +17,10 @@ import { LEARN } from "../terms/learn.js";
 import { nextStep, unticked } from "./tabs.js";
 import { isNum } from "../calc/util.js";
 import { names } from "./files.js";
+import { Scroll, Facts, date, shortName, pctV } from "./bits.js";
+import { SwCard } from "./swcard.js";
 
-const Scroll = ({ children }) => html`<div class="scroll">${children}</div>`;
-// A definition list of [label term, value term, key, decimals, value] rows; rows whose value is blank are left out.
-function Facts({ ctx, rows }) {
-  return html`<dl class="kv">${rows.filter(Boolean).filter(([, t, k, , v]) => { const x = v !== undefined ? v : ctx.value(t, k); return x !== undefined && x !== ""; })
-    .map(([lt, t, k = "", d, v]) => html`<dt><${L} t=${lt || t} k=${k} /></dt><dd><${V} t=${t} k=${k} d=${d} v=${v} u /></dd>`)}</dl>`;
-}
-const date = s => (s ? s.replace("T", " ") : s);
+export { shortName };
 
 // ---------- 0 Project ----------
 // Flag limits: CRITICAL and Watch, read by tab 4 (flags) and tab 5 (Tight). On tab 0 with the board settings.
@@ -86,7 +82,6 @@ export function LearnBox({ id }) {
     <ul>${l.look.map(x => html`<li>${marked(x)}</li>`)}</ul>
   </section>`;
 }
-const pctV = (t, k, x) => html`<${V} nofx t=${t} k=${k} v=${isNum(x) ? `${Math.round(x * 100)} %` : undefined} />`;
 
 // ---------- 1 Parts and power ----------
 // What each power method needs (calc/power.js). `used`: fields the method reads; `need`: the short list to fill.
@@ -408,10 +403,8 @@ export function ImportTab(c) {
   const s = p.settings;
   const set = (path, label, v) => c.edit(label, ["settings", ...path], v, "settings." + path.join("."));
   return html`
-    <${Card} title="In SolidWorks: 2 Import STEP">
-      <p>${marked("Import STEP reads the STEP file named on tab 0, finds the PCB and one body per part, and writes them to cad.json. The page reloads that file on its own when the macro has finished.")}</p>
+    <${SwCard} c=${c} id="ImportStep">
       <${Facts} ctx=${c} rows=${[[, "board.stepFile"]]} />
-      ${!p.board.stepFile && html`<p class="warn">No STEP file named yet. Type it on tab 0.</p>`}
     <//>
     <${Card} title="Import settings">
       <div class="form">
@@ -591,7 +584,6 @@ function PcbCard({ c }) {
     </div>
   <//>`;
 }
-export const shortName = n => (n || "").split("/").pop().replace(/-\d+$/, "");
 
 // ---------- 4 Triage ----------
 export function TriageTab(c) {
@@ -730,128 +722,8 @@ function NetDrawing({ k }) {
   </svg>`;
 }
 
-// ---------- 6 Build model ----------
-export function BuildTab(c) {
-  return html`<${BuildView} c=${c} />`;
-}
-function BuildView({ c }) {
-  const b = c.cad?.build;
-  const sw = useMemo(() => swFiles(c.project, c.cad, c.calc), [c.project, c.cad, c.calc]);
-  const [names, setNames] = useState(null);
-  useEffect(() => {
-    let live = true;
-    setNames(null);
-    if (c.listFolder && sw.folder) c.listFolder(sw.folder).then(n => live && setNames(n || []), () => live && setNames([]));
-    return () => { live = false; };
-  }, [c.listFolder, sw.folder, c.cad]);
-  const rows = names ? withFound(sw.rows, names, sw.prefix) : sw.rows;
-  const added = b?.counts?.added, wanted = b?.counts?.wanted;
-  const found = r => r.found === true ? html`<span class="status ok" data-status="found">found</span>`
-    : r.found === false ? html`<span class="status watch" data-status="missing">missing</span>` : html`<span class="hint">not checked</span>`;
-  const why = !c.listFolder ? "Files are checked when the project is opened from its folder (not by hand, not the example)."
-    : !sw.folder ? "The output folder is outside the project folder, so the page cannot look in it." : "";
-  return html`
-    <${Card} title="In SolidWorks: 3 Build Board"><p>Builds one box per included body and the PCB plate, in a new assembly. <${L} t="build.included" />: <${V} t="build.included" />.</p><//>
-    ${b ? html`<${Card} title="Last build">
-      <${Facts} ctx=${c} rows=${[[, "build.assembly"], [, "build.date", "", undefined, date(b.date)], [, "build.mode"], [, "build.wanted"], [, "build.added"], [, "build.moved"], [, "build.resized"], [, "build.suppressed"], [, "build.broughtBack"], [, "build.failed"], [, "build.overlaps"]]} />
-      ${isNum(added) && isNum(wanted) && added > 0 && html`<p class="hint">Added counts the PCB part too, so a first build adds one more than Wanted (the assembly file is not counted).</p>`}
-      ${(b.bodies || []).filter(x => x.status !== "built").map(x => html`<p class="warn">${shortName(x.name)}: <${V} t="buildbody.status" k=${x.key} />${x.reason ? ", " + x.reason : ""}</p>`)}
-    <//>` : html`<p class="hint">No build yet.</p>`}
-    <${Card} title="SolidWorks files of this project">
-      <p class="hint">The assembly, the PCB and one part per included body, as Build Board names them in ${sw.folder ? html`the <code>${sw.folder}</code> folder` : "the output folder"}. ${why}</p>
-      <${Scroll}><table class="grid swfiles">
-        <thead><tr><th><${L} t="body.name" /></th><th><${L} t="body.refDes" /></th><th><${L} t="body.include" /></th><th><${L} t="buildbody.status" /></th><th><${L} t="file.sw" /></th><th><${L} t="file.swFound" /></th></tr></thead>
-        <tbody>${rows.map(r => html`<tr class=${r.kind === "part" && !r.included ? "dim" : ""}>
-          <td>${r.kind === "part" ? html`<${V} t="body.name" k=${r.key} v=${shortName(r.name)} />` : html`<b>${r.kind === "extra" ? r.file : r.name}</b>`}</td>
-          <td>${r.refDes ? html`<${V} t="body.refDes" k=${r.key} />` : ""}</td>
-          <td>${r.kind === "part" ? html`<${V} t="body.include" k=${r.key} v=${r.included} />` : r.kind === "extra" ? html`<span class="hint">no: left out after an earlier build</span>` : ""}</td>
-          <td>${r.status ? html`<${V} t="buildbody.status" k=${r.key} v=${r.status} />${r.reason ? html` <span class="hint">${r.reason}</span>` : ""}` : ""}</td>
-          <td><${V} t="file.sw" k=${r.key} v=${r.file} /></td>
-          <td>${found(r)}</td>
-        </tr>`)}</tbody>
-      </table><//>
-    <//>`;
-}
+// ---------- 6 to 10: steps.js ----------
+export { BuildTab, SpreaderTab, SimTab, ResultsTab, ChangesTab } from "./steps.js";
 
-// ---------- 7 Spreader ----------
-export function SpreaderTab(c) {
-  const { project: p } = c;
-  const sides = ["top", "bottom"].filter(s => p.spreader?.[s] && c.calc.spreader[s]);
-  if (!sides.length) return html`<p class="hint">No spreader plate in this project. Plates are optional; the editor comes with W7.</p>`;
-  return sides.map(s => {
-    const pl = p.spreader[s];
-    return html`<${Card} title=${`${s === "top" ? "Top" : "Bottom"} plate${pl.enabled ? "" : " (not enabled)"}`}>
-      <${Facts} ctx=${c} rows=${[[, "plate.material", s], [, "plate.k", s], [, "plate.thickness", s], [, "plate.heightMode", s], [, "plate.faceZ", s, 3], [, "plate.covered", s], [, "plate.cuts", s]]} />
-      <${Scroll}><table class="grid"><thead><tr><th><${L} t="pchip.refDes" /></th><th><${L} t="pchip.covered" /></th><th class="num"><${L} t="pchip.chipFace" /></th><th class="num"><${L} t="pchip.gap" /></th><th class="num"><${L} t="pchip.timT" /></th><th class="num"><${L} t="pchip.pedestal" /></th><th><${L} t="pchip.check" /></th></tr></thead>
-      <tbody>${pl.chips.map((x, i) => { const k = `${s}/${i}`; const r = c.calc.spreader[s].chips[i]; return html`<tr><td><${V} t="pchip.refDes" k=${k} /></td><td><${V} t="pchip.covered" k=${k} /></td><td class="num"><${V} t="pchip.chipFace" k=${k} d=${3} /></td><td class="num"><${V} t="pchip.gap" k=${k} d=${3} /></td><td class="num"><${V} t="pchip.timT" k=${k} d=${3} /></td><td class="num"><${V} t="pchip.pedestal" k=${k} d=${3} /></td><td class=${r.check === "OK" ? "" : "warn"}><${V} t="pchip.check" k=${k} /></td></tr>`; })}</tbody></table><//>
-    <//>`;
-  });
-}
-
-// ---------- 8 Simulation setup ----------
-export function SimTab(c) {
-  const chips = c.calc.simChips;
-  const cols = [["sim.pd", 3], ["sim.rjc", 2], ["sim.h", 2], ["sim.area", 1], ["sim.kz", 2], ["sim.kxy", 2]];
-  return html`
-    <${Card} title="In SolidWorks: 5 Run Thermal Study"><p>Sets up and runs the steady state study from these values. The editor for h, contacts and mesh comes with W7.</p>
-      <${Facts} ctx=${c} rows=${[[, "surf.pcbTopH"], [, "surf.pcbTopEps"], [, "surf.pcbBottomH"], [, "surf.pcbBottomEps"], [, "surf.partsH"], [, "surf.partsEps"], [, "simset.kPartsWithoutHeat"]]} />
-    <//>
-    <${Scroll}><table class="grid"><thead><tr><th><${L} t="sim.refDes" /></th><th><${L} t="sim.model" /></th>${cols.map(([t]) => html`<th class="num"><${L} t=${t} /></th>`)}<th><${L} t="sim.check" /></th></tr></thead>
-    <tbody>${chips.map((x, i) => html`<tr><td><${V} t="sim.refDes" k=${String(i)} /></td><td><${V} t="sim.model" k=${String(i)} /></td>${cols.map(([t, d]) => html`<td class="num"><${V} t=${t} k=${String(i)} d=${d} /></td>`)}<td class=${x.check === "OK" ? "" : "warn"}><${V} t="sim.check" k=${String(i)} /></td></tr>`)}</tbody></table><//>`;
-}
-
-// ---------- 9 Results ----------
-export function ResultsTab(c) {
-  const runs = c.results?.runs || [];
-  return [...runs].reverse().map(r => html`<${Card} title=${r.name}>
-    <${Facts} ctx=${c} rows=${[[, "run.date", r.name, undefined, date(r.date)], [, "run.studyType", r.name], [, "run.status", r.name], [, "run.energyBalance", r.name, 2],
-      [, "run.pcbMin", r.name, 1], [, "run.pcbMax", r.name, 1], [, "run.spreaderMin", r.name, 1], [, "run.spreaderMax", r.name, 1]]} />
-    ${r.parts && html`<${Scroll}><table class="grid"><thead><tr><th>RefDes</th><th class="num"><${L} t="runp.peak" /></th><th class="num"><${L} t="runp.avg" /></th><th class="num"><${L} t="part.tjMax">Tj max</${L}></th></tr></thead>
-      <tbody>${Object.entries(r.parts).map(([k, v]) => { const tj = c.project.parts.find(x => x.refDes === k)?.tjMaxC; const key = `${r.name}|${k}`; return html`<tr><td><${V} t="part.refDes" k=${k} v=${k} /></td><td class=${`num ${isNum(tj) && v.peakC > tj ? "warn" : ""}`}><${V} t="runp.peak" k=${key} d=${1} /></td><td class="num"><${V} t="runp.avg" k=${key} d=${1} /></td><td class="num">${isNum(tj) ? html`<${V} t="part.tjMax" k=${k} d=${0} />` : ""}</td></tr>`; })}</tbody></table><//>`}
-  <//>`);
-}
-
-// ---------- 10 Changes ----------
-export function ChangesTab(c) {
-  const { project: p, cad, now } = c;
-  const list = cad?.changes || [];
-  if (!p) return html`<p class="hint">Open a project to see its change records.</p>`;
-  if (!list.length) return html`<p class="hint">${marked("No change records. Import STEP, Build Board and Sync CAD write them when something moves or changes size.")}</p>`;
-  const open = unticked(p, cad);
-  const tickAll = () => c.editFn(`Tick ${open} changes`, q => { const checks = { ...(q.checks || {}) }; for (const x of list) if (!checks[x.id]) checks[x.id] = { at: now() }; return { ...q, checks }; });
-  const cols = ["change.date", "change.macro", "change.body", "change.change", "change.field"];
-  return html`
-    <div class="toolbar"><span>${open ? `${open} of ${list.length} not ticked` : `All ${list.length} ticked`}</span>${open > 0 && html`<button onClick=${tickAll}>Tick all</button>`}</div>
-    <${Scroll}><table class="grid"><thead><tr><th><${L} t="change.checked" /></th>${cols.map(t => html`<th><${L} t=${t} /></th>`)}<th class="num"><${L} t="change.old" /></th><th class="num"><${L} t="change.new" /></th></tr></thead>
-    <tbody>${list.map(x => html`<tr class=${p.checks?.[x.id] ? "dim" : ""}>
-      <td><${Check} term="change.checked" tkey=${x.id} value=${!!p.checks?.[x.id]} label=${"Checked " + x.id} onCommit=${v => c.edit(v ? "Tick change" : "Untick change", ["checks", x.id], v ? { at: now() } : undefined)} /></td>
-      <td><${V} t="change.date" k=${x.id} v=${date(x.date)} /></td><td><${V} t="change.macro" k=${x.id} /></td><td><${V} t="change.body" k=${x.id} v=${shortName(x.name)} /></td><td><${V} t="change.change" k=${x.id} /></td><td><${V} t="change.field" k=${x.id} /></td>
-      <td class="num"><${V} t="change.old" k=${x.id} /></td><td class="num"><${V} t="change.new" k=${x.id} /></td></tr>`)}</tbody></table><//>`;
-}
-
-// ---------- 11 Help ----------
-export function HelpTab(c = {}) {
-  return html`<${Card} title="Start here">
-    <p>This page takes a ${marked("PCB")} from ${marked("STEP")} file to a checked thermal result. You do the engineering (power numbers, datasheet values, judging the results); the SolidWorks macros build the model and run the study.</p>
-    <ol>
-      <li>Tab 0: choose the board's project folder. One folder per board. For a new project, type your prefix (your initials) and the board name. The page then writes <code>AB_project.json</code>, <code>AB_cad.json</code>, <code>AB_results.json</code> and the <code>CAD</code> folder there (AB is the prefix). The prefix keeps file names unique.</li>
-      <li>Tab 1: add each part that makes heat, with its datasheet values and its power.</li>
-      <li>Tabs 2 to 9: follow the tabs in order. A grey tab says what to do first and links to it.</li>
-    </ol>
-    <h4>See a finished study first</h4>
-    <p>The example study is the Raspberry Pi 4, with every tab filled in. It opens read only, so nothing can break. ${c.openExample && html`<button class="small" onClick=${c.openExample}>Open the example study</button>`}</p>
-    <h4>Learn mode</h4>
-    <p>Learn in the top bar puts a short box at the top of each tab: what the step is for and what to look at. On tabs 4 and 5 it also reads the results out in plain words, for example which part is closest to its limit and whether copper or a heatsink would help it more. Turn it off when you know the steps.</p>
-    <h4>Filling a board fast</h4>
-    <p>Tab 1: Paste a parts list takes the cells straight from Excel, one row per load. Tab 3: Link the suggested bodies matches body names with part numbers and RefDes. Check each link.</p>
-    <h4>Every value explains itself</h4>
-    <p>Hover over any value or label (or tab to it with the keyboard) to see what it is, its unit and whether you type it or the page works it out. Click a value, or the small i next to a label, to open the Explain panel: the longer text, the formula with your numbers, the inputs (click one to walk back to it) and what uses the value. Show formulas in the top bar writes the formula under every calculated value. Words with a dotted underline are abbreviations: hover for the meaning.</p>
-    <h4>Saving</h4>
-    <p>Save (Ctrl+S) writes <code>AB_project.json</code>. While there are unsaved edits the page also saves on its own every 30 s. Before the first save of each day it copies the old file to <code>backup\\AB_project_yyyymmdd.json</code>.</p>
-    <h4>Undo</h4>
-    <p>Ctrl+Z undoes the last edit, Ctrl+Y (or Ctrl+Shift+Z) redoes it. Undo works for the whole session, including deleted parts.</p>
-    <h4>Files the macros write</h4>
-    <p>After making them empty for a new project, the page never writes <code>AB_cad.json</code> or <code>AB_results.json</code>. It checks them every 2 s and reloads them when a macro has finished. The macros find them from the project file you pick, by the same prefix.</p>
-    <p class="hint">The full help, with the heat basics and the glossary, comes with W8.</p>
-  <//>`;
-}
+// ---------- 11 Help: help.js ----------
+export { HelpTab } from "./help.js";

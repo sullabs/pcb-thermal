@@ -123,6 +123,8 @@
             "timToSpreader": { "type": "number", "minimum": 0 }
           }
         },
+        "layerFrac": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 0.45, "description": "Two-resistor chips: thickness of the top and bottom layer as a share of the chip height. Blank = 0.1." },
+        "kCore": { "$ref": "common.schema.json#/$defs/kWmK", "description": "Two-resistor chips: k of the junction core between the two layers. Blank = 100." },
         "chips": {
           "type": "array",
           "description": "Chips modelled with a calibrated k. Others get kPartsWithoutHeat.",
@@ -349,6 +351,7 @@
       "properties": {
         "computedAt": { "$ref": "common.schema.json#/$defs/dateTime" },
         "computedBy": { "type": "string", "description": "'page 0.1.0', or 'workbook' when copied from an old workbook's cached values." },
+        "inputsHash": { "type": "string", "description": "Hash of the PCB size and the bodies below. Build Board copies it into cad.json build, so the page can tell when the model is out of date." },
         "ambientC": { "$ref": "common.schema.json#/$defs/degC" },
         "pcb": {
           "type": "object",

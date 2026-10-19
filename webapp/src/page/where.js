@@ -13,8 +13,9 @@ const INPUT_TAB = [
   ["part.", 1], ["load.", 1],
   ["set.", 2],
   ["pcbov.", 3], ["stack.", 3], ["body.include", 3], ["body.refDes", 3], ["bodyset.", 3],
-  ["surf.", 5], ["hand.", 5], ["simset.", 5],
-  ["plate.", 7], ["pchip.", 7],
+  ["surf.spreader", 8], ["simset.kPartsWithoutHeat", 5], ["simset.", 8],
+  ["surf.", 5], ["hand.", 5],
+  ["plate.", 7], ["pchip.", 7], ["sol.", 7], ["solp.", 7],
   ["sim.refDes", 8], ["sim.model", 8], ["sim.kxySet", 8],
   ["change.checked", 10],
 ];

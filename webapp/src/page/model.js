@@ -29,6 +29,62 @@ export const SIM_DEFAULTS = {
 // A project made before the page (or by hand) may have no simSetup: give it the template values before an edit.
 export const withSimSetup = p => (p.simSetup ? p : { ...p, simSetup: structuredClone(SIM_DEFAULTS) });
 
+// ---------- W7: spreader plates, thermal solution, sim chips, sizes from SolidWorks ----------
+// The parts with Pd whose included body is on this side of the board (bottom plate: bodies on the bottom side).
+export function heatedOnSide(project, calc, side) {
+  return project.parts.filter(x => calc.register.parts[x.refDes]?.pdW > 0).filter(x => {
+    const b = calc.bodies.find(r => r.refDes === x.refDes && r.include);
+    return b && (side === "bottom" ? b.side === "Bottom" : b.side !== "Bottom");
+  }).map(x => x.refDes);
+}
+export const newPlateChip = refDes => ({ refDes, covered: false, heightMode: "Pedestal", timMode: "Body", timTMm: 0.2, timK: 3 });
+// A plate with the template defaults (7 Spreader): aluminium 6061, 1.5 mm, every heated part on its side listed, none covered.
+export function addPlate(project, calc, side) {
+  const plate = { enabled: true, material: "Aluminium 6061", k: 167, densityKgM3: 2700, thicknessMm: 1.5, clearanceXYMm: 1, clearanceZMm: 1,
+    minPedestalMm: 0.3, heightMode: "Auto", chips: heatedOnSide(project, calc, side).map(newPlateChip) };
+  return { ...project, spreader: { ...(project.spreader || {}), [side]: plate } };
+}
+export function removePlate(project, side) {
+  const { [side]: gone, ...rest } = project.spreader || {};
+  const p = { ...project, spreader: rest };
+  if (!Object.keys(rest).length) delete p.spreader;
+  return p;
+}
+// Thermal solution hand check (8 Thermal solution): a plate the size of the PCB, 2 mm aluminium, h 10, one face.
+export function addSolution(project, calc, side) {
+  const key = side === "bottom" ? "solutionBottom" : "solutionTop";
+  const sol = { plateTMm: 2, plateK: 167, hAir: 10, faces: 1, parts: {} };
+  if (calc.pcb.l > 0) sol.plateLMm = calc.pcb.l;
+  if (calc.pcb.w > 0) sol.plateWMm = calc.pcb.w;
+  for (const r of heatedOnSide(project, calc, side)) sol.parts[r] = { underPlate: true, tim1TMm: 0.2, tim1K: 3 };
+  return { ...project, handCheck: { ...(project.handCheck || {}), [key]: sol } };
+}
+export function removeSolution(project, side) {
+  const key = side === "bottom" ? "solutionBottom" : "solutionTop";
+  const { [key]: gone, ...rest } = project.handCheck || {};
+  return { ...project, handCheck: rest };
+}
+// Sim chips: every part with Pd and a body gets a block model; chips already listed keep their settings.
+export function addSimChips(project, calc) {
+  const p = withSimSetup(project);
+  const have = new Set((p.simSetup.chips || []).map(x => x.refDes));
+  const add = project.parts.filter(x => calc.register.parts[x.refDes]?.pdW > 0 && calc.bodies.some(b => b.refDes === x.refDes && b.include) && !have.has(x.refDes))
+    .map(x => ({ refDes: x.refDes, model: x.rjbCW > 0 && x.rjcCW > 0 ? "Two-resistor" : "Block" }));
+  return { ...p, simSetup: { ...p.simSetup, chips: [...(p.simSetup.chips || []), ...add] } };
+}
+// Sync CAD found a body whose box in SolidWorks differs from the page: take the SolidWorks values as typed values
+// (an override for an imported body, the box itself for a body typed in by hand). Only the fields that differ.
+export function takeAsBuilt(project, calc, key, box) {
+  const row = calc.bodies.find(b => b.key === key);
+  if (!row) return project;
+  let p = project;
+  for (const f of ["xMin", "yMin", "zMin", "l", "w", "h"]) {
+    if (!Number.isFinite(box[f]) || Math.abs(box[f] - (row.box[f] ?? NaN)) <= 1e-4) continue;
+    p = setIn(p, row.manual ? ["bodies", key, "manual", "box", f] : ["bodies", key, "override", f], Math.round(box[f] * 1000) / 1000);
+  }
+  return p;
+}
+
 // A body typed in by hand (not in the STEP), key m_<n>. It starts as a 5 x 5 x 1 mm box on the board top.
 export function addManualBody(project, pcbH) {
   let n = 1;

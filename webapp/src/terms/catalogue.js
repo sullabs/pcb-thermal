@@ -331,6 +331,110 @@ def("file.swFound", "File found", "", "", "cad", "Whether the file is in the out
 def("file.partsList", "Parts list", "", "", "input", "A table of parts pasted from Excel or a text file: one row per load, the first row names the columns.",
   "Columns it reads: RefDes, Part number, Class, Package, Tj max, Rja, Rjc, Rjb, Ta override, Label, Rail, Method, Vin, Iin, Vout, Iout, Efficiency, R, Pd. Other columns are left out. Rows with the same RefDes make one part with several loads. Copy the current list to get the layout.");
 
+// ---------- W7: spreader inputs, thermal solution, as built ----------
+def("plate.density", "Plate density", "ρ", "kg/m³", "input", "Density of the plate material. Only the mass of the plate uses it.", undefined, { range: [1000, 9000] });
+def("plate.clearanceXY", "XY clearance", "", "mm", "input", "Gap kept around a tall part the plate does not cover: its clearance cut is this much bigger on each side.", undefined, { range: [0, 5] });
+def("pchip.timMode", "TIM mode", "", "", "input", "Body: the TIM is a solid part in the model, with its own k. Contact R: the TIM is only a contact resistance between chip and plate.",
+  "Body is closer to the real thing and needed for a TIM thicker than about 0.3 mm. Contact R keeps the mesh small: use it for thin pastes and films.");
+def("pchip.timK", "TIM k", "k TIM", "W/(m K)", "input", "Thermal conductivity of the TIM, from its datasheet.",
+  "Gap pads 1 to 6, pastes 2 to 8, phase change films 3 to 5. The datasheet k is measured on a thin layer under pressure: a soft pad that is not squeezed does worse.", { range: [0.5, 20] });
+def("pchip.timR", "TIM resistance", "R TIM", "C/W", "calculated", "Resistance of the TIM layer between this chip and the plate.");
+
+def("sol.plateL", "Plate length", "L plate", "mm", "input", "Length of the common plate for the hand check.", undefined, { range: [5, 500] });
+def("sol.plateW", "Plate width", "W plate", "mm", "input", "Width of the common plate for the hand check.", undefined, { range: [5, 500] });
+def("sol.plateT", "Plate thickness", "t plate", "mm", "input", "Thickness of the common plate for the hand check.", undefined, { range: [0.3, 20] });
+def("sol.plateK", "Plate k", "k plate", "W/(m K)", "input", "Thermal conductivity of the plate. Aluminium 6061 about 167, copper about 390.", undefined, { range: [10, 400] });
+def("sol.hAir", "h plate to air", "h", "W/(m² K)", "input", "Heat transfer coefficient from the plate faces to the air.",
+  "Still air 5 to 10, a light draught 10 to 25, a fan 25 to 100. Fins raise the area, not h: use a larger plate area instead.", { range: [2, 200] });
+def("sol.faces", "Faces to air", "", "", "input", "1: only the outer face loses heat. 2: both faces (a plate standing free in the air).");
+def("sol.rOverride", "R plate to air typed", "", "C/W", "input", "Optional: a measured or datasheet resistance from the plate to air (a heatsink). Replaces h × area.");
+def("sol.area", "Plate area", "A plate", "mm²", "calculated", "L × W of the plate.");
+def("sol.hEff", "Effective h", "h eff", "W/(m² K)", "calculated", "h times the faces that lose heat, or the h that the typed R gives.");
+def("sol.rPlateAir", "Plate to air", "R plate-air", "C/W", "calculated", "Resistance from the whole plate to the air: 1 / (h eff × A plate).");
+def("sol.partsUnder", "Parts under the plate", "", "", "calculated", "Parts with Under plate ticked.");
+def("sol.pdPlate", "Pd into the plate", "Pd plate", "W", "calculated", "All the heat of the parts under the plate. The hand check sends all of it through the plate (none into the board).",
+  "On the safe side: in reality some of the heat still goes down into the board, so the plate runs cooler than this.");
+def("sol.plateC", "Plate temperature", "T plate", "C", "calculated", "Ambient plus Pd plate × R plate-air: one temperature for the whole plate.");
+def("sol.footprints", "Footprints", "", "mm²", "calculated", "Sum of the footprints under the plate. If it is more than the plate area, the plate is too small.");
+def("solp.underPlate", "Under plate", "", "", "input", "This part gives its heat to the common plate in the hand check.");
+def("solp.tim1T", "TIM1 thickness", "t TIM1", "mm", "input", "TIM between the chip and the local spreader (or the plate when there is no local spreader).", undefined, { range: [0.02, 3] });
+def("solp.tim1K", "TIM1 k", "k TIM1", "W/(m K)", "input", "Conductivity of TIM1.", undefined, { range: [0.5, 20] });
+def("solp.localL", "Local spreader L", "", "mm", "input", "Optional: a small copper or aluminium block on the chip, under the plate. Leave the six local fields blank for none.");
+def("solp.localW", "Local spreader W", "", "mm", "input", "Width of the local spreader.");
+def("solp.localT", "Local spreader t", "", "mm", "input", "Thickness of the local spreader.");
+def("solp.localK", "Local spreader k", "", "W/(m K)", "input", "Conductivity of the local spreader.", undefined, { range: [10, 400] });
+def("solp.tim2T", "TIM2 thickness", "t TIM2", "mm", "input", "TIM between the local spreader and the plate.", undefined, { range: [0.02, 3] });
+def("solp.tim2K", "TIM2 k", "k TIM2", "W/(m K)", "input", "Conductivity of TIM2.", undefined, { range: [0.5, 20] });
+def("solp.shareOverride", "Plate share typed", "", "mm²", "input", "Optional: the plate area this part heats. Blank shares the plate in proportion to Pd.");
+def("solp.package", "Package area", "A package", "mm²", "calculated", "L × W of the part's body: where its heat leaves the chip top.");
+def("solp.footprint", "Footprint on the plate", "A footprint", "mm²", "calculated", "Where the heat enters the plate: the local spreader, or the package when there is none.");
+def("solp.plateShare", "Plate share", "A share", "mm²", "calculated", "Plate area this part heats: its share of Pd plate, or the value typed.");
+def("solp.rjc", "Rjc", "Rjc", "C/W", "calculated", "Rjc of the part, from tab 1. The hand check needs it: without Rjc the part is not worked out.");
+def("solp.rTim1", "R TIM1", "R TIM1", "C/W", "calculated", "Resistance of TIM1 over the package area.");
+def("solp.rLocal", "R local spreader", "R local", "C/W", "calculated", "Spreading resistance in the local spreader (0 when there is none).", undefined, { help: "spreading" });
+def("solp.rTim2", "R TIM2", "R TIM2", "C/W", "calculated", "Resistance of TIM2 over the local spreader (0 when there is none).");
+def("solp.rPlateSpread", "R spreading in the plate", "R plate", "C/W", "calculated", "Resistance of the heat spreading from the footprint into the part's share of the plate.", undefined, { help: "spreading" });
+def("solp.rStack", "R stack", "R stack", "C/W", "calculated", "Junction to plate: Rjc + R TIM1 + R local + R TIM2 + R plate, in series.");
+def("solp.dtStack", "Rise over the plate", "ΔT stack", "C", "calculated", "Pd × R stack: how far the junction sits above the plate.");
+def("solp.tj", "Tj with the plate", "Tj", "C", "calculated", "Junction temperature with the common plate: plate temperature plus the rise through the stack.");
+def("solp.margin", "Margin with the plate", "", "C", "calculated", "Tj max minus Tj with the plate.");
+def("solp.status", "Status with the plate", "", "", "calculated", "FAIL, Tight or OK from the margin, or what is missing.");
+
+def("sprb.file", "Plate part", "", "", "cad", "The spreader part file Build Spreader made or updated.");
+def("sprb.date", "Spreader build date", "", "", "cad", "When Build Spreader ran for this plate.");
+def("sprb.pedestals", "Pedestals", "", "", "cad", "Pedestals built on the plate.");
+def("sprb.tims", "TIM parts", "", "", "cad", "TIM parts built (TIM mode Body).");
+def("sprb.cuts", "Clearance cuts built", "", "", "cad", "Clearance cuts in the plate.");
+def("sprb.failures", "Problems", "", "", "cad", "Things Build Spreader could not do. Each is listed below.");
+def("asb.date", "Last Sync CAD", "", "", "cad", "When Sync CAD last read the assembly back.");
+def("asb.bodies", "Bodies changed in SolidWorks", "", "", "cad", "Bodies whose box in the assembly differs from what the page asked for: someone moved or resized them in SolidWorks.");
+def("asb.failedChecks", "Failed checks", "", "", "cad", "Checks Sync CAD found failing: missing faces, TIMs not touching, interference.");
+def("asbp.outlineArea", "Plate outline area", "", "mm²", "cad", "Area of the plate's outer face, as built.");
+def("asbp.topArea", "Plate area facing out", "", "mm²", "cad", "Area of all faces that face away from the board.");
+def("asbp.exposedArea", "Plate area in air", "", "mm²", "cad", "All plate faces that do not touch a TIM or chip: the area that loses heat to air.");
+def("asbp.volume", "Plate volume", "", "mm³", "cad", "Volume of the plate as built.");
+def("asbp.mass", "Plate mass", "m", "g", "cad", "Volume × density.");
+def("asbp.thickness", "Plate thickness built", "", "mm", "cad", "Thickness of the plate read from its faces.");
+def("asbp.holes", "Round holes", "", "", "cad", "Round through holes in the plate (screws, standoffs).");
+
+// ---------- W7: simulation setup inputs ----------
+def("surf.spreaderTopH", "h, spreader top", "h", "W/(m² K)", "input", "Convection coefficient on the spreader's outer face.", undefined, { range: [0, 200] });
+def("surf.spreaderTopEps", "Emissivity, spreader top", "ε", "", "input", "Emissivity of the spreader's outer face. Bare aluminium 0.05 to 0.1, anodised 0.8 to 0.9.", undefined, { range: [0, 1] });
+def("surf.spreaderOtherH", "h, other spreader faces", "h", "W/(m² K)", "input", "Convection on the spreader's sides and underside (the faces not touching a TIM).", undefined, { range: [0, 200] });
+def("surf.spreaderOtherEps", "Emissivity, other spreader faces", "ε", "", "input", "Emissivity of the spreader's sides and underside.", undefined, { range: [0, 1] });
+def("simset.studyType", "Study type", "", "", "input", "Thermal: SolidWorks Simulation, heat conduction with h on the outer faces (button 6). Flow: Flow Simulation, the air is modelled (button 7).",
+  "Start with Thermal: it is fast and uses the same h as the hand check. Use Flow when the air flow decides the result (a fan, a closed box, chimney effect), after a Flow project was made once by hand.");
+def("simset.meshGlobal", "Global mesh size", "", "mm", "input", "Element size for the whole model.", "Smaller is more accurate and slower. 2 to 3 mm is a good start for a credit card size board.", { range: [0.3, 10] });
+def("simset.meshFine", "Fine mesh size", "", "mm", "input", "Element size on the chips with heat and on the TIMs.", "A chip should be at least 3 elements thick; TIMs 2. 0.3 to 0.5 mm is usual.", { range: [0.05, 3] });
+def("simset.includePartsWithoutHeat", "Parts without heat in the study", "", "", "input", "Yes: parts without heat stay in the model and conduct and lose heat. No: they are left out (a smaller, faster study).");
+def("simset.contactPartPcb", "Contact R part to PCB", "", "K m²/W", "input", "Thermal contact resistance between every part and the PCB. 0 = bonded (solder joint).", undefined, { range: [0, 0.001] });
+def("simset.contactChipTim", "Contact R chip to TIM", "", "K m²/W", "input", "Contact resistance between a chip and its TIM part. 0 = bonded.", undefined, { range: [0, 0.001] });
+def("simset.contactTimSpreader", "Contact R TIM to spreader", "", "K m²/W", "input", "Contact resistance between a TIM part and the spreader. 0 = bonded.", undefined, { range: [0, 0.001] });
+def("simset.layerFrac", "Layer thickness", "", "", "input", "Two-resistor chips: thickness of the top and of the bottom layer, as a share of the chip height. Blank = 0.1.", undefined, { range: [0.02, 0.4] });
+def("simset.kCore", "Core k", "", "W/(m K)", "input", "Two-resistor chips: k of the junction core between the two layers. High, so the core is one temperature. Blank = 100.", undefined, { range: [10, 1000] });
+
+// ---------- W7: runs ----------
+def("run.study", "Study", "", "", "run", "Name of the study (or Flow project) in SolidWorks.");
+def("run.meshGlobal", "Mesh size", "", "mm", "run", "Global mesh size used by the run.");
+def("run.meshFine", "Fine mesh", "", "mm", "run", "Mesh size on the chips and TIMs used by the run.");
+def("run.nodes", "Nodes", "", "", "run", "Nodes in the mesh.");
+def("run.elements", "Elements", "", "", "run", "Elements in the mesh.");
+def("run.plot", "Plot picture", "", "", "run", "Picture of the temperature plot that Read Results saved.");
+def("run.worst", "Hottest part", "", "", "calculated", "The part with the highest peak temperature in this run.");
+def("run.worstC", "Hottest part peak", "", "C", "calculated", "Peak temperature of the hottest part.");
+def("run.pass", "Result", "", "", "calculated", "PASS when every part with a Tj max is below it; FAIL when one is above.");
+def("run.fails", "Parts over Tj max", "", "", "calculated", "Parts whose peak temperature is above their Tj max.");
+def("run.balanceOk", "Energy balance OK", "", "", "calculated", "Yes when the energy balance error is within 2 %.");
+def("run.changes", "Inputs changed since", "", "", "calculated", "Inputs that are different now from when this run was made. The run shows the old case until you run again.");
+def("runp.margin", "Margin, simulation", "", "C", "calculated", "Tj max minus the simulated peak.");
+def("runp.status", "Status, simulation", "", "", "calculated", "FAIL, Tight or OK from the simulated margin.");
+def("runp.hand", "Tj, hand check", "Tj hand", "C", "calculated", "The hand check Tj this part is compared with: tab 7 with the plate when the run has a spreader and the part is under the plate, else tab 5.");
+def("runp.gap", "Hand - simulation", "", "C", "calculated", "Hand check Tj minus the simulated peak. Positive: the hand check is warmer, on the safe side.",
+  "Within about 5 C: the two agree and you can trust both. A big gap means an input differs between them: h, emissivity, the PCB k, a missing body, or a chip block k.");
+def("build.outOfDate", "Model out of date", "", "", "calculated", "Yes when the PCB or the bodies changed on the page after the last build. Run Build Board again.");
+
+def("help.search", "Glossary search", "", "", "input", "Words to look for in the glossary: names, symbols, units and explanations. Every word must match.");
+
 export const TERMS = T;
 
 // ---------- glossary: abbreviations and symbols in any text ----------
@@ -372,6 +476,7 @@ export const STATUS = {
   "FAIL": "The hand check Tj is above Tj max.",
   "Tight": "Tj is below Tj max, by less than the CRITICAL margin limit.",
   "OK": "Inside the limits.",
+  "PASS": "Every part with a Tj max is below it in this run.",
   "locked": "This step cannot run yet. The tab says what to do first.",
   "to do": "Open and not done yet.",
   "done": "Nothing left to do here for now.",

@@ -10,7 +10,7 @@
     "build": "node tools/build.mjs",
     "serve": "node tools/serve.mjs",
     "expected": "node tools/test_w2.mjs --write",
-    "test": "node tools/test_w1.mjs && node tools/test_w2.mjs && node tools/test_w3.mjs && node tools/test_w4.mjs && node tools/test_w5.mjs"
+    "test": "node tools/test_w1.mjs && node tools/test_w2.mjs && node tools/test_w3.mjs && node tools/test_w4.mjs && node tools/test_w5.mjs && node tools/test_w7.mjs && node tools/test_w8.mjs && node tools/test_w9.mjs"
   },
   "devDependencies": {
     "ajv": "^8.17.1",

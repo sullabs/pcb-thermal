@@ -14,6 +14,7 @@
 
 import { CLASS_METHOD, STEFAN_BOLTZMANN } from "./constants.js";
 import { bodyOf } from "./geometry.js";
+import { leeSpreading } from "./lee.js";
 import { isNum, N } from "./util.js";
 
 const partOf = (c, ref) => c.project.parts.find(p => p.refDes === ref);
@@ -36,6 +37,14 @@ const geo = c => c.calc.geometry;
 const geoBody = (c, key) => c.calc.geometry.bodies.find(b => b.key === key);
 const choice = (c, key) => c.project.bodies[key] || {};
 const bodySet = (c, key, f) => { const ch = choice(c, key); return ch.manual ? ch.manual.box?.[f] : ch.override?.[f]; };
+// Thermal solution (tab 7 hand check with a common plate): sol.* by side, solp.* by "side|RefDes".
+const solIn = (c, side) => c.project.handCheck?.[side === "bottom" ? "solutionBottom" : "solutionTop"];
+const solOut = (c, side) => c.calc.solution?.[side];
+const solp = (c, key) => { const [side, ref] = key.split("|"); return { side, ref, inp: solIn(c, side)?.parts?.[ref] || {}, r: solOut(c, side)?.parts?.[ref], s: solIn(c, side) }; };
+const runCalc = (c, name) => c.calc.runs?.[name];
+const runpCalc = (c, key) => { const [run, ref] = key.split("|"); return c.calc.runs?.[run]?.parts?.[ref]; };
+const sprb = (c, side) => c.cad?.spreaderBuild?.[side];
+const asbp = (c, side) => c.cad?.asBuilt?.plates?.[side];
 
 // ---------- values ----------
 export const VALUES = {
@@ -291,6 +300,97 @@ export const VALUES = {
   "change.field": (c, k) => change(c, k)?.field,
   "change.old": (c, k) => change(c, k)?.old,
   "change.new": (c, k) => change(c, k)?.new,
+
+  // ---------- W7 ----------
+  "plate.density": (c, k) => plateIn(c, k)?.densityKgM3,
+  "plate.clearanceXY": (c, k) => plateIn(c, k)?.clearanceXYMm,
+  "pchip.timMode": (c, k) => pchip(c, k).c?.timMode,
+  "pchip.timK": (c, k) => pchip(c, k).c?.timK,
+  "pchip.timR": (c, k) => pchip(c, k).r?.timRCW,
+  "sol.plateL": (c, k) => solIn(c, k)?.plateLMm,
+  "sol.plateW": (c, k) => solIn(c, k)?.plateWMm,
+  "sol.plateT": (c, k) => solIn(c, k)?.plateTMm,
+  "sol.plateK": (c, k) => solIn(c, k)?.plateK,
+  "sol.hAir": (c, k) => solIn(c, k)?.hAir,
+  "sol.faces": (c, k) => solIn(c, k)?.faces,
+  "sol.rOverride": (c, k) => solIn(c, k)?.rPlateToAirOverrideCW,
+  "sol.area": (c, k) => solOut(c, k)?.plateAreaMm2,
+  "sol.hEff": (c, k) => solOut(c, k)?.hEff,
+  "sol.rPlateAir": (c, k) => solOut(c, k)?.rPlateAirCW,
+  "sol.partsUnder": (c, k) => solOut(c, k)?.partsUnder,
+  "sol.pdPlate": (c, k) => solOut(c, k)?.pdPlateW,
+  "sol.plateC": (c, k) => solOut(c, k)?.plateC,
+  "sol.footprints": (c, k) => solOut(c, k)?.footprintsMm2,
+  "solp.underPlate": (c, k) => solp(c, k).inp.underPlate === true,
+  "solp.tim1T": (c, k) => solp(c, k).inp.tim1TMm,
+  "solp.tim1K": (c, k) => solp(c, k).inp.tim1K,
+  "solp.localL": (c, k) => solp(c, k).inp.localLMm,
+  "solp.localW": (c, k) => solp(c, k).inp.localWMm,
+  "solp.localT": (c, k) => solp(c, k).inp.localTMm,
+  "solp.localK": (c, k) => solp(c, k).inp.localK,
+  "solp.tim2T": (c, k) => solp(c, k).inp.tim2TMm,
+  "solp.tim2K": (c, k) => solp(c, k).inp.tim2K,
+  "solp.shareOverride": (c, k) => solp(c, k).inp.plateShareOverrideMm2,
+  "solp.package": (c, k) => solp(c, k).r?.packageMm2,
+  "solp.footprint": (c, k) => solp(c, k).r?.footprintMm2,
+  "solp.plateShare": (c, k) => solp(c, k).r?.plateShareMm2,
+  "solp.rjc": (c, k) => solp(c, k).r?.rjcCW,
+  "solp.rTim1": (c, k) => solp(c, k).r?.rTim1CW,
+  "solp.rLocal": (c, k) => solp(c, k).r?.rLocalCW,
+  "solp.rTim2": (c, k) => solp(c, k).r?.rTim2CW,
+  "solp.rPlateSpread": (c, k) => solp(c, k).r?.rPlateSpreadCW,
+  "solp.rStack": (c, k) => solp(c, k).r?.rStackCW,
+  "solp.dtStack": (c, k) => solp(c, k).r?.dtStackC,
+  "solp.tj": (c, k) => solp(c, k).r?.tjC,
+  "solp.margin": (c, k) => solp(c, k).r?.marginC,
+  "solp.status": (c, k) => solp(c, k).r?.status,
+  "sprb.file": (c, k) => sprb(c, k)?.file,
+  "sprb.date": (c, k) => sprb(c, k)?.date,
+  "sprb.pedestals": (c, k) => sprb(c, k)?.pedestals,
+  "sprb.tims": (c, k) => sprb(c, k)?.tims?.length,
+  "sprb.cuts": (c, k) => sprb(c, k)?.cuts,
+  "sprb.failures": (c, k) => sprb(c, k)?.failures?.length,
+  "asb.date": c => c.cad?.asBuilt?.date,
+  "asb.bodies": c => c.cad?.asBuilt?.bodies?.length,
+  "asb.failedChecks": c => c.cad?.asBuilt?.failedChecks?.length,
+  "asbp.outlineArea": (c, k) => asbp(c, k)?.outlineAreaMm2,
+  "asbp.topArea": (c, k) => asbp(c, k)?.topAreaMm2,
+  "asbp.exposedArea": (c, k) => asbp(c, k)?.exposedAreaMm2,
+  "asbp.volume": (c, k) => asbp(c, k)?.volumeMm3,
+  "asbp.mass": (c, k) => asbp(c, k)?.massG,
+  "asbp.thickness": (c, k) => asbp(c, k)?.thicknessMm,
+  "asbp.holes": (c, k) => asbp(c, k)?.holes,
+  "surf.spreaderTopH": c => surf(c).spreaderTop?.h,
+  "surf.spreaderTopEps": c => surf(c).spreaderTop?.emissivity,
+  "surf.spreaderOtherH": c => surf(c).spreaderOther?.h,
+  "surf.spreaderOtherEps": c => surf(c).spreaderOther?.emissivity,
+  "simset.studyType": c => c.project.simSetup?.studyType,
+  "simset.meshGlobal": c => c.project.simSetup?.meshGlobalMm,
+  "simset.meshFine": c => c.project.simSetup?.meshFineMm,
+  "simset.includePartsWithoutHeat": c => c.project.simSetup?.includePartsWithoutHeat,
+  "simset.contactPartPcb": c => c.project.simSetup?.contacts?.partToPcb,
+  "simset.contactChipTim": c => c.project.simSetup?.contacts?.chipToTim,
+  "simset.contactTimSpreader": c => c.project.simSetup?.contacts?.timToSpreader,
+  "simset.layerFrac": c => c.project.simSetup?.layerFrac,
+  "simset.kCore": c => c.project.simSetup?.kCore,
+  "run.study": (c, k) => runOf(c, k)?.study,
+  "run.meshGlobal": (c, k) => runOf(c, k)?.mesh?.globalMm,
+  "run.meshFine": (c, k) => runOf(c, k)?.mesh?.fineMm,
+  "run.nodes": (c, k) => runOf(c, k)?.mesh?.nodes,
+  "run.elements": (c, k) => runOf(c, k)?.mesh?.elements,
+  "run.plot": (c, k) => runOf(c, k)?.plotFile,
+  "run.worst": (c, k) => runCalc(c, k)?.worst,
+  "run.worstC": (c, k) => runCalc(c, k)?.worstC,
+  "run.pass": (c, k) => runCalc(c, k)?.pass,
+  "run.fails": (c, k) => runCalc(c, k)?.fails,
+  "run.balanceOk": (c, k) => runCalc(c, k)?.balanceOk,
+  "run.changes": (c, k) => { const ch = runCalc(c, k)?.changes; return ch === undefined ? undefined : ch.length ? ch.join("; ") : "none"; },
+  "runp.margin": (c, k) => runpCalc(c, k)?.marginC,
+  "runp.status": (c, k) => runpCalc(c, k)?.status,
+  "runp.hand": (c, k) => runpCalc(c, k)?.handC,
+  "runp.gap": (c, k) => runpCalc(c, k)?.gapC,
+  "build.outOfDate": c => c.calc.build?.outOfDate,
+  "help.search": () => undefined,
 };
 
 export function valueOf(ctx, term, key = "") {
@@ -544,6 +644,103 @@ F["sim.kxy"] = (c, k) => (isNum(c.project.simSetup?.chips?.[+k]?.kxy)
   : isNum(c.calc.simChips[+k]?.kz) ? { text: "k xy = k z (none typed)", inputs: [["k z", "sim.kz", k]], fn: v => v["k z"] } : null);
 F["sim.check"] = (c, k) => ({ text: "OK unless: no body, no heat, two-resistor model (not built yet), or no Rjc", inputs: [["k z", "sim.kz", k], ["Pd", "sim.pd", k]] });
 
+// ---------- W7: TIM resistance, thermal solution, runs ----------
+F["pchip.timR"] = (c, k) => { const x = pchip(c, k); if (!isNum(x.r?.timRCW) || !x.r.key) return null;
+  return { text: "R TIM = TIM × 1000 / (k TIM × L × W)", inputs: [["TIM", "pchip.timT", k], ["k TIM", "pchip.timK", k], ["L", "body.l", x.r.key], ["W", "body.w", x.r.key]],
+    fn: v => v.TIM * 1000 / (v["k TIM"] * v.L * v.W), note: "A layer of thickness t and area A conducts with R = t / (k A); 1000 turns mm into m." }; };
+
+F["sol.area"] = (c, k) => (isNum(solOut(c, k)?.plateAreaMm2) ? { text: "A plate = L plate × W plate", inputs: [["L plate", "sol.plateL", k], ["W plate", "sol.plateW", k]], fn: v => v["L plate"] * v["W plate"] } : null);
+F["sol.hEff"] = (c, k) => {
+  const s = solIn(c, k), o = solOut(c, k);
+  if (!isNum(o?.hEff)) return null;
+  return isNum(s.rPlateToAirOverrideCW)
+    ? { text: "h eff = 1 / (R typed × A plate / 10⁶)", expr: "1 / (R typed × A plate / 1000000)", inputs: [["R typed", "sol.rOverride", k], ["A plate", "sol.area", k]], fn: v => 1 / ((v["R typed"] * v["A plate"]) / 1e6), note: "The h that gives the typed resistance over the plate area." }
+    : { text: "h eff = h × faces", inputs: [["h", "sol.hAir", k], ["faces", "sol.faces", k]], fn: v => v.h * v.faces };
+};
+F["sol.rPlateAir"] = (c, k) => {
+  const s = solIn(c, k), o = solOut(c, k);
+  if (!isNum(o?.rPlateAirCW)) return null;
+  return isNum(s.rPlateToAirOverrideCW)
+    ? { text: "R plate-air = R typed", inputs: [["R typed", "sol.rOverride", k]], fn: v => v["R typed"] }
+    : { text: "R plate-air = 1000000 / (h eff × A plate)", inputs: [["h eff", "sol.hEff", k], ["A plate", "sol.area", k]], fn: v => 1e6 / (v["h eff"] * v["A plate"]), note: "R = 1 / (h A); A in mm², so × 10⁶." };
+};
+F["sol.partsUnder"] = () => ({ text: "Number of parts with Under plate ticked", inputs: [] });
+const solActive = (c, k) => c.project.parts.filter(p => solIn(c, k)?.parts?.[p.refDes]?.underPlate === true && isNum(c.calc.register.parts[p.refDes]?.pdW));
+F["sol.pdPlate"] = (c, k) => {
+  if (!solOut(c, k)) return null;
+  const ins = solActive(c, k).map(p => [`Pd(${p.refDes})`, "part.pd", p.refDes]);
+  return { text: "Pd plate = sum of Pd of the parts under the plate", expr: ins.map(x => x[0]).join(" + ") || "0", inputs: ins, fn: v => ins.reduce((a, x) => a + v[x[0]], 0) };
+};
+F["sol.plateC"] = (c, k) => (isNum(solOut(c, k)?.plateC) ? { text: "T plate = Ta + Pd plate × R plate-air", inputs: [["Ta", "board.ambient", ""], ["Pd plate", "sol.pdPlate", k], ["R plate-air", "sol.rPlateAir", k]], fn: v => v.Ta + v["Pd plate"] * v["R plate-air"] } : null);
+F["sol.footprints"] = (c, k) => {
+  if (!solOut(c, k)) return null;
+  const ins = c.project.parts.filter(p => isNum(solOut(c, k).parts[p.refDes]?.footprintMm2)).map(p => [`A(${p.refDes})`, "solp.footprint", `${k}|${p.refDes}`]);
+  return { text: "Footprints = sum of the footprints on the plate", expr: ins.map(x => x[0]).join(" + ") || "0", inputs: ins, fn: v => ins.reduce((a, x) => a + v[x[0]], 0) };
+};
+F["solp.package"] = (c, k) => { const x = solp(c, k); const b = bodyOfRef(c, x.ref); return b && isNum(x.r?.packageMm2) ? { text: "A package = L × W of its body", inputs: [["L", "body.l", b.key], ["W", "body.w", b.key]], fn: v => v.L * v.W } : null; };
+F["solp.footprint"] = (c, k) => { const x = solp(c, k); if (!isNum(x.r?.footprintMm2)) return null;
+  return isNum(x.inp.localLMm) ? { text: "A footprint = local L × local W", inputs: [["local L", "solp.localL", k], ["local W", "solp.localW", k]], fn: v => v["local L"] * v["local W"] }
+    : { text: "A footprint = A package (no local spreader)", inputs: [["A package", "solp.package", k]], fn: v => v["A package"] }; };
+F["solp.plateShare"] = (c, k) => { const x = solp(c, k); if (!isNum(x.r?.plateShareMm2)) return null;
+  return isNum(x.inp.plateShareOverrideMm2) ? { text: "A share = plate share typed", inputs: [["typed", "solp.shareOverride", k]], fn: v => v.typed }
+    : { text: "A share = A plate × Pd / Pd plate", inputs: [["A plate", "sol.area", x.side], ["Pd", "part.pd", x.ref], ["Pd plate", "sol.pdPlate", x.side]], fn: v => v["A plate"] * v.Pd / v["Pd plate"], note: "Each part heats a share of the plate in proportion to its Pd." }; };
+F["solp.rjc"] = (c, k) => { const x = solp(c, k); return isNum(x.r?.rjcCW) ? { text: "Rjc = Rjc of the part (tab 1)", inputs: [["Rjc", "part.rjc", x.ref]], fn: v => v.Rjc } : null; };
+F["solp.rTim1"] = (c, k) => (isNum(solp(c, k).r?.rTim1CW) ? { text: "R TIM1 = 1000 × t TIM1 / (k TIM1 × A package)", inputs: [["t TIM1", "solp.tim1T", k], ["k TIM1", "solp.tim1K", k], ["A package", "solp.package", k]], fn: v => 1000 * v["t TIM1"] / (v["k TIM1"] * v["A package"]) } : null);
+const leeFx = (ins, note) => ({
+  text: "R = Lee spreading (source A, plate A, t, k, h)", expr: `Lee(${ins.map(x => x[0]).join(", ")})`, inputs: ins,
+  fn: v => leeSpreading({ sourceMm2: v[ins[0][0]], plateMm2: v[ins[1][0]], tMm: v[ins[2][0]], k: v[ins[3][0]], h: ins[4][3] ? ins[4][3](v) : v[ins[4][0]] }).r,
+  note, ref: "Lee, Song, Au and Moran 1995",
+});
+F["solp.rLocal"] = (c, k) => { const x = solp(c, k); if (!isNum(x.r?.rLocalCW)) return null;
+  if (!x.r.local) return { text: "R local = 0 (no local spreader)", inputs: [], fn: () => 0 };
+  const f = leeFx([["A package", "solp.package", k], ["A footprint", "solp.footprint", k], ["t local", "solp.localT", k], ["k local", "solp.localK", k]],
+    "The far face of the local spreader is cooled through TIM2, so its h is k TIM2 / t TIM2.");
+  f.inputs.push(["k TIM2", "solp.tim2K", k], ["t TIM2", "solp.tim2T", k]);
+  f.expr = "Lee(A package, A footprint, t local, k local, 1000 × k TIM2 / t TIM2)";
+  f.fn = v => leeSpreading({ sourceMm2: v["A package"], plateMm2: v["A footprint"], tMm: v["t local"], k: v["k local"], h: 1000 * v["k TIM2"] / v["t TIM2"] }).r;
+  return f; };
+F["solp.rTim2"] = (c, k) => { const x = solp(c, k); if (!isNum(x.r?.rTim2CW)) return null;
+  return x.r.local ? { text: "R TIM2 = 1000 × t TIM2 / (k TIM2 × A footprint)", inputs: [["t TIM2", "solp.tim2T", k], ["k TIM2", "solp.tim2K", k], ["A footprint", "solp.footprint", k]], fn: v => 1000 * v["t TIM2"] / (v["k TIM2"] * v["A footprint"]) }
+    : { text: "R TIM2 = 0 (no local spreader)", inputs: [], fn: () => 0 }; };
+F["solp.rPlateSpread"] = (c, k) => { const x = solp(c, k); if (!isNum(x.r?.rPlateSpreadCW)) return null;
+  const f = leeFx([["A footprint", "solp.footprint", k], ["A share", "solp.plateShare", k], ["t plate", "sol.plateT", x.side], ["k plate", "sol.plateK", x.side], ["h eff", "sol.hEff", x.side]],
+    "Heat enters the plate through the footprint and spreads over the part's share before it leaves to air.");
+  f.expr = "Lee(A footprint, A share, t plate, k plate, h eff)";
+  return f; };
+F["solp.rStack"] = (c, k) => (isNum(solp(c, k).r?.rStackCW) ? { text: "R stack = Rjc + R TIM1 + R local + R TIM2 + R plate",
+  inputs: [["Rjc", "solp.rjc", k], ["R TIM1", "solp.rTim1", k], ["R local", "solp.rLocal", k], ["R TIM2", "solp.rTim2", k], ["R plate", "solp.rPlateSpread", k]],
+  fn: v => v.Rjc + v["R TIM1"] + v["R local"] + v["R TIM2"] + v["R plate"] } : null);
+F["solp.dtStack"] = (c, k) => { const x = solp(c, k); return isNum(x.r?.dtStackC) ? { text: "ΔT stack = Pd × R stack", inputs: [["Pd", "part.pd", x.ref], ["R stack", "solp.rStack", k]], fn: v => v.Pd * v["R stack"] } : null; };
+F["solp.tj"] = (c, k) => { const x = solp(c, k); return isNum(x.r?.tjC) ? { text: "Tj = T plate + ΔT stack", inputs: [["T plate", "sol.plateC", x.side], ["ΔT stack", "solp.dtStack", k]], fn: v => v["T plate"] + v["ΔT stack"] } : null; };
+F["solp.margin"] = (c, k) => { const x = solp(c, k); return isNum(x.r?.marginC) ? { text: "Margin = Tj max - Tj", inputs: [["Tj max", "part.tjMax", x.ref], ["Tj", "solp.tj", k]], fn: v => v["Tj max"] - v.Tj } : null; };
+F["solp.status"] = (c, k) => ({ text: "FAIL when the margin is below 0, Tight when it is below the CRITICAL margin limit, else OK (or what is missing)", inputs: [["Margin", "solp.margin", k], ["limit", "limit.criticalMargin", ""]] });
+
+F["run.worst"] = (c, k) => ({ text: "The RefDes with the highest peak in this run", inputs: [["peak", "run.worstC", k]] });
+F["run.worstC"] = (c, k) => {
+  const r = runOf(c, k);
+  const ins = Object.entries(r?.parts || {}).filter(([, t]) => isNum(t.peakC)).map(([ref]) => [`peak(${ref})`, "runp.peak", `${k}|${ref}`]);
+  if (!ins.length) return null;
+  return { text: "Hottest part peak = highest peak of all parts", expr: `max(${ins.map(x => x[0]).join(", ")})`, inputs: ins, fn: v => Math.max(...ins.map(x => v[x[0]])) };
+};
+F["run.pass"] = (c, k) => ({ text: "PASS when no part is above its Tj max (FAIL as soon as one is)", inputs: [["parts over", "run.fails", k]] });
+F["run.fails"] = () => ({ text: "Number of parts with a peak above their Tj max", inputs: [] });
+F["run.balanceOk"] = (c, k) => ({ text: "Yes when the energy balance error is 2 % or less", inputs: [["error", "run.energyBalance", k]] });
+F["run.changes"] = () => ({ text: "Inputs of the run (a copy kept in the results file) compared with the inputs now: ambient, PCB, Pd per part, bodies, chip models, plates, surfaces, contacts, mesh", inputs: [] });
+F["runp.margin"] = (c, k) => { const ref = k.split("|")[1]; return isNum(runpCalc(c, k)?.marginC) ? { text: "Margin = Tj max - peak", inputs: [["Tj max", "part.tjMax", ref], ["peak", "runp.peak", k]], fn: v => v["Tj max"] - v.peak } : null; };
+F["runp.status"] = (c, k) => ({ text: "FAIL when the peak is above Tj max, Tight when the margin is below the CRITICAL margin limit, else OK", inputs: [["Margin", "runp.margin", k], ["limit", "limit.criticalMargin", ""]] });
+F["runp.hand"] = (c, k) => {
+  const [run, ref] = k.split("|");
+  const x = runpCalc(c, k);
+  if (!isNum(x?.handC)) return null;
+  if (x.handFrom === "thermal solution") {
+    const side = ["top", "bottom"].find(s => isNum(c.calc.solution[s]?.parts?.[ref]?.tjC));
+    return { text: "Tj hand = Tj with the plate (tab 7)", inputs: [["Tj plate", "solp.tj", `${side}|${ref}`]], fn: v => v["Tj plate"], note: `The run ${run} has a spreader and ${ref} is under the hand check plate.` };
+  }
+  return { text: "Tj hand = Tj of the bare board hand check (tab 5)", inputs: [["Tj bare", "bbp.tj", ref]], fn: v => v["Tj bare"] };
+};
+F["runp.gap"] = (c, k) => (isNum(runpCalc(c, k)?.gapC) ? { text: "Gap = Tj hand - peak", inputs: [["Tj hand", "runp.hand", k], ["peak", "runp.peak", k]], fn: v => v["Tj hand"] - v.peak } : null);
+F["build.outOfDate"] = () => ({ text: "Yes when the hash of the PCB and bodies now differs from the one the last Build Board built from", inputs: [] });
+
 export const FORMULAS = F;
 // Values worked out by the page (not typed, not from SolidWorks) without a formula entry would be a gap:
 // tools/test_w4.mjs checks that every term of kind "calculated" in the catalogue has one.
@@ -574,7 +771,7 @@ export function instances(ctx) {
   const out = [];
   const add = (prefix, keys) => { for (const t of Object.keys(VALUES)) if (t.startsWith(prefix + ".")) for (const k of keys) out.push([t, k]); };
   const { project: p, calc } = ctx;
-  for (const t of Object.keys(VALUES)) if (/^(const|board|limit|rails|triage|import|set|pcb|pcbov|stack|geo|surf|hand|simset|bb|build)\./.test(t) && t !== "buildbody.status") out.push([t, ""]);
+  for (const t of Object.keys(VALUES)) if (/^(const|board|limit|rails|triage|import|set|pcb|pcbov|stack|geo|surf|hand|simset|bb|build|asb)\./.test(t) && t !== "buildbody.status") out.push([t, ""]);
   add("part", p.parts.map(x => x.refDes));
   add("load", p.parts.flatMap(x => x.loads.map(l => l.id)));
   add("rail", calc.rails.rails.map(r => r.rail));
@@ -590,6 +787,11 @@ export function instances(ctx) {
   add("run", runs.map(r => r.name));
   add("runp", runs.flatMap(r => Object.keys(r.parts || {}).map(x => `${r.name}|${x}`)));
   add("change", (ctx.cad?.changes || []).map(x => x.id));
+  const solSides = ["top", "bottom"].filter(s => calc.solution?.[s]);
+  add("sol", solSides);
+  add("solp", solSides.flatMap(s => p.parts.map(x => `${s}|${x.refDes}`)));
+  add("sprb", ["top", "bottom"].filter(s => ctx.cad?.spreaderBuild?.[s]));
+  add("asbp", ["top", "bottom"].filter(s => ctx.cad?.asBuilt?.plates?.[s]));
   return out;
 }
 

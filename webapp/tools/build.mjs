@@ -23,11 +23,15 @@ export async function build({ out = path.join(root, "dist", "PCB_Thermal.html"),
   // The example study (Help > example, read only). Board data stays in example/, out of src/.
   const ex = path.join(root, "..", "example", "RaspberryPi4");
   const example = JSON.stringify(Object.fromEntries(["project", "cad", "results"].map(n => [n, JSON.parse(fs.readFileSync(path.join(ex, n + ".json"), "utf8"))])));
+  // The SolidWorks button icons for the SolidWorks cards, from the macros' icon folder (src/icons/*_32.bmp).
+  const iconDir = path.join(root, "..", "src", "icons");
+  const icons = JSON.stringify(Object.fromEntries(fs.readdirSync(iconDir).filter(f => /_32.bmp$/i.test(f))
+    .map(f => [f.replace(/_32.bmp$/i, ""), "data:image/bmp;base64," + fs.readFileSync(path.join(iconDir, f)).toString("base64")])));
   const virtual = {
     name: "virtual",
     setup(b) {
-      b.onResolve({ filter: /^virtual:(validators|example)$/ }, a => ({ path: a.path.slice(8), namespace: "virtual" }));
-      b.onLoad({ filter: /.*/, namespace: "virtual" }, a => ({ contents: a.path === "example" ? example : validators, loader: a.path === "example" ? "json" : "js", resolveDir: root }));
+      b.onResolve({ filter: /^virtual:(validators|example|icons)$/ }, a => ({ path: a.path.slice(8), namespace: "virtual" }));
+      b.onLoad({ filter: /.*/, namespace: "virtual" }, a => ({ contents: a.path === "example" ? example : a.path === "icons" ? icons : validators, loader: a.path === "validators" ? "js" : "json", resolveDir: root }));
     },
   };
   const res = await esbuild.build({
