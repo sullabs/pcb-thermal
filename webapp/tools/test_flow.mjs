@@ -2,6 +2,8 @@
 //   node tools/test_flow.mjs
 // F1. Run health: the fields RunFlow writes are valid, runHealth gives ok / check / bad with plain reasons, tab 9
 //     shows the badge and greys out PASS/FAIL of a bad run, the report and the tab state name it.
+// F2. Mesh: simSetup.flow is valid, the smallest cell estimate matches RunFlow's rule and flags thin parts, tab 8
+//     shows the Flow mesh card, a mesh check pair is compared per chip on tab 9.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -84,6 +86,39 @@ const flowRun = (over = {}) => ({
   check(st.results.status === "attention" && /health Bad/.test(st.results.note), "tab 9 needs attention when the newest run is bad", st.results);
   const issues = openIssues(c);
   check(issues.some(x => /health Bad: L1 and L2/.test(x)), "the report lists the bad run as an open issue", issues);
+}
+
+// ---------- F2 ----------
+{
+  const withFlow = f => ({ ...P, simSetup: { ...P.simSetup, studyType: "Flow", flow: f } });
+  valid("project.schema.json", withFlow({ meshLevel: 4, localMesh: true, solidRefine: 3, meshCheck: true, meshCheckLimitC: 1 }), "project.json with simSetup.flow");
+  check(!ajv.validate("project.schema.json", withFlow({ meshLevel: 8 })), "mesh level 8 is refused by the schema");
+  const c0 = ctxOf(withFlow({}));
+  const s = c0.calc.flow.settings;
+  check(s.meshLevel === 4 && s.localMesh === true && s.solidRefine === 3 && s.meshCheckLimitC === 1, "blank Flow settings take the defaults", s);
+  const d = c0.calc.flow.domain, vol = (d.x[1] - d.x[0]) * (d.y[1] - d.y[0]) * (d.z[1] - d.z[0]);
+  const expect = Math.cbrt(vol / (28000 * 7)) / 8;
+  check(Math.abs(c0.calc.flow.minCellMm - expect) < 1e-9 && c0.calc.flow.thin.length === 0, "level 4 with local mesh: smallest cell = (V/(28000×7))^(1/3)/8, no thin part", [c0.calc.flow.minCellMm, c0.calc.flow.thin]);
+  const c2 = ctxOf(withFlow({ meshLevel: 2, localMesh: false }));
+  const thin = c2.calc.flow.thin.map(x => x.refDes);
+  check(thin.includes("L1") && thin.includes("L2") && thin.includes("U3"), "level 2 without local mesh: L1, L2 and U3 may not be meshed", c2.calc.flow);
+  const t8 = show("SimTab", c2);
+  check(t8.includes("Flow mesh") && t8.includes('data-term="flow.meshLevel"') && t8.includes("May not be meshed: ") && t8.includes("L1 (1.2 mm)"), "tab 8 shows the Flow mesh card and the thin parts");
+  check(!show("SimTab", ctxOf({ ...P, simSetup: { ...P.simSetup, studyType: "Thermal" } })).includes("Flow mesh"), "no Flow mesh card for a Thermal study");
+
+  const a = flowRun({ name: "FL_20261019_2200", unresolved: [], warnings: [], heatAppliedW: 6.67, energyBalancePct: 0.1, mesh: { level: 4, localMesh: true }, meshCheck: { pairWith: "FL_20261019_2200_L5", level: 4 }, parts: { U1: { peakC: 91.6 }, U3: { peakC: 124.5 } } });
+  const b = flowRun({ name: "FL_20261019_2200_L5", unresolved: [], warnings: [], heatAppliedW: 6.67, energyBalancePct: 0.1, mesh: { level: 5, localMesh: true }, meshCheck: { pairWith: "FL_20261019_2200", level: 5 }, parts: { U1: { peakC: 91.2 }, U3: { peakC: 126.0 } } });
+  const res = { ...R, runs: [...R.runs, a, b] };
+  valid("results.schema.json", res, "results.json with a mesh check pair");
+  const c = ctxOf(withFlow({}), C, res);
+  const m = c.calc.runs[b.name].meshCheck;
+  check(m.coarse === a.name && m.fine === b.name && Math.abs(m.parts.U3 - 1.5) < 1e-9 && Math.abs(m.parts.U1 + 0.4) < 1e-9, "mesh check: finer minus coarser per chip", m);
+  check(m.ok === false && m.over.join() === "U3" && m.worst === "U3", "U3 moved 1.5 C: not OK against the 1 C limit", m);
+  check(c.calc.runs[a.name].meshCheck.fine === b.name, "both runs of the pair see the same comparison");
+  const t9 = show("ResultsTab", c);
+  check(t9.includes("Mesh check: level 4") && t9.includes('data-term="runp.meshDelta"') && t9.includes("Moved by the limit or more: U3"), "tab 9 shows the mesh check per chip");
+  const okc = ctxOf(withFlow({ meshCheckLimitC: 2 }), C, res);
+  check(okc.calc.runs[b.name].meshCheck.ok === true, "with a 2 C limit the same pair is OK");
 }
 
 console.log(`Flow plan: ${n - fails} of ${n} checks passed.`);

@@ -125,6 +125,18 @@
         },
         "layerFrac": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 0.45, "description": "Two-resistor chips: thickness of the top and bottom layer as a share of the chip height. Blank = 0.1." },
         "kCore": { "$ref": "common.schema.json#/$defs/kWmK", "description": "Two-resistor chips: k of the junction core between the two layers. Blank = 100." },
+        "flow": {
+          "type": "object",
+          "description": "Flow Simulation settings (tab 8, study type Flow). Blank values take the defaults of webapp/src/calc/flow.js.",
+          "additionalProperties": false,
+          "properties": {
+            "meshLevel": { "type": "integer", "minimum": 1, "maximum": 7, "description": "Global mesh level. Blank = 4." },
+            "localMesh": { "type": "boolean", "description": "A local mesh on every part with heat, the TIMs and the spreader. Blank = yes." },
+            "solidRefine": { "type": "integer", "minimum": 0, "maximum": 9, "description": "Refinement of solid and solid/fluid boundary cells in the local mesh. Blank = 3." },
+            "meshCheck": { "type": "boolean", "description": "Solve twice, at meshLevel and one level finer, and compare. Blank = no." },
+            "meshCheckLimitC": { "type": "number", "exclusiveMinimum": 0, "description": "A mesh check is OK when every chip moved less than this (C). Blank = 1." }
+          }
+        },
         "chips": {
           "type": "array",
           "description": "Chips modelled with a calibrated k. Others get kPartsWithoutHeat.",

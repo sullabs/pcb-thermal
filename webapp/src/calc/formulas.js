@@ -394,6 +394,20 @@ export const VALUES = {
   "run.cellsTotal": (c, k) => runOf(c, k)?.solver?.cellsTotal,
   "run.cellsSolid": (c, k) => runOf(c, k)?.solver?.cellsSolid,
   "run.cellsFluid": (c, k) => runOf(c, k)?.solver?.cellsFluid,
+  "run.meshLevel": (c, k) => runOf(c, k)?.mesh?.level,
+  "run.localMesh": (c, k) => runOf(c, k)?.mesh?.localMesh,
+  "run.meshCheckPair": (c, k) => runOf(c, k)?.meshCheck?.pairWith,
+  "run.meshCheckOk": (c, k) => { const m = runCalc(c, k)?.meshCheck; return m?.ok === undefined ? undefined : m.ok ? "OK" : "Not OK"; },
+  "run.meshCheckWorst": (c, k) => runCalc(c, k)?.meshCheck?.worstC,
+  "runp.meshDelta": (c, k) => { const [run, ref] = k.split("|"); return runCalc(c, run)?.meshCheck?.parts?.[ref]; },
+  "flow.meshLevel": c => c.calc.flow?.settings.meshLevel,
+  "flow.localMesh": c => c.calc.flow?.settings.localMesh,
+  "flow.solidRefine": c => c.calc.flow?.settings.solidRefine,
+  "flow.meshCheck": c => c.calc.flow?.settings.meshCheck,
+  "flow.meshCheckLimit": c => c.calc.flow?.settings.meshCheckLimitC,
+  "flow.domainVol": c => { const d = c.calc.flow?.domain; return d ? (d.x[1] - d.x[0]) * (d.y[1] - d.y[0]) * (d.z[1] - d.z[0]) : undefined; },
+  "flow.minCell": c => c.calc.flow?.minCellMm,
+  "flow.thin": c => { const t = c.calc.flow?.thin; return t ? (t.length ? t.map(x => `${x.refDes} (${x.hMm} mm)`).join(", ") : "none") : undefined; },
   "run.unresolved": (c, k) => { const u = runOf(c, k)?.unresolved; return u?.length ? u.join(", ") : undefined; },
   "run.changes": (c, k) => { const ch = runCalc(c, k)?.changes; return ch === undefined ? undefined : ch.length ? ch.join("; ") : "none"; },
   "runp.margin": (c, k) => runpCalc(c, k)?.marginC,
@@ -738,6 +752,16 @@ F["run.fails"] = () => ({ text: "Number of parts with a peak above their Tj max"
 F["run.balanceOk"] = (c, k) => ({ text: "Yes when the energy balance error is 2 % or less", inputs: [["error", "run.energyBalance", k]] });
 F["run.health"] = (c, k) => ({ text: "Bad when the solver did not finish, a part with heat was not meshed, or the energy balance error is above 2 %; Check when a goal is not converged, travels are below the minimum, Flow wrote other warnings or heat is left out; else OK",
   inputs: [["finished", "run.solverFinished", k], ["not meshed", "run.unresolved", k], ["error", "run.energyBalance", k], ["travels", "run.travels", k], ["heat asked", "run.heatRequested", k], ["heat applied", "run.heatApplied", k]] });
+F["flow.domainVol"] = () => ({ text: "V = X × Y × Z of the domain RunFlow sets: the PCB and its bodies, plus half the largest board size at the sides and below and one and a half above", inputs: [] });
+F["flow.minCell"] = c => (isNum(c.calc.flow?.minCellMm) ? {
+  text: "Smallest cell = (V / (28000 × 7^(level - 3)))^(1/3), divided by 2^refinement with a local mesh",
+  inputs: [["V", "flow.domainVol", ""], ["level", "flow.meshLevel", ""], ["local mesh", "flow.localMesh", ""], ["refinement", "flow.solidRefine", ""]],
+  fn: v => Math.cbrt(v.V / (28000 * 7 ** (v.level - 3))) / (v["local mesh"] ? 2 ** v.refinement : 1),
+  note: "An estimate calibrated on the RPi4 runs (level 3: 28 000 cells, level 5: 1.43 M). Flow also refines near small solids by itself, so a part a little thinner may still be meshed. The run health on tab 9 shows what happened." } : null);
+F["flow.thin"] = () => ({ text: "Parts with heat whose body is thinner than the estimated smallest cell", inputs: [["smallest cell", "flow.minCell", ""]] });
+F["run.meshCheckOk"] = (c, k) => ({ text: "OK when every chip moved less than the mesh check limit between the two levels", inputs: [["largest change", "run.meshCheckWorst", k], ["limit", "flow.meshCheckLimit", ""]] });
+F["run.meshCheckWorst"] = () => ({ text: "The largest change of a chip peak between the two runs of the mesh check (finer minus coarser)", inputs: [] });
+F["runp.meshDelta"] = () => ({ text: "Change = peak at the finer level - peak at the coarser level", inputs: [] });
 F["run.healthReasons"] = (c, k) => ({ text: "Each reason behind the health of the run, in plain words", inputs: [["health", "run.health", k]] });
 F["run.changes"] = () => ({ text: "Inputs of the run (a copy kept in the results file) compared with the inputs now: ambient, PCB, Pd per part, bodies, chip models, plates, surfaces, contacts, mesh", inputs: [] });
 F["runp.margin"] = (c, k) => { const ref = k.split("|")[1]; return isNum(runpCalc(c, k)?.marginC) ? { text: "Margin = Tj max - peak", inputs: [["Tj max", "part.tjMax", ref], ["peak", "runp.peak", k]], fn: v => v["Tj max"] - v.peak } : null; };

@@ -42,7 +42,19 @@
             "globalMm": { "$ref": "common.schema.json#/$defs/mmPos" },
             "fineMm": { "$ref": "common.schema.json#/$defs/mmPos" },
             "nodes": { "type": "integer", "minimum": 0 },
-            "elements": { "type": "integer", "minimum": 0 }
+            "elements": { "type": "integer", "minimum": 0 },
+            "level": { "type": "integer", "minimum": 1, "maximum": 7, "description": "Flow: global mesh level of the solve." },
+            "localMesh": { "type": "boolean", "description": "Flow: local mesh on the parts with heat, TIMs and spreader." }
+          }
+        },
+        "meshCheck": {
+          "type": "object",
+          "description": "Flow: this run is one of the two solves of a mesh check (same inputs, levels N and N+1).",
+          "required": ["pairWith"],
+          "additionalProperties": false,
+          "properties": {
+            "pairWith": { "type": "string", "description": "Name of the other run of the pair." },
+            "level": { "type": "integer", "minimum": 1, "maximum": 7 }
           }
         },
         "inputs": {

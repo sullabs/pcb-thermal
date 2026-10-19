@@ -45,6 +45,7 @@ Const MAT_COPPER As String = "Pre-Defined\Metals\Copper"
 Const nikVolumeSource As Long = 4
 Const nikSolidMaterial As Long = 8
 Const nikVolumeGoal As Long = 13
+Const nikLocalMesh As Long = 14
 ' nikFeatureTopolReferenceTypes_e
 Const nikFTR_topology As Long = 0
 ' nikGoalParameters_e, nikGoalValueCalculateTypes_e
@@ -60,6 +61,9 @@ Const nikInitialSolidTemperature As Long = 26
 Const nikEnvRadiativeTemperature As Long = 30
 Const nikHeatGenerationRate As Long = 21
 Const nikVolumeSourceType As Long = 43
+Const nikInitialMeshLevel As Long = 7
+Const nikSolidCellsRefinementLevel As Long = 68
+Const nikFluidSolidBoundaryCellsRefinementLevel As Long = 69
 ' nikVolumeSourceTypes_e
 Const nikVolumeSourceType_HeatGenerationRate As Long = 1
 ' nikParameterDependencyTypes_e
@@ -80,6 +84,11 @@ Dim unresD As Object                     ' RefDes (upper case) the solver could 
 Dim meshedQ As Double                    ' heat on the sources the solver meshed (W)
 Dim balPct As Double, hasBal As Boolean  ' energy balance error (%)
 Dim qConv As Double, qRad As Double      ' Serv Heatf and Radiation Energy Delta (W)
+' Flow settings from project.json simSetup.flow (Flow plan F2). fMeshLevel 0 = leave the project's mesh as it is.
+Dim fMeshLevel As Long, fLocalMesh As Boolean, fSolidRefine As Long, fMeshCheck As Boolean
+Dim curLevel As Long                     ' global mesh level of the solve being read
+Dim mcPair As String                     ' mesh check: name of the other run of the pair ("" = no mesh check)
+Dim domMm(1 To 6) As Double, hasDom As Boolean  ' computational domain (mm) set by SetDomain
 
 Sub main()
     Set swApp = Application.SldWorks
@@ -89,6 +98,7 @@ Sub main()
     Set solverD = PJ_Dict(): Set healthD = PJ_Dict(): Set goalUnit = PJ_Dict(): Set unresD = PJ_Dict()
     Set warnC = New Collection
     meshedQ = 0: balPct = 0: hasBal = False: qConv = 0: qRad = 0
+    fMeshLevel = 0: fLocalMesh = False: fSolidRefine = 3: fMeshCheck = False: curLevel = 0: mcPair = "": hasDom = False
 
     jsonMode = False: regTotal = 0
     Dim xl As Object, wb As Object, rf As Object, rfPath As String, cad As Object
@@ -197,6 +207,7 @@ Sub main()
         projName = PT_SafeFile(PJ_Prefix()) & "Flow"
         pcbLayers = CLng(PJ_Num(PJ_Project, "pcbStack/copperLayers", 4))
         sprK = PJ_Num(PJ_Project, "spreader/top/k", 167)
+        ReadFlowSettings
     Else
         projName = PT_SafeFile(PT_Prefix(wb)) & "Flow"
         pcbLayers = 4
@@ -211,6 +222,7 @@ Sub main()
         PT_Msg "RunFlow stopped. The Flow project " & projName & " could not be set up:" & vbCrLf & ListNotes(), vbExclamation, MACRO_NAME
         GoTo done
     End If
+    If jsonMode Then WarnThinParts heat
 
     ' ---------- heat sources ----------
     Dim en As Object, ft As Object, tk As Long, refU As String, q As Double, nSet As Long, applied As Double
@@ -288,6 +300,30 @@ Sub main()
         WriteReport runName, CStr(fda.Name), applied, False
         PT_Msg "Sources updated. Nothing solved, nothing written to " & IIf(jsonMode, "the results file.", "Excel.") & vbCrLf & "Report: " & ReportPath(runName), vbInformation, MACRO_NAME
         GoTo done
+    End If
+    ' mesh check (F2): solve at the level of tab 8, then one level finer, and store both runs as a pair
+    Dim passN As Long, nPass As Long, runBase As String
+    nPass = 1
+    runBase = runName
+    If ans = vbYes And fMeshCheck And fMeshLevel >= 1 And fMeshLevel < 7 Then nPass = 2
+    For passN = 1 To nPass
+    If passN = 2 Then
+        On Error GoTo apiFail
+        Set notes = New Collection: Set lines = New Collection
+        ResetRunState
+        hasConv = False: hasRad = False: unresQ = 0: nGoals = 0
+        hSprMax = False: hSprMin = False: hPcbMax = False: hPcbMin = False
+        If SetMeshLevel(fda, fMeshLevel + 1) = 0 Then
+            PT_Msg "Run " & runBase & " was written to " & rfPath & " (tab 9)." & vbCrLf & _
+                   "The mesh check stopped there: Flow did not accept mesh level " & (fMeshLevel + 1) & ".", vbExclamation, MACRO_NAME
+            GoTo done
+        End If
+        curLevel = fMeshLevel + 1
+        runName = runBase & "_L" & curLevel
+        mcPair = runBase
+        lines.Add "mesh check: second solve at level " & curLevel
+    ElseIf nPass = 2 Then
+        mcPair = runBase & "_L" & (fMeshLevel + 1)
     End If
     If ans = vbYes Then
         If Not IsTrue(fda.Solve2(True, True, True, False)) Then
@@ -413,13 +449,22 @@ Sub main()
             PT_Msg "RunFlow read the goals, but " & rfPath & " could not be written:" & vbCrLf & PT_LastErr, vbExclamation, MACRO_NAME
             GoTo done
         End If
+        If passN < nPass Then GoTo nextPass
+        If nPass = 2 Then
+            SetMeshLevel fda, fMeshLevel
+            md.Save
+            notes.Add "Mesh check: runs " & runBase & " (level " & fMeshLevel & ") and " & runName & " (level " & curLevel & _
+                      "). Tab 9 shows how much each chip moved. The project is back at level " & fMeshLevel & "."
+        End If
         PT_Msg "Written to:" & vbCrLf & rfPath & vbCrLf & "(run " & runName & ", tab 9 of the page)" & vbCrLf & vbCrLf & _
                "Flow project " & CStr(fda.Name) & ": " & nSet & " heat sources set (" & Format(applied, "0.00") & " W), " & _
                peak.Count & " chips with a peak goal, " & nGoals & " goals read." & vbCrLf & _
                "Report: " & ReportPath(runName) & vbCrLf & ListNotes(), vbInformation, MACRO_NAME
         GoTo done
     End If
-
+nextPass:
+    Next passN
+    If nPass = 2 Then GoTo done
     ' ---------- Excel ----------
     Dim hdr As Object, ws As Object, r As Long, c As Long, lastR As Long, sv As Variant, refK As Variant
     On Error GoTo xlFail
@@ -662,6 +707,30 @@ Function BuildFlowProject(ByVal asm As Object, ByVal fda As Object, ByVal heat A
     OwnGoal fda, "Spreader max", nikGoalMax, sprC
     OwnGoal fda, "Spreader min", nikGoalMin, sprC
 
+    ' mesh (F2): global level, and a local mesh on every part with heat, the TIMs and the spreader
+    If fMeshLevel >= 1 Then
+        If SetMeshLevel(fda, fMeshLevel) > 0 Then
+            lines.Add "global mesh level = " & fMeshLevel
+        Else
+            notes.Add "The global mesh level " & fMeshLevel & " was not accepted: the project keeps its own level."
+        End If
+        curLevel = fMeshLevel
+        Dim want As Object, empty0 As Collection
+        Set want = CreateObject("Scripting.Dictionary")
+        Set empty0 = New Collection
+        For Each k In heat.Keys
+            refU = CStr(k)
+            If heat(k) > 0 And refComps.Exists(refU) Then
+                want("LOCAL MESH " & refU) = 1
+                If fLocalMesh Then OwnLocalMesh fda, "Local mesh " & refU, refComps(refU) Else OwnLocalMesh fda, "Local mesh " & refU, empty0
+            End If
+        Next
+        want("LOCAL MESH TIM") = 1: want("LOCAL MESH SPREADER") = 1
+        If fLocalMesh Then OwnLocalMesh fda, "Local mesh TIM", timC Else OwnLocalMesh fda, "Local mesh TIM", empty0
+        If fLocalMesh Then OwnLocalMesh fda, "Local mesh Spreader", sprC Else OwnLocalMesh fda, "Local mesh Spreader", empty0
+        DropOldLocalMeshes fda, want
+    End If
+
     SetDomain asm, fda
     BuildFlowProject = True
 End Function
@@ -827,6 +896,8 @@ Sub SetDomain(ByVal asm As Object, ByVal fda As Object)
         End If
         Set par = ep.Next
     Loop
+    For pt = 1 To 6: domMm(pt) = lims(pt) * 1000: Next
+    hasDom = True
     If n = 6 Then
         lines.Add "computational domain (mm): X " & Format(lims(1) * 1000, "0") & " to " & Format(lims(2) * 1000, "0") & _
                   ", Y " & Format(lims(3) * 1000, "0") & " to " & Format(lims(4) * 1000, "0") & _
@@ -897,6 +968,157 @@ Function SetInitialTemperature(ByVal fda As Object, ByVal kelvin As Double) As L
     Loop
     SetInitialTemperature = n
 End Function
+
+' ---------------------------------------------------------------- mesh (Flow plan F2)
+' Flow settings typed on tab 8 (project.json simSetup.flow). Blank = the defaults of the page.
+Sub ReadFlowSettings()
+    fMeshLevel = CLng(PJ_Num(PJ_Project, "simSetup/flow/meshLevel", 4))
+    If fMeshLevel < 1 Then fMeshLevel = 1
+    If fMeshLevel > 7 Then fMeshLevel = 7
+    fLocalMesh = PJ_Bool(PJ_Project, "simSetup/flow/localMesh", True)
+    fSolidRefine = CLng(PJ_Num(PJ_Project, "simSetup/flow/solidRefine", 3))
+    If fSolidRefine < 0 Then fSolidRefine = 0
+    If fSolidRefine > 9 Then fSolidRefine = 9
+    fMeshCheck = PJ_Bool(PJ_Project, "simSetup/flow/meshCheck", False)
+End Sub
+
+' Global mesh level (1 to 7) of the project. Returns how many parameters took it.
+Function SetMeshLevel(ByVal fda As Object, ByVal lvl As Long) As Long
+    Dim gm As Object
+    On Error Resume Next
+    Set gm = fda.GlobalMeshSettings
+    On Error GoTo 0
+    If gm Is Nothing Then Exit Function
+    SetMeshLevel = SetParamLong(gm, nikInitialMeshLevel, lvl)
+End Function
+
+' Local mesh of the macro on comps: solid and solid/fluid boundary cells refined fSolidRefine times. Deleted when
+' comps is empty. A local mesh the user made (any other name) is left alone.
+Sub OwnLocalMesh(ByVal fda As Object, ByVal featName As String, ByVal comps As Collection)
+    Dim ft As Object, isNew As Boolean, n As Long
+    Set ft = OwnFeature(fda, nikLocalMesh, featName, comps, isNew)
+    If ft Is Nothing Then Exit Sub
+    n = SetParamLong(ft, nikSolidCellsRefinementLevel, fSolidRefine) + SetParamLong(ft, nikFluidSolidBoundaryCellsRefinementLevel, fSolidRefine)
+    If n < 2 Then notes.Add featName & ": " & n & " of 2 refinement levels were accepted."
+    FinishFeature fda, ft, featName, isNew
+End Sub
+
+' Deletes the macro's local meshes ("Local mesh <name>") that are not in want (upper-case names): their part has no
+' heat any more or is gone from the assembly.
+Sub DropOldLocalMeshes(ByVal fda As Object, ByVal want As Object)
+    Dim en As Object, ft As Object, vr As Variant, drop As Collection, it As Variant
+    Set drop = New Collection
+    Set en = fda.EnumFeatures
+    If en Is Nothing Then Exit Sub
+    en.Reset
+    Set ft = en.Next
+    Do While Not ft Is Nothing
+        vr = ft.Type
+        If IsNumeric(vr) Then
+            If CLng(vr) = nikLocalMesh And UCase(Left$(CStr(ft.Name), 11)) = "LOCAL MESH " And Not want.Exists(UCase(CStr(ft.Name))) Then drop.Add ft
+        End If
+        Set ft = en.Next
+    Loop
+    For Each it In drop
+        lines.Add "removed " & CStr(it.Name) & " (its part has no heat or is gone)"
+        it.Delete
+    Next
+End Sub
+
+' Sets every parameter of that type on a project object or feature: SetLongValue, else SetValue. Returns how many took it.
+Function SetParamLong(ByVal obj As Object, ByVal parType As Long, ByVal valL As Long) As Long
+    Dim pf As Object, ep As Object, par As Object, rc As Long
+    On Error Resume Next
+    Set pf = obj.GetInterface("IParametrizedFeature")
+    If pf Is Nothing Then Set pf = obj
+    Err.Clear
+    Set ep = pf.EnumParameters
+    If ep Is Nothing Then Exit Function
+    ep.Reset
+    Set par = ep.Next
+    Do While Not par Is Nothing
+        If CLng(par.Type) = parType Then
+            rc = -1
+            rc = CLng(par.SetLongValue(valL))
+            If rc <> 0 Then
+                Err.Clear
+                rc = CLng(par.SetValue(CDbl(valL)))
+            End If
+            If rc = 0 And Err.Number = 0 Then SetParamLong = SetParamLong + 1
+            Err.Clear
+        End If
+        Set par = ep.Next
+    Loop
+End Function
+
+' Same for a number in SI units (SetValue). Returns how many took it.
+Function SetParamNum(ByVal obj As Object, ByVal parType As Long, ByVal valD As Double) As Long
+    Dim pf As Object, ep As Object, par As Object, rc As Long
+    On Error Resume Next
+    Set pf = obj.GetInterface("IParametrizedFeature")
+    If pf Is Nothing Then Set pf = obj
+    Err.Clear
+    Set ep = pf.EnumParameters
+    If ep Is Nothing Then Exit Function
+    ep.Reset
+    Set par = ep.Next
+    Do While Not par Is Nothing
+        If CLng(par.Type) = parType Then
+            rc = -1
+            rc = CLng(par.SetValue(valD))
+            If rc = 0 And Err.Number = 0 Then SetParamNum = SetParamNum + 1
+            Err.Clear
+        End If
+        Set par = ep.Next
+    Loop
+End Function
+
+' Estimated smallest solid cell (mm) for the mesh settings: the mean cell of the domain at level L (calibrated on the
+' RPi4 runs: level 3 = 28 000 cells, each level about 7 times more), halved fSolidRefine times with a local mesh.
+' Same rule as flowMinCellMm in webapp/src/calc/flow.js. 0 when the domain is unknown.
+Function MinCellMm() As Double
+    Dim vol As Double, cells As Double
+    If Not hasDom Or curLevel < 1 Then Exit Function
+    vol = (domMm(2) - domMm(1)) * (domMm(4) - domMm(3)) * (domMm(6) - domMm(5))
+    cells = 28000# * 7# ^ (curLevel - 3)
+    MinCellMm = (vol / cells) ^ (1# / 3#)
+    If fLocalMesh Then MinCellMm = MinCellMm / 2# ^ fSolidRefine
+End Function
+
+' Notes the parts with heat that are thinner than the estimated smallest cell: they may come back not meshed.
+' A warning only; the run health (F1) shows what really happened.
+Sub WarnThinParts(ByVal heat As Object)
+    Dim bl As Object, it As Variant, refU As String, hMm As Double, cellMm As Double, thin As Object, k As Variant, s As String
+    cellMm = MinCellMm()
+    If cellMm <= 0 Then Exit Sub
+    Set thin = CreateObject("Scripting.Dictionary")
+    Set bl = PJ_Obj(PJ_Project, "forSolidWorks/bodies")
+    If bl Is Nothing Then Exit Sub
+    For Each it In bl
+        refU = UCase(PJ_Str(it, "refDes", ""))
+        hMm = PJ_Num(it, "box/h", 0)
+        If refU <> "" And hMm > 0 Then
+            If heat.Exists(refU) Then
+                If heat(refU) > 0 And hMm < cellMm Then
+                    If Not thin.Exists(refU) Then thin.Add refU, hMm
+                End If
+            End If
+        End If
+    Next
+    For Each k In thin.Keys
+        s = s & IIf(s = "", "", ", ") & CStr(k) & " (" & Format(thin(k), "0.0") & " mm)"
+    Next
+    lines.Add "estimated smallest solid cell: " & Format(cellMm, "0.00") & " mm"
+    If s <> "" Then notes.Add "Thinner than the estimated smallest cell (" & Format(cellMm, "0.00") & " mm): " & s & _
+        ". They may not be meshed. Turn on the local mesh or raise the mesh level on tab 8."
+End Sub
+
+' Clears what one solve read, before the second solve of a mesh check.
+Sub ResetRunState()
+    Set solverD = PJ_Dict(): Set healthD = PJ_Dict(): Set goalUnit = PJ_Dict(): Set unresD = PJ_Dict()
+    Set warnC = New Collection
+    meshedQ = 0: balPct = 0: hasBal = False: qConv = 0: qRad = 0
+End Sub
 
 ' ---------------------------------------------------------------- run health (Flow plan F1)
 ' Folder of the Flow project's results (CAD\<n>\). From the API first; else the newest <n>\<n>.info.json next to the
@@ -1166,6 +1388,14 @@ Function FlowRun(ByVal runName As String, ByVal projName As String, ByVal solved
     PJ_Put inp, "forSolidWorks", PJ_Obj(PJ_Project, "forSolidWorks")
     PJ_Put inp, "simSetup", PJ_Obj(PJ_Project, "simSetup")
     PJ_Put d, "inputs", inp
+    If curLevel >= 1 Then
+        Set mm = PJ_Dict(): PJ_Put mm, "level", curLevel: PJ_Put mm, "localMesh", fLocalMesh
+        PJ_Put d, "mesh", mm
+    End If
+    If mcPair <> "" Then
+        Set mm = PJ_Dict(): PJ_Put mm, "pairWith", mcPair: PJ_Put mm, "level", curLevel
+        PJ_Put d, "meshCheck", mm
+    End If
     PJ_Put d, "heatRequestedW", Round(regTotal, 4)
     If meshedQ > 0 Then PJ_Put d, "heatAppliedW", Round(meshedQ, 4)
     If hasBal Then PJ_Put d, "energyBalancePct", Round(balPct, 3)

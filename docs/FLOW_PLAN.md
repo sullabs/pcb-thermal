@@ -95,6 +95,8 @@ requested 6.67 W. Report shows `Serv Heatf = 2.817 W`, not -270.333.
 
 ## F2. Mesh control and mesh check
 
+**Status: done 2026-10-19 (schema simSetup.flow, local mesh features, global level, mesh check pair, tab 8 card, tab 9 comparison, tests). Change from the plan: a part thinner than the estimated smallest cell gives a warning on tab 8 and in the report, not a refusal, because the cell estimate (calibrated on two RPi4 runs) is too rough to block a run; F1 health shows what was really meshed. Live acceptance not run yet.**
+
 **Problem.** The automatic mesh leaves small parts and thin TIMs without solid cells, and nothing tells the user how
 much the answer depends on the mesh.
 
@@ -240,7 +242,7 @@ orientation or air speed does not match the h it assumes (the page's h values ar
 |---|---|---|---|---|
 | F0 spike | none | 1 session | every later phase needs the ids | done 2026-10-19 |
 | F1 health | S1 | medium | without it no Flow number can be trusted | done 2026-10-19 |
-| F2 mesh | S2, F1 | medium | removes the unresolved parts F1 will show | open |
+| F2 mesh | S2, F1 | medium | removes the unresolved parts F1 will show | done 2026-10-19 |
 | F3 convergence | S3, F1 | small | | open |
 | F4 Tj | S4 | medium | changes the number compared with Tj max | open |
 | F5 materials | S4 to S6 | medium | | open |

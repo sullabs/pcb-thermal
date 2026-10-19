@@ -8,6 +8,7 @@
 //   inputChanges(fsThen, fsNow, simThen, simNow) -> texts, one per input that differs ("Pd of U5 0.8 W, now 1.1 W")
 
 import { isNum } from "./util.js";
+import { flowSettings, meshCheckResult } from "./flow.js";
 
 // Energy balance above this (%) means the run is not converged or a heat load is missing.
 export const BALANCE_LIMIT_PCT = 2;
@@ -85,6 +86,7 @@ export function runResults(project, results, calc, fsNow) {
     if (worst) { o.worst = worst[0]; o.worstC = worst[1].peakC; }
     o.pass = !checked ? "not checked" : fails ? "FAIL" : "PASS";
     o.health = runHealth(run, project.simSetup?.flow);
+    o.meshCheck = meshCheckResult(run, results.runs, flowSettings(project).meshCheckLimitC);
     if (isNum(run.energyBalancePct)) o.balanceOk = Math.abs(run.energyBalancePct) <= BALANCE_LIMIT_PCT;
     o.changes = run.inputs?.forSolidWorks ? inputChanges(run.inputs.forSolidWorks, fsNow, run.inputs.simSetup, project.simSetup) : undefined;
     out[run.name] = o;

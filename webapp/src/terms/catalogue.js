@@ -438,6 +438,23 @@ def("run.cellsTotal", "Cells", "", "", "run", "Flow: cells in the mesh.");
 def("run.cellsSolid", "Solid cells", "", "", "run", "Flow: cells inside solids. A part with no solid cells is not in the solve.");
 def("run.cellsFluid", "Fluid cells", "", "", "run", "Flow: cells in the air.");
 def("run.unresolved", "Not meshed", "", "", "run", "Flow: parts the solver could not resolve (no solid cells). Their heat is left out and their goals are not stored.");
+def("run.meshLevel", "Mesh level", "", "", "run", "Flow: global mesh level of the solve (1 coarse to 7 fine).");
+def("run.localMesh", "Local mesh", "", "", "run", "Flow: whether the parts with heat, the TIMs and the spreader had a local mesh.");
+def("run.meshCheckPair", "Mesh check with", "", "", "run", "Flow: the other run of this mesh check, the same case one mesh level finer or coarser.");
+def("run.meshCheckOk", "Mesh check", "", "", "calculated", "OK when no chip moved by the mesh check limit or more between the two mesh levels: the answer no longer depends on the mesh.");
+def("run.meshCheckWorst", "Largest change", "", "C", "calculated", "Largest change of a chip peak between the two mesh levels.");
+def("runp.meshDelta", "Change with the finer mesh", "", "C", "calculated", "Peak at the finer mesh level minus the peak at the coarser one.");
+def("flow.meshLevel", "Mesh level", "", "", "input", "Flow's global mesh level, 1 (coarse, fast) to 7 (fine, slow). Blank = 4.",
+  "Each level gives about 7 times more cells. On the RPi4 (2026-10-19): level 3 gave 28 000 cells in 24 s, level 5 1.43 M cells in 11 min, and moved the chips by 2.8 C. Start at 4 with the local mesh on, then run a mesh check.", { range: [1, 7] });
+def("flow.localMesh", "Local mesh", "", "", "input", "Yes: a local mesh on every part with heat, the TIMs and the spreader. Blank = yes.",
+  "Small parts and thin TIMs get no solid cells from the global mesh alone, and a part without solid cells loses its heat source. A local mesh refines only those bodies: on the RPi4 it doubled the cells (28 000 to 60 000) and moved the chips by 0.6 C, far cheaper than a finer global level.");
+def("flow.solidRefine", "Local refinement", "", "", "input", "How many times the local mesh halves the cells in and around the solids. Blank = 3.", undefined, { range: [0, 9] });
+def("flow.meshCheck", "Mesh check", "", "", "input", "Yes: the next Run Flow solves twice, at the mesh level and one level finer, and tab 9 compares them. Blank = no.",
+  "A result you can trust does not change much when the mesh gets finer. The mesh check costs one extra solve, several times longer than the first. Turn it off again for normal runs.");
+def("flow.meshCheckLimit", "Mesh check limit", "", "C", "input", "A mesh check is OK when every chip moved less than this. Blank = 1 C.", undefined, { range: [0.1, 5] });
+def("flow.domainVol", "Domain volume", "V", "mm³", "calculated", "Volume of the air box RunFlow puts around the board.");
+def("flow.minCell", "Smallest cell (estimate)", "", "mm", "calculated", "Estimated size of the smallest solid cell with these mesh settings. A part with heat thinner than this may not be meshed.");
+def("flow.thin", "Parts thinner than a cell", "", "", "calculated", "Parts with heat whose body is thinner than the estimated smallest cell. Turn on the local mesh or raise the level.");
 def("run.changes", "Inputs changed since", "", "", "calculated", "Inputs that are different now from when this run was made. The run shows the old case until you run again.");
 def("runp.margin", "Margin, simulation", "", "C", "calculated", "Tj max minus the simulated peak.");
 def("runp.status", "Status, simulation", "", "", "calculated", "FAIL, Tight or OK from the simulated margin.");

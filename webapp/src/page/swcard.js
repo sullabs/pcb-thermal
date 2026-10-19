@@ -98,6 +98,9 @@ export function macroChecks(id, c) {
       const bad = calc.simChips.filter(x => x.check !== "OK");
       out.push(ok(!bad.length, bad.length ? `Chips not OK: ${bad.map(x => x.refDes).join(", ")} (they get the k of parts without heat)` : "Every chip model OK", 8, true));
     } else {
+      const thin = calc.flow?.thin || [];
+      out.push(ok(!thin.length, thin.length ? `May not be meshed (thinner than the estimated smallest cell): ${thin.map(x => x.refDes).join(", ")}. Turn on the local mesh or raise the mesh level.` : "Every part with heat is thicker than the estimated smallest cell", 8, true));
+      if (calc.flow?.settings.meshCheck) out.push(ok(true, `Mesh check is on: Yes solves twice (level ${calc.flow.settings.meshLevel} and ${calc.flow.settings.meshLevel + 1}).`, 8, true));
       out.push(ok(true, "Flow Simulation is turned on in SolidWorks (Tools > Add-Ins) and PCBThermal_Flow.fwp sits next to PCBThermal.swp. Materials are Flow's own (PCB 4/8/12 layers, typical plastic package, GR25A TIM), not the k values on this page.", undefined, true));
     }
   } else if (id === "ReadResults") {
