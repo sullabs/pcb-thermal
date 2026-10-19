@@ -63,12 +63,14 @@ Sub main()
         End If
     Next fil
 
+    Dim stampBefore As Variant
+    stampBefore = FileStamp(fso, ProjectFile(proj))
     RunCommand vbeO, proj, ID_COMPILE
     RunCommand vbeO, proj, ID_SAVE
 
     msgS = "Updated " & nDone & " modules in " & ProjectFile(proj) & " from " & srcDir & ":" & vbCrLf & " " & Trim$(doneS)
     If nFail > 0 Then msgS = msgS & vbCrLf & vbCrLf & nFail & " failed:" & failS
-    If IsSaved(proj) Then
+    If IsSaved(proj) Or FileStamp(fso, ProjectFile(proj)) <> stampBefore Then
         msgS = msgS & vbCrLf & vbCrLf & "Compiled and saved."
     Else
         msgS = msgS & vbCrLf & vbCrLf & "Not saved yet: open the VBA editor (Alt+F11), Debug > Compile VBAProject, then Ctrl+S."
@@ -112,6 +114,15 @@ Private Function ProjectFolder(ByVal fso As Object, ByVal proj As Object) As Str
     Dim fileS As String
     fileS = ProjectFile(proj)
     If Len(fileS) > 0 Then ProjectFolder = fso.GetParentFolderName(fileS)
+End Function
+
+'' Last write time of the .swp ("" when it cannot be read). proj.Saved can stay False after a save that worked,
+' when SolidWorks runs the macro (RunMacro or a toolbar button), so a new time on the file counts as saved too.
+Private Function FileStamp(ByVal fso As Object, ByVal pathS As String) As Variant
+    FileStamp = ""
+    On Error Resume Next
+    If Len(pathS) > 0 Then FileStamp = CStr(fso.GetFile(pathS).DateLastModified)
+    Err.Clear
 End Function
 
 Private Function IsSaved(ByVal proj As Object) As Boolean

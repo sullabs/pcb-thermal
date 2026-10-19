@@ -251,7 +251,7 @@ Sub RunProject()
     Dim s As String, k As Long
     s = "Written to:" & vbCrLf & cadPath & vbCrLf & "(the page reloads it on its own: tab 7 Spreader and tab 10 Changes)" & vbCrLf & vbCrLf & _
         "Read from " & asmPath & vbCrLf & vbCrLf & _
-        bodiesOut.Count & " bodies differ from the page. Take their SolidWorks sizes on tab 10, or run Build Board to put the page's sizes back." & vbCrLf & _
+        bodiesOut.Count & " bodies differ from the page." & IIf(bodiesOut.Count > 0, " Take their SolidWorks sizes on tab 10, or run Build Board to put the page's sizes back.", "") & vbCrLf & _
         nDiffers & " spreader values differ from tab 7." & vbCrLf & _
         nFailed & " checks failed" & IIf(nRepeat > 0, " (" & nRepeat & " already waiting for a tick, not added again)", "") & "." & vbCrLf
     If nLog > 0 Then s = s & nLog & " change records written. Tick them on tab 10 of the page." & vbCrLf Else s = s & "Nothing to report." & vbCrLf

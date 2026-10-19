@@ -170,7 +170,7 @@ Sub main()
     On Error Resume Next
     pn = res.GetPlotNames
     If Not IsEmpty(pn) Then
-        res.ActivatePlot CStr(pn(0))
+        res.ActivatePlot ResultPlotName(pn)
         asm.ViewZoomtofit2
         If Not asm.Extension.SaveAs(plotPath, 0, PT_swSaveSilent, Nothing, errs, warns) Then plotPath = ""
     Else
@@ -368,4 +368,19 @@ Function SummaryText(ByVal runName As String, ByVal nRead As Long, ByVal bothPla
         s = s & "- " & q & vbCrLf
     Next
     SummaryText = s
+End Function
+
+' The temperature plot to save as the run picture. GetPlotNames also lists the mesh quality plot (Quality1),
+' sometimes first: take a Thermal plot, else the first plot that is not a mesh quality plot.
+Private Function ResultPlotName(ByVal names As Variant) As String
+    Dim i As Long, nm As String
+    For i = LBound(names) To UBound(names)
+        nm = CStr(names(i))
+        If LCase(Left(nm, 7)) = "thermal" Then ResultPlotName = nm: Exit Function
+    Next
+    For i = LBound(names) To UBound(names)
+        nm = CStr(names(i))
+        If LCase(Left(nm, 7)) <> "quality" Then ResultPlotName = nm: Exit Function
+    Next
+    ResultPlotName = CStr(names(LBound(names)))
 End Function
