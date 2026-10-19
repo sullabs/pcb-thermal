@@ -271,7 +271,7 @@ function SimView({ c }) {
 // Flow mesh settings (Flow plan F2): global level, local mesh, mesh check, and the parts that may not be meshed.
 function FlowMeshCard({ c, f, setSim, locked }) {
   const fc = c.calc.flow;
-  return html`<${Card} title="Flow mesh" cls=${fc?.thin?.length ? "attention" : ""}>
+  return html`<${Card} title="Flow mesh and convergence" cls=${fc?.thin?.length ? "attention" : ""}>
     <div class="form">
       <label><${L} t="flow.meshLevel" /> <${NumField} term="flow.meshLevel" value=${f.meshLevel} unit="" width="4em" placeholder="4" label="Mesh level" rule=${{ integer: true, min: 1, max: 7 }} disabled=${locked} onCommit=${v => setSim(["flow", "meshLevel"], "Mesh level", v, false)} /></label>
       <label><${L} t="flow.localMesh" /> <span class="field"><${Check} term="flow.localMesh" value=${f.localMesh !== false} label="Local mesh" disabled=${locked} onCommit=${v => setSim(["flow", "localMesh"], "Local mesh", v)} /></span></label>
@@ -279,10 +279,12 @@ function FlowMeshCard({ c, f, setSim, locked }) {
       <label><${L} t="flow.meshCheck" /> <span class="field"><${Check} term="flow.meshCheck" value=${!!f.meshCheck} label="Mesh check" disabled=${locked} onCommit=${v => setSim(["flow", "meshCheck"], "Mesh check", v)} /></span></label>
       <label><${L} t="flow.meshCheckLimit" /> <${NumField} term="flow.meshCheckLimit" value=${f.meshCheckLimitC} unit="C" width="4em" placeholder="1" label="Mesh check limit" rule=${{ minEx: 0 }} disabled=${locked} onCommit=${v => setSim(["flow", "meshCheckLimitC"], "Mesh check limit", v, false)} /></label>
       <label><${L} t="flow.minCell" /> <span><${V} t="flow.minCell" d=${2} u /></span></label>
+      <label><${L} t="flow.minTravels" /> <${NumField} term="flow.minTravels" value=${f.minTravels} unit="" width="4em" placeholder="2" label="Minimum travels" rule=${{ min: 1, max: 20 }} disabled=${locked} onCommit=${v => setSim(["flow", "minTravels"], "Minimum travels", v, false)} /></label>
+      <label><${L} t="flow.goalCriteria" /> <${NumField} term="flow.goalCriteria" value=${f.goalCriteriaC} unit="C" width="4em" placeholder="0.2" label="Goal criterion" rule=${{ minEx: 0 }} disabled=${locked} onCommit=${v => setSim(["flow", "goalCriteriaC"], "Goal criterion", v, false)} /></label>
     </div>
     ${fc?.thin?.length > 0 ? html`<p class="warn">${marked(`May not be meshed: ${fc.thin.map(x => `${x.refDes} (${x.hMm} mm)`).join(", ")}. They are thinner than the estimated smallest cell. Turn on the local mesh or raise the level; the run health on tab 9 shows what really happened.`)}</p>`
       : html`<p class="hint">Every part with heat is thicker than the estimated smallest cell.</p>`}
-    ${c.learn && html`<p class="hint">More cells cost time: each level gives about 7 times more. A local mesh refines only the parts with heat, TIMs and spreader, which is what decides the chip temperatures. Run a mesh check once per design: if the chips move less than the limit at the next level, the mesh is fine enough.</p>`}
+    ${c.learn && html`<p class="hint">More cells cost time: each level gives about 7 times more. A local mesh refines only the parts with heat, TIMs and spreader, which is what decides the chip temperatures. Run a mesh check once per design: if the chips move less than the limit at the next level, the mesh is fine enough. The solve stops when the goals have converged and the minimum travels are done; more travels take longer but let the air settle.</p>`}
   <//>`;
 }
 
@@ -320,7 +322,7 @@ function ResultsView({ c }) {
       ${rc.balanceOk === false && run.studyType !== "Flow" && html`<p class="warn"><b>Energy balance error above ${BALANCE_LIMIT_PCT} %:</b> the run is not converged, or a heat load is missing. Do not trust its temperatures yet: check the SetupSim report, refine the mesh and run again.</p>`}
       <div class=${`cols ${rc.health?.level === "bad" ? "dim" : ""}`}>
         <div><${Facts} ctx=${c} rows=${[[, "run.pass", run.name], [, "run.worst", run.name], [, "run.worstC", run.name, 1], [, "run.fails", run.name], [, "run.date", run.name, undefined, date(run.date)], [, "run.studyType", run.name], [, "run.study", run.name], [, "run.status", run.name]]} /></div>
-        <div><${Facts} ctx=${c} rows=${[[, "run.energyBalance", run.name, 2], [, "run.balanceOk", run.name], [, "run.pcbMin", run.name, 1], [, "run.pcbMax", run.name, 1], [, "run.spreaderMin", run.name, 1], [, "run.spreaderMax", run.name, 1], [, "run.meshGlobal", run.name], [, "run.meshFine", run.name], [, "run.nodes", run.name], [, "run.elements", run.name], [, "run.meshLevel", run.name], [, "run.localMesh", run.name], [, "run.heatRequested", run.name, 2], [, "run.heatApplied", run.name, 2], [, "run.solverFinished", run.name], [, "run.travels", run.name, 2], [, "run.iterations", run.name], [, "run.cellsTotal", run.name], [, "run.cellsSolid", run.name], [, "run.cellsFluid", run.name]]} /></div>
+        <div><${Facts} ctx=${c} rows=${[[, "run.energyBalance", run.name, 2], [, "run.balanceOk", run.name], [, "run.pcbMin", run.name, 1], [, "run.pcbMax", run.name, 1], [, "run.spreaderMin", run.name, 1], [, "run.spreaderMax", run.name, 1], [, "run.meshGlobal", run.name], [, "run.meshFine", run.name], [, "run.nodes", run.name], [, "run.elements", run.name], [, "run.meshLevel", run.name], [, "run.localMesh", run.name], [, "run.heatRequested", run.name, 2], [, "run.heatApplied", run.name, 2], [, "run.solverFinished", run.name], [, "run.travels", run.name, 2], [, "run.worstDelta", run.name, 2], [, "run.goalsLoose", run.name], [, "run.iterations", run.name], [, "run.cellsTotal", run.name], [, "run.cellsSolid", run.name], [, "run.cellsFluid", run.name]]} /></div>
       </div>
       ${c.learn && html`<${RunReading} c=${c} run=${run} rc=${rc} />`}
       ${refs.length > 0 && html`<${Scroll}><table class="grid"><thead><tr><th><${L} t="part.refDes" /></th><th class="num"><${L} t="part.tjMax" /></th><th class="num"><${L} t="runp.peak" /></th><th class="num"><${L} t="runp.avg" /></th>

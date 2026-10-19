@@ -452,6 +452,11 @@ def("flow.solidRefine", "Local refinement", "", "", "input", "How many times the
 def("flow.meshCheck", "Mesh check", "", "", "input", "Yes: the next Run Flow solves twice, at the mesh level and one level finer, and tab 9 compares them. Blank = no.",
   "A result you can trust does not change much when the mesh gets finer. The mesh check costs one extra solve, several times longer than the first. Turn it off again for normal runs.");
 def("flow.meshCheckLimit", "Mesh check limit", "", "C", "input", "A mesh check is OK when every chip moved less than this. Blank = 1 C.", undefined, { range: [0.1, 5] });
+def("flow.minTravels", "Minimum travels", "", "", "input", "The solve stops only after this many travels, and only when the goals have converged. Blank = 2.",
+  "Flow's own criteria are often met after about one travel; on the RPi4 the chip goals then still had criteria of about 2.3 K. Two travels let the air settle so runs can be compared within 1 to 2 C. The API cannot set the criterion of a goal, so a goal still moving more than the goal criterion is flagged on tab 9.", { range: [1, 10] });
+def("flow.goalCriteria", "Goal criterion", "", "C", "input", "A goal whose last change is above this is shown as not converged on tab 9. Blank = 0.2 C.", undefined, { range: [0.05, 2] });
+def("run.goalsLoose", "Goals still moving", "", "", "calculated", "Temperature goals whose last change is above the goal criterion of tab 8.");
+def("run.worstDelta", "Largest goal delta", "", "C", "calculated", "Largest change of a temperature goal at the end of the solve.");
 def("flow.domainVol", "Domain volume", "V", "mm³", "calculated", "Volume of the air box RunFlow puts around the board.");
 def("flow.minCell", "Smallest cell (estimate)", "", "mm", "calculated", "Estimated size of the smallest solid cell with these mesh settings. A part with heat thinner than this may not be meshed.");
 def("flow.thin", "Parts thinner than a cell", "", "", "calculated", "Parts with heat whose body is thinner than the estimated smallest cell. Turn on the local mesh or raise the level.");

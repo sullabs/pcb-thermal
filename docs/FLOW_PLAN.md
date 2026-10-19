@@ -125,6 +125,8 @@ moves every chip by less than 1 C, or the page says which chip did not.
 
 ## F3. Convergence settings
 
+**Status: done 2026-10-19 (minTravels, goalCriteriaC; finish conditions set as all satisfied + goals convergence + manual travels; goals above the criterion flagged in the report and on tab 9). The API cannot set a goal's criterion (F0, S3). Live acceptance not run yet.**
+
 **Problem.** Goals stop at about 2.3 K criteria after 1 travel.
 
 **project.json** (`simSetup.flow`): `minTravels` (default 2), `goalCriteriaC` (default 0.2).
@@ -243,7 +245,7 @@ orientation or air speed does not match the h it assumes (the page's h values ar
 | F0 spike | none | 1 session | every later phase needs the ids | done 2026-10-19 |
 | F1 health | S1 | medium | without it no Flow number can be trusted | done 2026-10-19 |
 | F2 mesh | S2, F1 | medium | removes the unresolved parts F1 will show | done 2026-10-19 |
-| F3 convergence | S3, F1 | small | | open |
+| F3 convergence | S3, F1 | small | | done 2026-10-19 |
 | F4 Tj | S4 | medium | changes the number compared with Tj max | open |
 | F5 materials | S4 to S6 | medium | | open |
 | F8 fixes | none | small | can go any time, good first warm-up | open |

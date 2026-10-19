@@ -8,7 +8,7 @@
 
 import { isNum } from "./util.js";
 
-export const FLOW_DEFAULTS = { meshLevel: 4, localMesh: true, solidRefine: 3, meshCheck: false, meshCheckLimitC: 1 };
+export const FLOW_DEFAULTS = { meshLevel: 4, localMesh: true, solidRefine: 3, meshCheck: false, meshCheckLimitC: 1, minTravels: 2, goalCriteriaC: 0.2 };
 
 export function flowSettings(project) {
   const f = project.simSetup?.flow || {};

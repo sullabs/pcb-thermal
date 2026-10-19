@@ -4,6 +4,7 @@
 //     shows the badge and greys out PASS/FAIL of a bad run, the report and the tab state name it.
 // F2. Mesh: simSetup.flow is valid, the smallest cell estimate matches RunFlow's rule and flags thin parts, tab 8
 //     shows the Flow mesh card, a mesh check pair is compared per chip on tab 9.
+// F3. Convergence: minTravels and goalCriteriaC are valid, default to 2 and 0.2, and drive the health reasons.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +14,7 @@ import { makeValidator } from "./validate.mjs";
 import { calcProject } from "../src/calc/index.js";
 import { valueOf } from "../src/calc/formulas.js";
 import { runHealth } from "../src/calc/runs.js";
+import { flowSettings } from "../src/calc/flow.js";
 import { tabStates, blockingProblems } from "../src/page/tabs.js";
 import { openIssues } from "../src/page/report.js";
 import { Explain } from "../src/page/explain.js";
@@ -103,7 +105,7 @@ const flowRun = (over = {}) => ({
   const thin = c2.calc.flow.thin.map(x => x.refDes);
   check(thin.includes("L1") && thin.includes("L2") && thin.includes("U3"), "level 2 without local mesh: L1, L2 and U3 may not be meshed", c2.calc.flow);
   const t8 = show("SimTab", c2);
-  check(t8.includes("Flow mesh") && t8.includes('data-term="flow.meshLevel"') && t8.includes("May not be meshed: ") && t8.includes("L1 (1.2 mm)"), "tab 8 shows the Flow mesh card and the thin parts");
+  check(t8.includes("Flow mesh and convergence") && t8.includes('data-term="flow.meshLevel"') && t8.includes("May not be meshed: ") && t8.includes("L1 (1.2 mm)"), "tab 8 shows the Flow mesh card and the thin parts");
   check(!show("SimTab", ctxOf({ ...P, simSetup: { ...P.simSetup, studyType: "Thermal" } })).includes("Flow mesh"), "no Flow mesh card for a Thermal study");
 
   const a = flowRun({ name: "FL_20261019_2200", unresolved: [], warnings: [], heatAppliedW: 6.67, energyBalancePct: 0.1, mesh: { level: 4, localMesh: true }, meshCheck: { pairWith: "FL_20261019_2200_L5", level: 4 }, parts: { U1: { peakC: 91.6 }, U3: { peakC: 124.5 } } });
@@ -119,6 +121,27 @@ const flowRun = (over = {}) => ({
   check(t9.includes("Mesh check: level 4") && t9.includes('data-term="runp.meshDelta"') && t9.includes("Moved by the limit or more: U3"), "tab 9 shows the mesh check per chip");
   const okc = ctxOf(withFlow({ meshCheckLimitC: 2 }), C, res);
   check(okc.calc.runs[b.name].meshCheck.ok === true, "with a 2 C limit the same pair is OK");
+}
+
+// ---------- F3 ----------
+{
+  const withFlow = f => ({ ...P, simSetup: { ...P.simSetup, studyType: "Flow", flow: f } });
+  valid("project.schema.json", withFlow({ minTravels: 2, goalCriteriaC: 0.2 }), "project.json with minTravels and goalCriteriaC");
+  check(!ajv.validate("project.schema.json", withFlow({ minTravels: 0 })), "0 travels is refused by the schema");
+  const s = flowSettings(withFlow({}));
+  check(s.minTravels === 2 && s.goalCriteriaC === 0.2, "defaults: 2 travels, 0.2 C", s);
+  const base = { unresolved: [], warnings: [], heatAppliedW: 6.67, energyBalancePct: 0.1 };
+  const one = runHealth(flowRun({ ...base, solver: { finished: true, travels: 1.006 }, goalsHealth: { "U2 max": { progressPct: 100, deltaC: 0.36, criteriaC: 2.2 } } }), s);
+  check(one.level === "check" && one.reasons.some(r => /only 1.01 travels, fewer than 2/.test(r)) && one.reasons.some(r => /moving more than 0.2 C: U2 max/.test(r)), "1 travel and a goal moving 0.36 C: check with both reasons", one);
+  const two = runHealth(flowRun({ ...base, solver: { finished: true, travels: 2.04 }, goalsHealth: { "U2 max": { progressPct: 100, deltaC: 0.12, criteriaC: 2.2 } } }), s);
+  check(two.level === "ok", "2 travels and every goal within 0.2 C: ok", two);
+  const own = runHealth(flowRun({ ...base, solver: { finished: true, travels: 2.04 }, inputs: { ...flowRun().inputs, simSetup: { ...P.simSetup, flow: { minTravels: 3 } } } }), s);
+  check(own.level === "check" && /fewer than 3/.test(own.reasons[0]), "a run is judged with the settings it was made with", own);
+  const r = flowRun({ name: "FL_20261019_2300", ...base, solver: { finished: true, travels: 2.04 }, goalsHealth: { "U2 max": { progressPct: 100, deltaC: 0.36, criteriaC: 2.2 }, "U1 max": { progressPct: 100, deltaC: 0.1, criteriaC: 2 } } });
+  const c = ctxOf(withFlow({}), C, { ...R, runs: [...R.runs, r] });
+  check(c.value("run.goalsLoose", r.name) === "U2 max" && Math.abs(c.value("run.worstDelta", r.name) - 0.36) < 1e-9, "goals still moving and the largest delta on the page");
+  const t8 = show("SimTab", c);
+  check(t8.includes('data-term="flow.minTravels"') && t8.includes('data-term="flow.goalCriteria"'), "tab 8 has the convergence inputs");
 }
 
 console.log(`Flow plan: ${n - fails} of ${n} checks passed.`);

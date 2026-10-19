@@ -85,7 +85,7 @@ export function runResults(project, results, calc, fsNow) {
     const o = { parts, fails, checked, withPlate };
     if (worst) { o.worst = worst[0]; o.worstC = worst[1].peakC; }
     o.pass = !checked ? "not checked" : fails ? "FAIL" : "PASS";
-    o.health = runHealth(run, project.simSetup?.flow);
+    o.health = runHealth(run, flowSettings(project));
     o.meshCheck = meshCheckResult(run, results.runs, flowSettings(project).meshCheckLimitC);
     if (isNum(run.energyBalancePct)) o.balanceOk = Math.abs(run.energyBalancePct) <= BALANCE_LIMIT_PCT;
     o.changes = run.inputs?.forSolidWorks ? inputChanges(run.inputs.forSolidWorks, fsNow, run.inputs.simSetup, project.simSetup) : undefined;

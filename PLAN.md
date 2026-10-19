@@ -25,7 +25,7 @@ Reference board: Raspberry Pi 4 Model B (`Raspberry Pi 4 Model B.STEP`).
 | M6 `SetupSim` + `ReadResults` (Simulation thermal) | written, not yet run |
 | M7 Flow Simulation spike + `RunFlow` | spike done (`docs/flow_api_notes.md`), `RunFlow.bas` written, run and fixed 2026-10-01 (API Boolean quirk, 0 K goals); builds the whole Flow project from `PCBThermal_Flow.fwp` 2026-10-19 |
 | M8 two-resistor chip model | written in SetupSim, not yet run (docs/HOWTO_M8.md) |
-| Flow plan F0 to F8 (trustworthy Flow runs) | `docs/FLOW_PLAN.md`; done 2026-10-19: F0, F1, F2 (live RPi4 acceptance runs still open) |
+| Flow plan F0 to F8 (trustworthy Flow runs) | `docs/FLOW_PLAN.md`; done 2026-10-19: F0, F1, F2, F3 (live RPi4 acceptance runs still open) |
 | Test of M1 to M6 in one session | `docs/TEST_PLAN.md` |
 | Register rebuilt with Vin/Iin/Vout/Iout/Pin/Pout/Pd, Ta, Tj, Rja/Rjc/Rjb; L and W moved to CAD geometry | done 2026-10-01, RPi4 refilled: same results |
 | ImportStep: every solid body, rotation of the board and of each body, Include = No by default, tables grow on demand (decisions 29 to 31) | compiled and run 2026-10-14 on a fresh copy (`example/RaspberryPi4/RPi4_fresh.xlsx`): 108 bodies, re-import "none", BuildBoard "Nothing changed", 0 overlaps, parts coloured. Three bugs fixed (see section 9). Rotation checks R2, R4, R6 not done |

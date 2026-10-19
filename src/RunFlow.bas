@@ -86,6 +86,7 @@ Dim balPct As Double, hasBal As Boolean  ' energy balance error (%)
 Dim qConv As Double, qRad As Double      ' Serv Heatf and Radiation Energy Delta (W)
 ' Flow settings from project.json simSetup.flow (Flow plan F2). fMeshLevel 0 = leave the project's mesh as it is.
 Dim fMeshLevel As Long, fLocalMesh As Boolean, fSolidRefine As Long, fMeshCheck As Boolean
+Dim fMinTravels As Double, fGoalCritC As Double   ' convergence (F3)
 Dim curLevel As Long                     ' global mesh level of the solve being read
 Dim mcPair As String                     ' mesh check: name of the other run of the pair ("" = no mesh check)
 Dim domMm(1 To 6) As Double, hasDom As Boolean  ' computational domain (mm) set by SetDomain
@@ -99,6 +100,7 @@ Sub main()
     Set warnC = New Collection
     meshedQ = 0: balPct = 0: hasBal = False: qConv = 0: qRad = 0
     fMeshLevel = 0: fLocalMesh = False: fSolidRefine = 3: fMeshCheck = False: curLevel = 0: mcPair = "": hasDom = False
+    fMinTravels = 0: fGoalCritC = 0
 
     jsonMode = False: regTotal = 0
     Dim xl As Object, wb As Object, rf As Object, rfPath As String, cad As Object
@@ -426,6 +428,14 @@ Sub main()
     Else
         notes.Add "Energy balance not worked out: Serv Heatf or Radiation Energy Delta is missing from the goals."
     End If
+    If fGoalCritC > 0 Then
+        Dim loose As String, hk2 As Variant
+        loose = ""
+        For Each hk2 In healthD.Keys
+            If PJ_Num(healthD(hk2), "deltaC", 0) > fGoalCritC Then loose = loose & IIf(loose = "", "", ", ") & CStr(hk2) & " (" & Format(PJ_Num(healthD(hk2), "deltaC", 0), "0.00") & ")"
+        Next
+        If loose <> "" Then notes.Add "Goals still moving more than " & fGoalCritC & " C: " & loose & ". Raise the minimum travels on tab 8."
+    End If
     If unresD.Count > 0 Then notes.Add "Not meshed (no solid cells): " & JoinKeys(unresD) & ". " & Format(unresQ, "0.00") & " W left out, their goals are not stored."
     If peak.Count = 0 And avg.Count = 0 Then
         PT_Msg "RunFlow stopped. No goal name contains a RefDes. Nothing was written." & vbCrLf & _
@@ -730,6 +740,7 @@ Function BuildFlowProject(ByVal asm As Object, ByVal fda As Object, ByVal heat A
         If fLocalMesh Then OwnLocalMesh fda, "Local mesh Spreader", sprC Else OwnLocalMesh fda, "Local mesh Spreader", empty0
         DropOldLocalMeshes fda, want
     End If
+    If fMinTravels >= 1 Then SetConvergence fda
 
     SetDomain asm, fda
     BuildFlowProject = True
@@ -980,6 +991,39 @@ Sub ReadFlowSettings()
     If fSolidRefine < 0 Then fSolidRefine = 0
     If fSolidRefine > 9 Then fSolidRefine = 9
     fMeshCheck = PJ_Bool(PJ_Project, "simSetup/flow/meshCheck", False)
+    fMinTravels = PJ_Num(PJ_Project, "simSetup/flow/minTravels", 2)
+    If fMinTravels < 1 Then fMinTravels = 1
+    fGoalCritC = PJ_Num(PJ_Project, "simSetup/flow/goalCriteriaC", 0.2)
+End Sub
+
+' Finish conditions (F3). The API has no "minimum travels" and no criterion per goal, so: stop only when all
+' conditions hold, the goals have converged (Flow's own criteria) and at least fMinTravels travels are done.
+' Goals still moving more than fGoalCritC are flagged after the solve (run health on tab 9).
+Sub SetConvergence(ByVal fda As Object)
+    Dim cco As Object, errTxt As String
+    On Error Resume Next
+    Set cco = fda.GetCalculationControlOptions
+    If cco Is Nothing Then
+        notes.Add "Finish conditions could not be read: the solve uses the project's own."
+        Exit Sub
+    End If
+    Err.Clear
+    cco.FinishConditionsRule = 1
+    cco.UseGoalsConvergence = True
+    cco.UseMaximumTravels = True
+    cco.UseManualMaximumTravels = True
+    cco.MaximumTravels = fMinTravels
+    cco.UseMaximumIterations = False
+    cco.UseMaximumCPUTime = False
+    cco.UseMaximumPhysicalTime = False
+    errTxt = Err.Description
+    Err.Clear
+    On Error GoTo 0
+    If errTxt <> "" Then
+        notes.Add "Finish conditions were not all set (" & errTxt & "): check Calculation Control Options in the project."
+    Else
+        lines.Add "finish conditions: all satisfied, goals converged and " & fMinTravels & " travels"
+    End If
 End Sub
 
 ' Global mesh level (1 to 7) of the project. Returns how many parameters took it.

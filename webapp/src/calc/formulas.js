@@ -405,6 +405,10 @@ export const VALUES = {
   "flow.solidRefine": c => c.calc.flow?.settings.solidRefine,
   "flow.meshCheck": c => c.calc.flow?.settings.meshCheck,
   "flow.meshCheckLimit": c => c.calc.flow?.settings.meshCheckLimitC,
+  "flow.minTravels": c => c.calc.flow?.settings.minTravels,
+  "flow.goalCriteria": c => c.calc.flow?.settings.goalCriteriaC,
+  "run.goalsLoose": (c, k) => { const r = runOf(c, k), lim = c.calc.flow?.settings.goalCriteriaC; if (!r?.goalsHealth || !isNum(lim)) return undefined; const l = Object.entries(r.goalsHealth).filter(([, g]) => g.deltaC > lim).map(([n]) => n); return l.length ? l.join(", ") : "none"; },
+  "run.worstDelta": (c, k) => { const g = Object.values(runOf(c, k)?.goalsHealth || {}).map(x => x.deltaC).filter(isNum); return g.length ? Math.max(...g) : undefined; },
   "flow.domainVol": c => { const d = c.calc.flow?.domain; return d ? (d.x[1] - d.x[0]) * (d.y[1] - d.y[0]) * (d.z[1] - d.z[0]) : undefined; },
   "flow.minCell": c => c.calc.flow?.minCellMm,
   "flow.thin": c => { const t = c.calc.flow?.thin; return t ? (t.length ? t.map(x => `${x.refDes} (${x.hMm} mm)`).join(", ") : "none") : undefined; },
@@ -762,6 +766,8 @@ F["flow.thin"] = () => ({ text: "Parts with heat whose body is thinner than the 
 F["run.meshCheckOk"] = (c, k) => ({ text: "OK when every chip moved less than the mesh check limit between the two levels", inputs: [["largest change", "run.meshCheckWorst", k], ["limit", "flow.meshCheckLimit", ""]] });
 F["run.meshCheckWorst"] = () => ({ text: "The largest change of a chip peak between the two runs of the mesh check (finer minus coarser)", inputs: [] });
 F["runp.meshDelta"] = () => ({ text: "Change = peak at the finer level - peak at the coarser level", inputs: [] });
+F["run.goalsLoose"] = (c, k) => ({ text: "Goals whose last change (delta) is above the goal criterion of tab 8", inputs: [["criterion", "flow.goalCriteria", ""], ["largest delta", "run.worstDelta", k]] });
+F["run.worstDelta"] = () => ({ text: "Largest delta of the temperature goals at the end of the solve (from the Flow info file)", inputs: [] });
 F["run.healthReasons"] = (c, k) => ({ text: "Each reason behind the health of the run, in plain words", inputs: [["health", "run.health", k]] });
 F["run.changes"] = () => ({ text: "Inputs of the run (a copy kept in the results file) compared with the inputs now: ambient, PCB, Pd per part, bodies, chip models, plates, surfaces, contacts, mesh", inputs: [] });
 F["runp.margin"] = (c, k) => { const ref = k.split("|")[1]; return isNum(runpCalc(c, k)?.marginC) ? { text: "Margin = Tj max - peak", inputs: [["Tj max", "part.tjMax", ref], ["peak", "runp.peak", k]], fn: v => v["Tj max"] - v.peak } : null; };
