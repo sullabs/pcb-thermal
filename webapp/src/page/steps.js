@@ -282,12 +282,13 @@ function ResultsView({ c }) {
   const parts = new Map(c.project.parts.map(x => [x.refDes, x]));
   return html`
     ${waiting && html`<${SwCard} c=${c} id="ReadResults" />`}
-    <${Card} title=${`Run ${run.name}`} cls=${rc.pass === "FAIL" || rc.balanceOk === false ? "attention" : ""}>
+    <${Card} title=${`Run ${run.name}`} cls=${rc.pass === "FAIL" || rc.balanceOk === false || rc.health?.level !== "ok" ? "attention" : ""}>
+      <${Health} c=${c} run=${run} rc=${rc} />
       ${rc.changes?.length > 0 && html`<p class="warn"><b>Older than the inputs:</b> ${marked(rc.changes.slice(0, 8).join("; "))}${rc.changes.length > 8 ? "; and more" : ""}.</p>`}
-      ${rc.balanceOk === false && html`<p class="warn"><b>Energy balance error above ${BALANCE_LIMIT_PCT} %:</b> the run is not converged, or a heat load is missing. Do not trust its temperatures yet: check the SetupSim report, refine the mesh and run again.</p>`}
-      <div class="cols">
+      ${rc.balanceOk === false && run.studyType !== "Flow" && html`<p class="warn"><b>Energy balance error above ${BALANCE_LIMIT_PCT} %:</b> the run is not converged, or a heat load is missing. Do not trust its temperatures yet: check the SetupSim report, refine the mesh and run again.</p>`}
+      <div class=${`cols ${rc.health?.level === "bad" ? "dim" : ""}`}>
         <div><${Facts} ctx=${c} rows=${[[, "run.pass", run.name], [, "run.worst", run.name], [, "run.worstC", run.name, 1], [, "run.fails", run.name], [, "run.date", run.name, undefined, date(run.date)], [, "run.studyType", run.name], [, "run.study", run.name], [, "run.status", run.name]]} /></div>
-        <div><${Facts} ctx=${c} rows=${[[, "run.energyBalance", run.name, 2], [, "run.balanceOk", run.name], [, "run.pcbMin", run.name, 1], [, "run.pcbMax", run.name, 1], [, "run.spreaderMin", run.name, 1], [, "run.spreaderMax", run.name, 1], [, "run.meshGlobal", run.name], [, "run.meshFine", run.name], [, "run.nodes", run.name], [, "run.elements", run.name]]} /></div>
+        <div><${Facts} ctx=${c} rows=${[[, "run.energyBalance", run.name, 2], [, "run.balanceOk", run.name], [, "run.pcbMin", run.name, 1], [, "run.pcbMax", run.name, 1], [, "run.spreaderMin", run.name, 1], [, "run.spreaderMax", run.name, 1], [, "run.meshGlobal", run.name], [, "run.meshFine", run.name], [, "run.nodes", run.name], [, "run.elements", run.name], [, "run.heatRequested", run.name, 2], [, "run.heatApplied", run.name, 2], [, "run.solverFinished", run.name], [, "run.travels", run.name, 2], [, "run.iterations", run.name], [, "run.cellsTotal", run.name], [, "run.cellsSolid", run.name], [, "run.cellsFluid", run.name]]} /></div>
       </div>
       ${c.learn && html`<${RunReading} c=${c} run=${run} rc=${rc} />`}
       ${refs.length > 0 && html`<${Scroll}><table class="grid"><thead><tr><th><${L} t="part.refDes" /></th><th class="num"><${L} t="part.tjMax" /></th><th class="num"><${L} t="runp.peak" /></th><th class="num"><${L} t="runp.avg" /></th>
@@ -300,12 +301,22 @@ function ResultsView({ c }) {
       <${Plot} c=${c} run=${run} />
     <//>
     <${Card} title="All runs">
-      <${Scroll}><table class="grid runs"><thead><tr><th><${L} t="run.name" /></th><th><${L} t="run.date" /></th><th><${L} t="run.studyType" /></th><th><${L} t="run.status" /></th><th><${L} t="run.worst" /></th><th class="num"><${L} t="run.worstC" /></th><th class="num"><${L} t="run.energyBalance" /></th><th><${L} t="run.pass" /></th><th></th></tr></thead>
+      <${Scroll}><table class="grid runs"><thead><tr><th><${L} t="run.name" /></th><th><${L} t="run.date" /></th><th><${L} t="run.studyType" /></th><th><${L} t="run.status" /></th><th><${L} t="run.worst" /></th><th class="num"><${L} t="run.worstC" /></th><th class="num"><${L} t="run.energyBalance" /></th><th><${L} t="run.health" /></th><th><${L} t="run.pass" /></th><th></th></tr></thead>
       <tbody>${[...runs].reverse().map(r => html`<tr class=${r.name === run.name ? "sel" : ""}><td><${V} t="run.name" k=${r.name} /></td><td><${V} t="run.date" k=${r.name} v=${date(r.date)} /></td><td><${V} t="run.studyType" k=${r.name} /></td><td><${V} t="run.status" k=${r.name} /></td>
-        <td><${V} t="run.worst" k=${r.name} /></td><td class="num"><${V} t="run.worstC" k=${r.name} d=${1} /></td><td class="num"><${V} t="run.energyBalance" k=${r.name} d=${2} /></td><td><${V} t="run.pass" k=${r.name} /></td>
+        <td><${V} t="run.worst" k=${r.name} /></td><td class="num"><${V} t="run.worstC" k=${r.name} d=${1} /></td><td class="num"><${V} t="run.energyBalance" k=${r.name} d=${2} /></td><td><span class=${`status ${HEALTH_CLS[c.calc.runs[r.name]?.health?.level] || ""}`}><${V} t="run.health" k=${r.name} /></span></td><td class=${c.calc.runs[r.name]?.health?.level === "bad" ? "dim" : ""}><${V} t="run.pass" k=${r.name} /></td>
         <td><button class="small" aria-pressed=${r.name === run.name} onClick=${() => setSel(r.name)}>Show</button></td></tr>`)}</tbody></table><//>
       <p class="hint">Each run keeps a copy of the inputs it was made with, so an old run always shows its own case. The hand check on tab 5 compares with the run set there.</p>
     <//>`;
+}
+
+const HEALTH_CLS = { ok: "ok", check: "watch", bad: "crit" };
+// Health badge of a run (Flow plan F1) and the reasons in plain words. Read it before the temperatures.
+function Health({ c, run, rc }) {
+  const h = rc.health;
+  if (!h) return null;
+  return html`<div class="health"><p><span class=${`status ${HEALTH_CLS[h.level]}`}><${V} t="run.health" k=${run.name} /></span>
+    ${h.level === "ok" ? " Finished, every part meshed, energy balance within limits: read the temperatures." : h.level === "bad" ? " Do not trust the temperatures of this run yet. PASS or FAIL is greyed out." : " Look at these before you trust the temperatures."}</p>
+    ${h.reasons.length > 0 && html`<ul class="reasons">${h.reasons.map(x => html`<li>${marked(x.charAt(0).toUpperCase() + x.slice(1) + ".")}</li>`)}</ul>`}</div>`;
 }
 
 // Plain reading of a run (Learn mode): the hottest part, how it compares with the hand check, and what to trust.

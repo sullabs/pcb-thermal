@@ -425,6 +425,19 @@ def("run.worstC", "Hottest part peak", "", "C", "calculated", "Peak temperature 
 def("run.pass", "Result", "", "", "calculated", "PASS when every part with a Tj max is below it; FAIL when one is above.");
 def("run.fails", "Parts over Tj max", "", "", "calculated", "Parts whose peak temperature is above their Tj max.");
 def("run.balanceOk", "Energy balance OK", "", "", "calculated", "Yes when the energy balance error is within 2 %.");
+def("run.health", "Run health", "", "", "calculated", "Can this run be believed? Bad: not finished, a part with heat not meshed, or energy balance off. Check: a goal not converged, too few travels or a Flow warning. OK: read the temperatures.",
+  "Look at the health before the temperatures. A Flow run can finish and still be wrong: a small part that gets no solid cells loses its heat source, and a goal that stops after one travel can still move by a few C. The PASS or FAIL of a Bad run is greyed out.");
+def("run.healthReasons", "Why", "", "", "calculated", "The reasons behind the run health, in plain words.");
+def("run.heatRequested", "Heat asked for", "", "W", "run", "Flow: sum of the heat per part the page sent (tab 1).");
+def("run.heatApplied", "Heat applied", "", "W", "run", "Flow: heat on the sources the solver meshed. Less than the heat asked for when a part was not meshed.");
+def("run.solverFinished", "Solver finished", "", "", "run", "Flow: the solver reached its finish conditions (from the Flow project's info file).");
+def("run.iterations", "Iterations", "", "", "run", "Flow: solver iterations of the run.");
+def("run.travels", "Travels", "", "", "run", "Flow: how many times the flow has crossed the domain. Below 2 the goals may still move.",
+  "One travel is the number of iterations the air needs to cross the computational domain once. Flow's own default criteria are often met after about one travel, which can still leave chip temperatures 1 to 2 C from the final value.");
+def("run.cellsTotal", "Cells", "", "", "run", "Flow: cells in the mesh.");
+def("run.cellsSolid", "Solid cells", "", "", "run", "Flow: cells inside solids. A part with no solid cells is not in the solve.");
+def("run.cellsFluid", "Fluid cells", "", "", "run", "Flow: cells in the air.");
+def("run.unresolved", "Not meshed", "", "", "run", "Flow: parts the solver could not resolve (no solid cells). Their heat is left out and their goals are not stored.");
 def("run.changes", "Inputs changed since", "", "", "calculated", "Inputs that are different now from when this run was made. The run shows the old case until you run again.");
 def("runp.margin", "Margin, simulation", "", "C", "calculated", "Tj max minus the simulated peak.");
 def("runp.status", "Status, simulation", "", "", "calculated", "FAIL, Tight or OK from the simulated margin.");

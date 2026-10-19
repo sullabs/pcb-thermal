@@ -108,7 +108,7 @@ export const MACRO_HELP = {
   BuildSpreader: { changes: "Completes the spreader part (plate, pedestals, clearance cuts, named faces) and builds the TIM parts. Writes the plate build to the cad file.", check: "Problems on tab 7, then that each covered chip got its pedestal and TIM." },
   SyncFromCAD: { changes: "Reads the assembly only. Writes what it found (boxes that differ, the plate as built, failed checks) to the cad file.", check: "Tab 10: take the SolidWorks sizes or build again; tick the failed checks once fixed." },
   SetupSim: { changes: "Adds a new study to the assembly and a new run, with a copy of the inputs, to the results file. Never changes an older study.", check: "The message: solved, or the problems that stopped it. Then press Read Results." },
-  RunFlow: { changes: "Makes or updates the Flow project <prefix>Flow (materials, heat sources, goals, domain, initial temperature), solves it, and adds a run to the results file.", check: "Every chip with heat has a source (the message lists the ones without), and the goals were read." },
+  RunFlow: { changes: "Makes or updates the Flow project <prefix>Flow (materials, heat sources, goals, domain, initial temperature), solves it, and adds a run to the results file.", check: "Every chip with heat has a source (the message lists the ones without), the goals were read, and the run health on tab 9 is OK (no part left unmeshed, energy balance within 2 %)." },
   ReadResults: { changes: "Puts the temperatures, energy balance and the plot picture into the run in the results file.", check: "Tab 9: the energy balance first, then each part against Tj max and the hand check." },
 };
 

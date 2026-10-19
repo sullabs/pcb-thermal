@@ -66,7 +66,38 @@
         },
         "spreader": { "$ref": "#/$defs/minMax" },
         "pcb": { "$ref": "#/$defs/minMax" },
-        "energyBalancePct": { "type": "number", "description": "|heat in - heat out| / larger of the two, %. Near 0 means the study converged." },
+        "energyBalancePct": { "type": "number", "description": "|heat in - heat out| / larger of the two, %. Near 0 means the study converged. Flow: |heat applied - (Serv Heatf + Radiation Energy Delta)| / heat applied." },
+        "heatRequestedW": { "type": "number", "minimum": 0, "description": "Flow: heat the page asked for, sum of forSolidWorks.heat (W)." },
+        "heatAppliedW": { "type": "number", "minimum": 0, "description": "Flow: heat on the sources the solver meshed (W). Less than heatRequestedW when a source was unresolved." },
+        "solver": {
+          "type": "object",
+          "description": "Flow: state of the solve, from <n>.info.json of the Flow project folder.",
+          "additionalProperties": false,
+          "properties": {
+            "finished": { "type": "boolean" },
+            "iterations": { "type": "integer", "minimum": 0 },
+            "travels": { "type": "number", "minimum": 0 },
+            "cellsTotal": { "type": "integer", "minimum": 0 },
+            "cellsSolid": { "type": "integer", "minimum": 0 },
+            "cellsFluid": { "type": "integer", "minimum": 0 },
+            "projectDir": { "type": "string" }
+          }
+        },
+        "goalsHealth": {
+          "type": "object",
+          "description": "Flow: convergence per goal name. delta and criteria in K (= C for a difference).",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "progressPct": { "type": "number" },
+              "deltaC": { "type": "number" },
+              "criteriaC": { "type": "number" }
+            }
+          }
+        },
+        "warnings": { "type": "array", "items": { "type": "string" }, "description": "Flow: lines of calculation_warnings.txt." },
+        "unresolved": { "type": "array", "items": { "type": "string" }, "description": "Flow: RefDes whose source or goal the solver could not resolve (not meshed). Their goals are not stored." },
         "parts": {
           "type": "object",
           "description": "Temperature per RefDes.",

@@ -70,7 +70,7 @@ export const LEARN = {
   },
   results: {
     purpose: "Read the simulation results: temperature per part, against Tj max and against the hand check.",
-    look: ["Check the energy balance first: above a few percent the result is not converged.", "A part above Tj max is marked."],
+    look: ["Check the health badge first: a Bad run (not finished, a part not meshed, energy balance off) gives temperatures you cannot trust, so its PASS or FAIL is greyed out.", "Check the energy balance: above a few percent the result is not converged.", "A part above Tj max is marked."],
   },
   changes: {
     purpose: "Check every move and size change the macros found, so a wrong import or build is caught before you trust a result.",

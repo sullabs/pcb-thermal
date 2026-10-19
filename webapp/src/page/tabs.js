@@ -86,6 +86,7 @@ export function tabStates({ project, cad = {}, results = {}, calc, canSave }) {
     results: () => {
       const last = runs[runs.length - 1], r = last && calc.runs?.[last.name];
       if (!r) return ["ready"];
+      if (r.health?.level === "bad") return ["attention", `${last.name} health Bad: ${r.health.reasons[0]}`];
       if (r.pass === "FAIL") return ["attention", `${r.fails} part${r.fails === 1 ? "" : "s"} over Tj max in ${last.name}`];
       if (r.balanceOk === false) return ["attention", `energy balance of ${last.name} above 2 %`];
       return r.pass === "PASS" ? ["done", `${last.name} PASS`] : ["ready", `${runs.length} run${runs.length === 1 ? "" : "s"}`];

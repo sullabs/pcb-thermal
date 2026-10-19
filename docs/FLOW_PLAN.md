@@ -61,6 +61,8 @@ Done when each row has a type id or parameter id, or a "not possible" with the f
 
 ## F1. Run health: converged, meshed, energy balanced (do first)
 
+**Status: done 2026-10-19 (schema, page, macro, tests in webapp/tools/test_flow.mjs). Live acceptance on RPi4 not run yet: needs SolidWorks.**
+
 **Problem.** A run is stored as "read" even when sources were not meshed, goals came back 0 K, or the solve stopped
 after 1 travel. The 484 C runs went into the results unflagged. Flow runs have no `energyBalancePct`.
 
@@ -237,7 +239,7 @@ orientation or air speed does not match the h it assumes (the page's h values ar
 | Phase | Depends on | Size | Why this order | Status |
 |---|---|---|---|---|
 | F0 spike | none | 1 session | every later phase needs the ids | done 2026-10-19 |
-| F1 health | S1 | medium | without it no Flow number can be trusted | open |
+| F1 health | S1 | medium | without it no Flow number can be trusted | done 2026-10-19 |
 | F2 mesh | S2, F1 | medium | removes the unresolved parts F1 will show | open |
 | F3 convergence | S3, F1 | small | | open |
 | F4 Tj | S4 | medium | changes the number compared with Tj max | open |

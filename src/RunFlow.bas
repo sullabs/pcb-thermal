@@ -71,12 +71,24 @@ Dim reWords As Object
 Dim jsonMode As Boolean
 Dim rptDir As String                     ' output folder and file prefix of the report
 Dim regTotal As Double                   ' heat of all parts (W), for the messages
+' run health (Flow plan F1), filled after the solve from the Flow project folder
+Dim solverD As Object                    ' finished, iterations, travels, cells (results.json run.solver)
+Dim healthD As Object                    ' goal name -> progressPct, deltaC, criteriaC
+Dim goalUnit As Object                   ' goal name -> unit from <n>.info.json ("temperature", ...)
+Dim warnC As Collection                  ' lines of calculation_warnings.txt
+Dim unresD As Object                     ' RefDes (upper case) the solver could not resolve
+Dim meshedQ As Double                    ' heat on the sources the solver meshed (W)
+Dim balPct As Double, hasBal As Boolean  ' energy balance error (%)
+Dim qConv As Double, qRad As Double      ' Serv Heatf and Radiation Energy Delta (W)
 
 Sub main()
     Set swApp = Application.SldWorks
     PT_Trace MACRO_NAME & ": started (VBA macro)."
     Set notes = New Collection
     Set lines = New Collection
+    Set solverD = PJ_Dict(): Set healthD = PJ_Dict(): Set goalUnit = PJ_Dict(): Set unresD = PJ_Dict()
+    Set warnC = New Collection
+    meshedQ = 0: balPct = 0: hasBal = False: qConv = 0: qRad = 0
 
     jsonMode = False: regTotal = 0
     Dim xl As Object, wb As Object, rf As Object, rfPath As String, cad As Object
@@ -291,9 +303,20 @@ Sub main()
         GoTo done
     End If
 
+    ' ---------- run health: Flow project folder, solver info and warnings ----------
+    Dim pDir As String
+    pDir = FlowProjectDir(fda, asmPath, CStr(fda.Name))
+    If pDir = "" Then
+        notes.Add "The Flow project folder was not found: mesh, convergence and warnings of the run were not read."
+    Else
+        ReadSolverInfo pDir
+        ReadWarnings pDir, heat
+    End If
+
     ' ---------- goals ----------
     Dim peak As Object, avg As Object, gres As Object, ge As Object, gl As Object
     Dim gname As String, gv As Double, gk As String, gref As String, grp As String
+    Dim graw As Double, hasConv As Boolean, hasRad As Boolean, gup As String, unresQ As Double, uk As Variant
     Dim sprMax As Double, sprMin As Double, pcbMax As Double, pcbMin As Double
     Dim hSprMax As Boolean, hSprMin As Boolean, hPcbMax As Boolean, hPcbMin As Boolean, nGoals As Long
     Set peak = CreateObject("Scripting.Dictionary")
@@ -308,13 +331,19 @@ Sub main()
     Set gl = ge.Next
     Do While Not gl Is Nothing
         gname = CStr(gl.GetGoalName)
-        gv = CDbl(gl.GetLastCalculatedValue) - 273.15
+        graw = CDbl(gl.GetLastCalculatedValue)
+        If IsTempGoal(gname) Then gv = graw - 273.15 Else gv = graw
+        gup = UCase(gname)
+        If gup = "SERV HEATF" Then qConv = graw: hasConv = True
+        If gup = "RADIATION ENERGY DELTA" Then qRad = graw: hasRad = True
         gk = GoalKind(gname)
         gref = FindRef(gname, heat)
         grp = ""
         If gref = "" Then grp = FindGroup(gname)
         nGoals = nGoals + 1
-        If (gref <> "" Or grp <> "") And gv < -270 Then
+        If gref <> "" And unresD.Exists(gref) Then
+            lines.Add "goal " & gname & ": " & gref & " was not meshed, not stored"
+        ElseIf (gref <> "" Or grp <> "") And gv < -270 Then
             notes.Add "Goal '" & gname & "' has no valid temperature (0 K): not stored. Check that its body is meshed and solid."
             lines.Add "goal " & gname & " = no value (0 K): skipped"
         ElseIf gref <> "" Then
@@ -340,11 +369,28 @@ Sub main()
                 pcbMax = gv: hPcbMax = True
             End If
             lines.Add "goal " & gname & " = " & Format(gv, "0.00") & " C -> pcb " & gk
-        ElseIf Not IsServiceGoal(gname) Then
-            lines.Add "goal " & gname & " = " & Format(gv, "0.000") & " (not a RefDes, spreader or PCB goal: ignored)"
+        ElseIf IsServiceGoal(gname) Then
+            lines.Add "goal " & gname & " = " & Format(gv, "0.000") & " " & GoalUnitText(gname)
+        Else
+            lines.Add "goal " & gname & " = " & Format(gv, "0.000") & " " & GoalUnitText(gname) & " (not a RefDes, spreader or PCB goal: ignored)"
         End If
         Set gl = ge.Next
     Loop
+    ' energy balance: heat on the meshed sources against the heat leaving by convection and radiation
+    For Each uk In unresD.Keys
+        If heat.Exists(uk) Then unresQ = unresQ + heat(uk)
+    Next
+    meshedQ = applied - unresQ
+    If meshedQ < 0 Then meshedQ = 0
+    If hasConv And hasRad And meshedQ > 0 Then
+        balPct = Abs(meshedQ - (qConv + qRad)) / meshedQ * 100
+        hasBal = True
+        lines.Add "energy balance: " & Format(meshedQ, "0.000") & " W on meshed sources, " & Format(qConv, "0.000") & " W convection + " & _
+                  Format(qRad, "0.000") & " W radiation out, error " & Format(balPct, "0.00") & " %"
+    Else
+        notes.Add "Energy balance not worked out: Serv Heatf or Radiation Energy Delta is missing from the goals."
+    End If
+    If unresD.Count > 0 Then notes.Add "Not meshed (no solid cells): " & JoinKeys(unresD) & ". " & Format(unresQ, "0.00") & " W left out, their goals are not stored."
     If peak.Count = 0 And avg.Count = 0 Then
         PT_Msg "RunFlow stopped. No goal name contains a RefDes. Nothing was written." & vbCrLf & _
                "Rename the goals, for example 'U1 max' (see docs\HOWTO_M7.md).", vbExclamation, MACRO_NAME
@@ -852,6 +898,157 @@ Function SetInitialTemperature(ByVal fda As Object, ByVal kelvin As Double) As L
     SetInitialTemperature = n
 End Function
 
+' ---------------------------------------------------------------- run health (Flow plan F1)
+' Folder of the Flow project's results (CAD\<n>\). From the API first; else the newest <n>\<n>.info.json next to the
+' assembly whose project_name is projName. "" when neither.
+Function FlowProjectDir(ByVal fda As Object, ByVal asmPath As String, ByVal projName As String) As String
+    Dim s As String, fso As Object, fld As Object, sf As Object, f As String, js As Object, best As Date, bestS As String
+    On Error Resume Next
+    s = CStr(fda.ProjectFiles.ProjectDirectory)
+    Err.Clear
+    If s <> "" Then
+        If Right$(s, 1) = "\" Then s = Left$(s, Len(s) - 1)
+        If Dir(s, vbDirectory) <> "" Then
+            FlowProjectDir = s
+            Exit Function
+        End If
+    End If
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set fld = fso.GetFolder(fso.GetParentFolderName(asmPath))
+    If fld Is Nothing Then Exit Function
+    For Each sf In fld.SubFolders
+        f = sf.Path & "\" & sf.Name & ".info.json"
+        If fso.FileExists(f) Then
+            Set js = Nothing
+            Set js = PJ_Parse(PJ_ReadFile(f))
+            Err.Clear
+            If Not js Is Nothing Then
+                If StrComp(PJ_Str(js, "project_name", ""), projName, vbTextCompare) = 0 Then
+                    If bestS = "" Or fso.GetFile(f).DateLastModified > best Then
+                        best = fso.GetFile(f).DateLastModified
+                        bestS = sf.Path
+                    End If
+                End If
+            End If
+        End If
+    Next
+    FlowProjectDir = bestS
+End Function
+
+' Reads <pDir>\<n>.info.json (written by the Flow solver): finished, iterations, travels, cells, and per goal its unit
+' and convergence (progress, delta, criteria in K; kept for temperature goals only).
+Sub ReadSolverInfo(ByVal pDir As String)
+    Dim f As String, js As Object, gl As Object, it As Variant, g As Object, h As Object, nm As String, unitS As String
+    f = pDir & "\" & Mid$(pDir, InStrRev(pDir, "\") + 1) & ".info.json"
+    If Dir(f) = "" Then
+        notes.Add "No solver info file " & f & ": mesh and convergence of the run were not read."
+        Exit Sub
+    End If
+    On Error GoTo bad
+    Set js = PJ_Parse(PJ_ReadFile(f))
+    If PJ_Has(js, "finished") Then PJ_Put solverD, "finished", PJ_Bool(js, "finished", False)
+    If PJ_IsNum(js, "telemetry/iteration") Then PJ_Put solverD, "iterations", CLng(PJ_Num(js, "telemetry/iteration", 0))
+    If PJ_IsNum(js, "telemetry/travel") Then PJ_Put solverD, "travels", Round(PJ_Num(js, "telemetry/travel", 0), 3)
+    If PJ_IsNum(js, "mesh/cells_total") Then PJ_Put solverD, "cellsTotal", CLng(PJ_Num(js, "mesh/cells_total", 0))
+    If PJ_IsNum(js, "mesh/cells_solid") Then PJ_Put solverD, "cellsSolid", CLng(PJ_Num(js, "mesh/cells_solid", 0))
+    If PJ_IsNum(js, "mesh/cells_fluid") Then PJ_Put solverD, "cellsFluid", CLng(PJ_Num(js, "mesh/cells_fluid", 0))
+    PJ_Put solverD, "projectDir", pDir
+    Set gl = PJ_Obj(js, "goals")
+    If gl Is Nothing Then Exit Sub
+    For Each it In gl
+        Set g = PJ_Obj(it, "goal")
+        If Not g Is Nothing Then
+            nm = PJ_Str(g, "name", "")
+            unitS = LCase(PJ_Str(g, "unit", ""))
+            If nm <> "" Then
+                goalUnit(nm) = unitS
+                If unitS = "temperature" Then
+                    Set h = PJ_Dict()
+                    If PJ_IsNum(g, "progress") Then PJ_Put h, "progressPct", Round(PJ_Num(g, "progress", 0), 1)
+                    If PJ_IsNum(g, "delta") Then PJ_Put h, "deltaC", Round(PJ_Num(g, "delta", 0), 4)
+                    If PJ_IsNum(g, "criteria") Then PJ_Put h, "criteriaC", Round(PJ_Num(g, "criteria", 0), 4)
+                    If h.Count > 0 Then PJ_Put healthD, nm, h
+                End If
+            End If
+        End If
+    Next
+    Exit Sub
+bad:
+    notes.Add "The solver info file " & f & " could not be read (" & Err.Description & "): mesh and convergence not read."
+End Sub
+
+' Reads <pDir>\calculation_warnings.txt: every warning after "Warnings on last iteration:" goes to warnC; a warning
+' about an unresolved source or an invalid goal whose name holds a RefDes puts that RefDes in unresD. Without that
+' header line (another solver version) only the lines about unresolved items are taken.
+Sub ReadWarnings(ByVal pDir As String, ByVal heat As Object)
+    Dim f As String, txt As String, ls As Variant, i As Long, started As Boolean, ln As String, refU As String, pass As Long
+    f = pDir & "\calculation_warnings.txt"
+    If Dir(f) = "" Then Exit Sub
+    On Error GoTo bad
+    txt = PJ_ReadFile(f)
+    ls = Split(Replace(txt, vbCr, ""), vbLf)
+    For pass = 1 To 2
+        For i = 0 To UBound(ls)
+            ln = Trim$(Replace(CStr(ls(i)), vbTab, " "))
+            If pass = 1 And Not started Then
+                If InStr(1, ln, "Warnings on last iteration", vbTextCompare) > 0 Then started = True
+            ElseIf ln <> "" And (started Or InStr(1, ln, "unresolved", vbTextCompare) > 0) Then
+                warnC.Add ln
+                If InStr(1, ln, "unresolved", vbTextCompare) > 0 Or InStr(1, ln, "invalid", vbTextCompare) > 0 Then
+                    refU = FindRef(ln, heat)
+                    If refU <> "" And Not unresD.Exists(refU) Then unresD.Add refU, 1
+                End If
+            End If
+        Next
+        If started Then Exit For
+    Next
+    Exit Sub
+bad:
+    notes.Add "calculation_warnings.txt could not be read (" & Err.Description & ")."
+End Sub
+
+' True when the goal value is a temperature (kelvin from the API): the unit in the info file, else by name.
+Function IsTempGoal(ByVal gname As String) As Boolean
+    Dim u As String
+    If goalUnit.Exists(gname) Then
+        IsTempGoal = (goalUnit(gname) = "temperature")
+        Exit Function
+    End If
+    u = UCase(gname)
+    If u = "SERV TEMP" Or u = "SERV TSOLID" Then
+        IsTempGoal = True
+    Else
+        IsTempGoal = Not IsServiceGoal(gname)
+    End If
+End Function
+
+' Unit text of a goal value for the report
+Function GoalUnitText(ByVal gname As String) As String
+    Select Case UCase(gname)
+        Case "SERV HEATF", "RADIATION ENERGY DELTA": GoalUnitText = "W"
+        Case "SERV PRESS": GoalUnitText = "Pa"
+        Case "SERV MFLOW": GoalUnitText = "kg/s"
+        Case Else
+            If IsTempGoal(gname) Then GoalUnitText = "C"
+    End Select
+End Function
+
+' Keys of a dictionary as "A, B and C"
+Function JoinKeys(ByVal d As Object) As String
+    Dim k As Variant, n As Long, s As String
+    For Each k In d.Keys
+        n = n + 1
+        If n = 1 Then
+            s = CStr(k)
+        ElseIf n = d.Count Then
+            s = s & " and " & CStr(k)
+        Else
+            s = s & ", " & CStr(k)
+        End If
+    Next
+    JoinKeys = s
+End Function
+
 ' ---------------------------------------------------------------- names
 ' True for the goals Flow adds by itself to every solve (Serv ..., dm/m, Calculate_..., Radiation Energy Delta)
 Function IsServiceGoal(ByVal gname As String) As Boolean
@@ -927,6 +1124,14 @@ Sub WriteReport(ByVal runName As String, ByVal projName As String, ByVal applied
     ts.WriteLine "Flow project: " & projName
     ts.WriteLine "Heat applied: " & Format(applied, "0.000") & " W of " & Format(regTotal, "0.000") & " W of heat on the parts"
     ts.WriteLine "Goals read: " & IIf(readGoals, "yes", "no")
+    If solverD.Count > 0 Then
+        ts.WriteLine "Solver: " & IIf(PJ_Bool(solverD, "finished", False), "finished", "NOT finished") & ", " & _
+                     PJ_Num(solverD, "iterations", 0) & " iterations, " & Format(PJ_Num(solverD, "travels", 0), "0.00") & " travels"
+        ts.WriteLine "Cells: " & PJ_Num(solverD, "cellsTotal", 0) & " total, " & PJ_Num(solverD, "cellsSolid", 0) & " solid, " & _
+                     PJ_Num(solverD, "cellsFluid", 0) & " fluid"
+    End If
+    If hasBal Then ts.WriteLine "Energy balance error: " & Format(balPct, "0.00") & " % (" & Format(meshedQ, "0.000") & " W in, " & Format(qConv + qRad, "0.000") & " W out)"
+    If unresD.Count > 0 Then ts.WriteLine "Not meshed: " & JoinKeys(unresD)
     ts.WriteLine ""
     For Each q In lines: ts.WriteLine q: Next
     ts.WriteLine ""
@@ -961,6 +1166,19 @@ Function FlowRun(ByVal runName As String, ByVal projName As String, ByVal solved
     PJ_Put inp, "forSolidWorks", PJ_Obj(PJ_Project, "forSolidWorks")
     PJ_Put inp, "simSetup", PJ_Obj(PJ_Project, "simSetup")
     PJ_Put d, "inputs", inp
+    PJ_Put d, "heatRequestedW", Round(regTotal, 4)
+    If meshedQ > 0 Then PJ_Put d, "heatAppliedW", Round(meshedQ, 4)
+    If hasBal Then PJ_Put d, "energyBalancePct", Round(balPct, 3)
+    If solverD.Count > 0 Then PJ_Put d, "solver", solverD
+    If healthD.Count > 0 Then PJ_Put d, "goalsHealth", healthD
+    If warnC.Count > 0 Then PJ_Put d, "warnings", warnC
+    If unresD.Count > 0 Then
+        Set nl = New Collection
+        For Each refK In unresD.Keys
+            If refNames.Exists(CStr(refK)) Then nl.Add refNames(CStr(refK)) Else nl.Add CStr(refK)
+        Next
+        PJ_Put d, "unresolved", nl
+    End If
     If hasSpr Then
         Set mm = PJ_Dict(): PJ_Put mm, "maxC", Round(sprMax, 2): PJ_Put mm, "minC", Round(sprMin, 2)
         PJ_Put d, "spreader", mm

@@ -118,6 +118,9 @@ table.grid { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: 1
 .grid .num { text-align: right; font-variant-numeric: tabular-nums; }
 .grid td.num { font-family: var(--display); }
 .grid tr.dim td { opacity: .55; }
+.cols.dim > div:first-child, td.dim { opacity: .45; }
+.health .status { padding: 1px 8px; border-radius: 3px; font-weight: 600; }
+.health ul.reasons { margin: 4px 0 8px 18px; padding: 0; }
 .loads .field input { padding: 2px 4px; }
 .status { display: inline-block; border-radius: 3px; padding: 0 6px; font: 600 11.5px/1.6 var(--display); letter-spacing: .03em; }
 .status.crit { color: var(--crit); background: var(--crit-bg); }

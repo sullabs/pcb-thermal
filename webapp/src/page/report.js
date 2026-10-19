@@ -44,6 +44,7 @@ export function openIssues(ctx) {
   if (!runs.length) out.push("No simulation run yet.");
   const last = runs[runs.length - 1];
   const rc = last && calc.runs[last.name];
+  if (rc?.health && rc.health.level !== "ok") out.push(`Run ${last.name} health ${rc.health.level === "bad" ? "Bad" : "Check"}: ${rc.health.reasons.join("; ")}.`);
   if (rc?.pass === "FAIL") out.push(`Run ${last.name}: ${rc.fails} part${rc.fails === 1 ? "" : "s"} above Tj max.`);
   if (rc?.balanceOk === false) out.push(`Run ${last.name}: energy balance error ${fx(last.energyBalancePct, 2)} %, above 2 %.`);
   if (rc?.changes?.length) out.push(`Run ${last.name} is older than the inputs: ${rc.changes.slice(0, 5).join("; ")}${rc.changes.length > 5 ? "; and more" : ""}.`);
@@ -112,7 +113,7 @@ export function Report({ ctx, runs: runNames = [], images = {}, now }) {
 
     <h2>5 Simulation</h2>
     ${!runs.length ? html`<p>No run in this report.</p>` : runs.map(r => html`<div class="run"><h3>Run ${r.name}</h3>
-      <${Facts} ctx=${ctx} rows=${[["run.date", r.name], ["run.studyType", r.name], ["run.study", r.name], ["run.pass", r.name], ["run.worst", r.name], ["run.worstC", r.name, 1], ["run.energyBalance", r.name, 2], ["run.pcbMin", r.name, 1], ["run.pcbMax", r.name, 1], ["run.spreaderMin", r.name, 1], ["run.spreaderMax", r.name, 1], ["run.meshGlobal", r.name], ["run.meshFine", r.name], ["run.changes", r.name]]} />
+      <${Facts} ctx=${ctx} rows=${[["run.date", r.name], ["run.studyType", r.name], ["run.study", r.name], ["run.pass", r.name], ["run.worst", r.name], ["run.worstC", r.name, 1], ["run.energyBalance", r.name, 2], ["run.health", r.name], ["run.healthReasons", r.name], ["run.travels", r.name, 2], ["run.cellsTotal", r.name], ["run.pcbMin", r.name, 1], ["run.pcbMax", r.name, 1], ["run.spreaderMin", r.name, 1], ["run.spreaderMax", r.name, 1], ["run.meshGlobal", r.name], ["run.meshFine", r.name], ["run.changes", r.name]]} />
       <${Table} ctx=${ctx} rows=${Object.keys(r.parts || {}).map(k => `${r.name}|${k}`)} cols=${[["part.refDes", k => k.split("|")[1], undefined, "RefDes"], ["part.tjMax", k => k.split("|")[1], 0], ["runp.peak", k => k, 1], ["runp.avg", k => k, 1], ["runp.margin", k => k, 1], ["runp.status", k => k], ["runp.hand", k => k, 1], ["runp.gap", k => k, 1]]} />
       ${images[r.name] && html`<figure><img src=${images[r.name]} alt=${"Temperature plot of " + r.name} /><figcaption>Temperature plot, run ${r.name}</figcaption></figure>`}
     </div>`)}

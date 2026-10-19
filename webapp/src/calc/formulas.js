@@ -384,6 +384,17 @@ export const VALUES = {
   "run.pass": (c, k) => runCalc(c, k)?.pass,
   "run.fails": (c, k) => runCalc(c, k)?.fails,
   "run.balanceOk": (c, k) => runCalc(c, k)?.balanceOk,
+  "run.health": (c, k) => ({ ok: "OK", check: "Check", bad: "Bad" })[runCalc(c, k)?.health?.level],
+  "run.healthReasons": (c, k) => { const h = runCalc(c, k)?.health; return h ? (h.reasons.length ? h.reasons.join("; ") : "none") : undefined; },
+  "run.heatRequested": (c, k) => runOf(c, k)?.heatRequestedW,
+  "run.heatApplied": (c, k) => runOf(c, k)?.heatAppliedW,
+  "run.solverFinished": (c, k) => runOf(c, k)?.solver?.finished,
+  "run.iterations": (c, k) => runOf(c, k)?.solver?.iterations,
+  "run.travels": (c, k) => runOf(c, k)?.solver?.travels,
+  "run.cellsTotal": (c, k) => runOf(c, k)?.solver?.cellsTotal,
+  "run.cellsSolid": (c, k) => runOf(c, k)?.solver?.cellsSolid,
+  "run.cellsFluid": (c, k) => runOf(c, k)?.solver?.cellsFluid,
+  "run.unresolved": (c, k) => { const u = runOf(c, k)?.unresolved; return u?.length ? u.join(", ") : undefined; },
   "run.changes": (c, k) => { const ch = runCalc(c, k)?.changes; return ch === undefined ? undefined : ch.length ? ch.join("; ") : "none"; },
   "runp.margin": (c, k) => runpCalc(c, k)?.marginC,
   "runp.status": (c, k) => runpCalc(c, k)?.status,
@@ -725,6 +736,9 @@ F["run.worstC"] = (c, k) => {
 F["run.pass"] = (c, k) => ({ text: "PASS when no part is above its Tj max (FAIL as soon as one is)", inputs: [["parts over", "run.fails", k]] });
 F["run.fails"] = () => ({ text: "Number of parts with a peak above their Tj max", inputs: [] });
 F["run.balanceOk"] = (c, k) => ({ text: "Yes when the energy balance error is 2 % or less", inputs: [["error", "run.energyBalance", k]] });
+F["run.health"] = (c, k) => ({ text: "Bad when the solver did not finish, a part with heat was not meshed, or the energy balance error is above 2 %; Check when a goal is not converged, travels are below the minimum, Flow wrote other warnings or heat is left out; else OK",
+  inputs: [["finished", "run.solverFinished", k], ["not meshed", "run.unresolved", k], ["error", "run.energyBalance", k], ["travels", "run.travels", k], ["heat asked", "run.heatRequested", k], ["heat applied", "run.heatApplied", k]] });
+F["run.healthReasons"] = (c, k) => ({ text: "Each reason behind the health of the run, in plain words", inputs: [["health", "run.health", k]] });
 F["run.changes"] = () => ({ text: "Inputs of the run (a copy kept in the results file) compared with the inputs now: ambient, PCB, Pd per part, bodies, chip models, plates, surfaces, contacts, mesh", inputs: [] });
 F["runp.margin"] = (c, k) => { const ref = k.split("|")[1]; return isNum(runpCalc(c, k)?.marginC) ? { text: "Margin = Tj max - peak", inputs: [["Tj max", "part.tjMax", ref], ["peak", "runp.peak", k]], fn: v => v["Tj max"] - v.peak } : null; };
 F["runp.status"] = (c, k) => ({ text: "FAIL when the peak is above Tj max, Tight when the margin is below the CRITICAL margin limit, else OK", inputs: [["Margin", "runp.margin", k], ["limit", "limit.criticalMargin", ""]] });
