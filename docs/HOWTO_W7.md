@@ -40,7 +40,7 @@ Sync CAD never writes the project file. Tab 10 lists the bodies whose size in So
 6. **8 Read Results**. Expect on tab 9: peak per part, PASS or FAIL, energy balance within 2 %, the plot picture,
    and Tj hand vs simulation within a few degrees for the big parts.
 7. Change the ambient on tab 0 and save: tab 8 and tab 9 say the run is older than the inputs (ambient 40 C, now ...).
-8. Flow (optional, needs the Flow project made once by hand, `HOWTO_M7.md`): tab 8 study type Flow, save,
+8. Flow (optional, the macro builds the Flow project, `HOWTO_M7.md`): tab 8 study type Flow, save,
    **7 Run Flow Simulation**.
 
 ## Exports (W9)

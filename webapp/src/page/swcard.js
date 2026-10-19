@@ -30,7 +30,7 @@ export const MACROS = {
     does: "Makes a new steady state thermal study (PT_date_time) on the thermal assembly from this tab: materials, heat per part, contacts, convection and radiation per surface group, mesh. Then meshes and solves it. Older studies are never changed.",
     after: "The results file gets the new run. Then press Read Results." },
   RunFlow: { n: 7, name: "Run Flow Simulation", icon: "7_RunFlowSim", file: "results",
-    does: "Sets the heat of every Flow volume source from tab 1 (the source name holds the RefDes) and the ambient, solves the Flow project you made once by hand, and reads its goals.",
+    does: "Makes the Flow project <prefix>Flow from the PCBThermal_Flow template on first use (air, gravity, radiation), then on every run points its materials, a heat source and goals per chip, and the domain at the current model, sets the heat from tab 1 and the ambient, solves, and reads the goals.",
     after: "Tab 9 shows the new run (FL_date_time)." },
   ReadResults: { n: 8, name: "Read Results", icon: "8_ReadResults", file: "results",
     does: "Reads the solved thermal study: peak and average temperature per RefDes, PCB and spreader minimum and maximum, the energy balance, and a picture of the plot.",
@@ -98,7 +98,7 @@ export function macroChecks(id, c) {
       const bad = calc.simChips.filter(x => x.check !== "OK");
       out.push(ok(!bad.length, bad.length ? `Chips not OK: ${bad.map(x => x.refDes).join(", ")} (they get the k of parts without heat)` : "Every chip model OK", 8, true));
     } else {
-      out.push(ok(true, "The Flow project was made once by hand on the thermal assembly: one volume source per chip, with the RefDes in its name, and temperature goals named like 'U1 max'.", undefined, true));
+      out.push(ok(true, "Flow Simulation is turned on in SolidWorks (Tools > Add-Ins) and PCBThermal_Flow.fwp sits next to PCBThermal.swp. Materials are Flow's own (PCB 4/8/12 layers, typical plastic package, GR25A TIM), not the k values on this page.", undefined, true));
     }
   } else if (id === "ReadResults") {
     const waiting = (results.runs || []).filter(r => r.studyType === "Thermal" && (r.status === "solved" || r.status === "set up"));

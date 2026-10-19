@@ -3,11 +3,16 @@ Option Explicit
 ' =====================================================================================
 ' RunFlow  -  SolidWorks 2023 macro (milestone M7, Flow Simulation)
 '
-' Works on a Flow Simulation project that the user made once by hand on the thermal
-' assembly. The macro does not build the project. It:
+' Builds and runs the Flow Simulation project <prefix>Flow on the thermal assembly. It:
+'   0. makes the project from PCBThermal_Flow.fwp (macro folder) when it is missing: external air,
+'      conduction, gravity -Z, radiation (walls "Shellac, black matte", e about 0.9), PCB material with
+'      its axis on Z. Every run it points its own features
+'      (fixed names) at the current components: PCB, parts, spreader and TIM materials, a volume source
+'      "<RefDes> heat" and goals "<RefDes> max" and "<RefDes> avg" per part with heat, "PCB max/min",
+'      "Spreader max/min", and the computational domain around the assembly.
 '   1. sets the heat of every Flow volume heat source from the Component register
-'      (the source name must contain the RefDes, for example "U1" or "Q U1"),
-'   2. sets the initial temperature to the ambient on Sim setup,
+'      (the source name must contain the RefDes, for example "U1" or "Q U1"; a source the user made is kept),
+'   2. sets the initial and radiation environment temperatures to the ambient on Sim setup,
 '   3. optionally solves,
 '   4. reads the goals and writes them like ReadResults does:
 '        Sim results tab     one new row (peak and average per RefDes, spreader, PCB)
@@ -30,9 +35,26 @@ Const FLOW_PRODUCT As String = "Flow Simulation"
 Const FLOW_VERSION As String = "2023"
 Const FLOW_SRV_CLSID As String = "new:{478B60C3-62E1-4643-A9E0-8A448E7C3E68}"
 
+Const FLOW_TEMPLATE As String = "PCBThermal_Flow.fwp"
+Const MAT_PARTS As String = "Pre-Defined\IC Packages\Typical Plastic Package"
+Const MAT_TIM As String = "Pre-Defined\Interface Materials\Fujipoly\GR25A"
+Const MAT_ALUMINUM As String = "Pre-Defined\Metals\Aluminum"
+Const MAT_COPPER As String = "Pre-Defined\Metals\Copper"
+
 ' nikFeaturesTypes_e
 Const nikVolumeSource As Long = 4
+Const nikSolidMaterial As Long = 8
+Const nikVolumeGoal As Long = 13
+' nikFeatureTopolReferenceTypes_e
+Const nikFTR_topology As Long = 0
+' nikGoalParameters_e, nikGoalValueCalculateTypes_e
+Const nikGoalSolidTemperature As Long = 1
+Const nikGoalMin As Long = 0
+Const nikGoalMax As Long = 1
+Const nikGoalAvg As Long = 2
 ' nikParametersTypes_e
+Const nikDomainXmin As Long = 1         ' Xmax 2, Ymin 3, Ymax 4, Zmin 5, Zmax 6
+Const nikPathToSolidMaterial As Long = 32
 Const nikTemperature As Long = 10
 Const nikInitialSolidTemperature As Long = 26
 Const nikEnvRadiativeTemperature As Long = 30
@@ -157,11 +179,24 @@ Sub main()
                vbExclamation, MACRO_NAME
         GoTo done
     End If
-    Set fda = md.GetActiveProject
+    ' ---------- Flow project: <prefix>Flow, made from the template the first time, completed every run ----------
+    Dim projName As String, made As Boolean, pcbLayers As Long, sprK As Double
+    If jsonMode Then
+        projName = PT_SafeFile(PJ_Prefix()) & "Flow"
+        pcbLayers = CLng(PJ_Num(PJ_Project, "pcbStack/copperLayers", 4))
+        sprK = PJ_Num(PJ_Project, "spreader/top/k", 167)
+    Else
+        projName = PT_SafeFile(PT_Prefix(wb)) & "Flow"
+        pcbLayers = 4
+        sprK = PT_NameNum(wb, "Spr_k", 167)
+    End If
+    Set fda = FindOrMakeProject(md, projName, made, why)
     If fda Is Nothing Then
-        PT_Msg "RunFlow did not run. The thermal assembly has no Flow Simulation project." & vbCrLf & _
-               "Create one once (Flow Simulation > Wizard), add a volume heat source per chip and temperature goals," & vbCrLf & _
-               "then run again. See docs\HOWTO_M7.md.", vbExclamation, MACRO_NAME
+        PT_Msg "RunFlow did not run. " & why, vbExclamation, MACRO_NAME
+        GoTo done
+    End If
+    If Not BuildFlowProject(asm, fda, heat, pcbLayers, sprK, made) Then
+        PT_Msg "RunFlow stopped. The Flow project " & projName & " could not be set up:" & vbCrLf & ListNotes(), vbExclamation, MACRO_NAME
         GoTo done
     End If
 
@@ -231,7 +266,8 @@ Sub main()
     ' ---------- solve or read ----------
     Dim runName As String, ans As Long, solved As Boolean, rh As Object
     runName = "FL_" & Format(Now, "yyyymmdd_hhnn")
-    ans = PT_Msg(nSet & " heat sources set, " & Format(applied, "0.00") & " W of " & Format(regTotal, "0.00") & " W of heat on the parts." & _
+    ans = PT_Msg(IIf(made, "Flow project " & CStr(fda.Name) & " made from the template.", "Flow project " & CStr(fda.Name) & " brought up to date.") & vbCrLf & _
+                 nSet & " heat sources set, " & Format(applied, "0.00") & " W of " & Format(regTotal, "0.00") & " W of heat on the parts." & _
                  vbCrLf & vbCrLf & "Yes = solve now (can take many minutes) and read the goals" & vbCrLf & _
                  "No = do not solve, read the goals of the last solved run" & vbCrLf & "Cancel = stop here", _
                  vbYesNoCancel + vbQuestion, MACRO_NAME)
@@ -304,7 +340,7 @@ Sub main()
                 pcbMax = gv: hPcbMax = True
             End If
             lines.Add "goal " & gname & " = " & Format(gv, "0.00") & " C -> pcb " & gk
-        Else
+        ElseIf Not IsServiceGoal(gname) Then
             lines.Add "goal " & gname & " = " & Format(gv, "0.000") & " (not a RefDes, spreader or PCB goal: ignored)"
         End If
         Set gl = ge.Next
@@ -449,6 +485,311 @@ Function AttachFlow(ByVal api As Object) As Object
     Set AttachFlow = ia
 End Function
 
+' ---------------------------------------------------------------- Flow project set-up
+' The project projName of the active configuration. Made from the template (FLOW_TEMPLATE in the macro folder) when
+' missing: external air, conduction in solids, gravity -Z, and a "PCB material" whose anisotropy axis is Z.
+Function FindOrMakeProject(ByVal md As Object, ByVal projName As String, ByRef made As Boolean, ByRef why As String) As Object
+    Dim mc As Object, nms As Variant, i As Long, fda As Object, tpl As String, errTxt As String
+    made = False
+    On Error Resume Next
+    Set mc = md.ActiveConfiguration
+    If Not mc Is Nothing Then
+        nms = mc.GetProjectNames
+        If IsArray(nms) Then
+            For i = LBound(nms) To UBound(nms)
+                If StrComp(CStr(nms(i)), projName, vbTextCompare) = 0 Then
+                    Set fda = mc.ActivateProject(CStr(nms(i)), False)
+                    If fda Is Nothing Then Set fda = md.GetActiveProject
+                    If Not fda Is Nothing Then
+                        If StrComp(CStr(fda.Name), projName, vbTextCompare) <> 0 Then Set fda = Nothing
+                    End If
+                    Exit For
+                End If
+            Next
+        End If
+    End If
+    Err.Clear
+    If Not fda Is Nothing Then
+        Set FindOrMakeProject = fda
+        Exit Function
+    End If
+    tpl = FlowTemplatePath()
+    If tpl = "" Then
+        why = "The Flow project template " & FLOW_TEMPLATE & " is missing. It belongs in the macro folder, next to PCBThermal.swp."
+        Exit Function
+    End If
+    Set fda = md.CreateProjectFromTemplate(tpl, projName)
+    errTxt = Err.Description
+    Err.Clear
+    If Not fda Is Nothing Then Set fda = md.GetActiveProject
+    If fda Is Nothing Then
+        why = "Flow Simulation could not make the project " & projName & " from" & vbCrLf & tpl & vbCrLf & errTxt
+        Exit Function
+    End If
+    made = True
+    lines.Add "project " & projName & " made from " & tpl
+    Set FindOrMakeProject = fda
+End Function
+
+' FLOW_TEMPLATE in the folder of the running macro, else in the Flow Simulation template folder. "" if neither.
+Function FlowTemplatePath() As String
+    Dim s As String
+    On Error Resume Next
+    s = swApp.GetCurrentMacroPathFolder
+    If s <> "" Then
+        If Right$(s, 1) <> "\" Then s = s & "\"
+        If Dir(s & FLOW_TEMPLATE) <> "" Then
+            FlowTemplatePath = s & FLOW_TEMPLATE
+            Exit Function
+        End If
+    End If
+    s = Environ$("ProgramData") & "\COSMOS Applications\Flow Simulation " & FLOW_VERSION & "\template\" & FLOW_TEMPLATE
+    If Dir(s) <> "" Then FlowTemplatePath = s
+End Function
+
+' Completes the project from the tagged components: materials (PCB, parts, spreader, TIM), a volume source and
+' max and avg goals per part with heat, PCB and spreader goals, and the computational domain. The features the macro
+' owns have fixed names and are pointed at the current components on every run; any other feature is left as it is.
+' A source the user made (RefDes in its name) is used instead of a new one. False when there is no PCB to work on.
+Function BuildFlowProject(ByVal asm As Object, ByVal fda As Object, ByVal heat As Object, ByVal pcbLayers As Long, _
+                          ByVal sprK As Double, ByVal made As Boolean) As Boolean
+    Dim tg As Collection, it As Variant, refComps As Object, partC As Collection, pcbC As Collection
+    Dim sprC As Collection, timC As Collection, refU As String, k As Variant, ft As Object, isNew As Boolean
+    Dim layersS As String, sprMat As String, cn As String
+    Set refComps = CreateObject("Scripting.Dictionary")
+    Set partC = New Collection: Set pcbC = New Collection: Set sprC = New Collection: Set timC = New Collection
+    Set tg = PT_ListTagged(asm)
+    For Each it In tg
+        cn = CStr(it(3).Name2)
+        Select Case CStr(it(0))
+            Case "Part"
+                partC.Add cn
+                refU = UCase(CStr(it(2)))
+                If refU <> "" Then
+                    If Not refComps.Exists(refU) Then refComps.Add refU, New Collection
+                    refComps(refU).Add cn
+                End If
+            Case "PCB": pcbC.Add cn
+            Case "Spreader": sprC.Add cn
+            Case "TIM": timC.Add cn
+        End Select
+    Next
+    If pcbC.Count = 0 Then
+        notes.Add "No PCB in the thermal assembly (no component tagged PCB). Run Build Board first."
+        Exit Function
+    End If
+
+    ' materials
+    If pcbLayers >= 10 Then
+        layersS = "12"
+    ElseIf pcbLayers >= 6 Then
+        layersS = "8"
+    Else
+        layersS = "4"
+    End If
+    SetMaterial fda, "PCB material", "Pre-Defined\Non-isotropic\PCB " & layersS & "-layers", pcbC
+    SetMaterial fda, "Parts material", MAT_PARTS, partC
+    If sprK >= 300 Then sprMat = MAT_COPPER Else sprMat = MAT_ALUMINUM
+    SetMaterial fda, "Spreader material", sprMat, sprC
+    SetMaterial fda, "TIM material", MAT_TIM, timC
+
+    ' sources and goals per part with heat
+    For Each k In heat.Keys
+        refU = CStr(k)
+        If heat(k) > 0 Then
+            If Not refComps.Exists(refU) Then
+                notes.Add refU & " has heat but no part in the thermal assembly: no source or goal made."
+            Else
+                If OtherSource(fda, refU) Then
+                    lines.Add "source for " & refU & ": the one already in the project is used"
+                Else
+                    Set ft = OwnFeature(fda, nikVolumeSource, refU & " heat", refComps(refU), isNew)
+                    If Not ft Is Nothing Then FinishFeature fda, ft, refU & " heat", isNew
+                End If
+                OwnGoal fda, refU & " max", nikGoalMax, refComps(refU)
+                OwnGoal fda, refU & " avg", nikGoalAvg, refComps(refU)
+            End If
+        End If
+    Next
+    OwnGoal fda, "PCB max", nikGoalMax, pcbC
+    OwnGoal fda, "PCB min", nikGoalMin, pcbC
+    OwnGoal fda, "Spreader max", nikGoalMax, sprC
+    OwnGoal fda, "Spreader min", nikGoalMin, sprC
+
+    SetDomain asm, fda
+    BuildFlowProject = True
+End Function
+
+' Solid material feature of the macro: material path and components. A path the database does not have is noted.
+Sub SetMaterial(ByVal fda As Object, ByVal featName As String, ByVal matPath As String, ByVal comps As Collection)
+    Dim ft As Object, isNew As Boolean, rc As Long
+    Set ft = OwnFeature(fda, nikSolidMaterial, featName, comps, isNew)
+    If ft Is Nothing Then Exit Sub
+    rc = SetParamString(ft, nikPathToSolidMaterial, matPath)
+    If rc <> 0 Then
+        notes.Add featName & ": " & matPath & " is not in the Flow engineering database (code " & rc & "). Default solid used."
+        If isNew Then Exit Sub
+    End If
+    FinishFeature fda, ft, featName, isNew
+    If isNew And featName = "PCB material" Then
+        notes.Add "PCB material was made new: in SolidWorks set its anisotropy axis to Z (the board normal) once."
+    End If
+End Sub
+
+' Temperature goal of the macro (volume goal, solid temperature, kind = min, max or avg) on the components.
+Sub OwnGoal(ByVal fda As Object, ByVal featName As String, ByVal kind As Long, ByVal comps As Collection)
+    Dim ft As Object, gl As Object, isNew As Boolean
+    Set ft = OwnFeature(fda, nikVolumeGoal, featName, comps, isNew)
+    If ft Is Nothing Then Exit Sub
+    Set gl = ft.GetInterface("IParameterGoal")
+    If Not gl Is Nothing Then
+        gl.SetParameter nikGoalSolidTemperature
+        gl.SetValueToCalculate kind
+    End If
+    FinishFeature fda, ft, featName, isNew
+End Sub
+
+' Feature with a fixed name: the existing one pointed at comps, a new temporary one when missing (isNew), or
+' deleted when comps is empty (returns Nothing).
+Function OwnFeature(ByVal fda As Object, ByVal featType As Long, ByVal featName As String, ByVal comps As Collection, _
+                    ByRef isNew As Boolean) As Object
+    Dim ft As Object, topo As Object, c As Variant
+    isNew = False
+    Set ft = FeatureNamed(fda, featName)
+    If comps.Count = 0 Then
+        If Not ft Is Nothing Then
+            ft.Delete
+            lines.Add "removed " & featName & " (nothing in the assembly for it)"
+        End If
+        Exit Function
+    End If
+    If ft Is Nothing Then
+        Set ft = fda.CreateTemporaryFeature(featType)
+        If ft Is Nothing Then
+            notes.Add featName & " could not be made."
+            Exit Function
+        End If
+        isNew = True
+    End If
+    Set topo = ft.GetInterface("ITopologyBasedFeature")
+    If Not isNew Then topo.RemoveAllReferencies
+    For Each c In comps
+        If Not IsTrue(topo.AddComponent(nikFTR_topology, CStr(c))) Then notes.Add featName & ": component " & CStr(c) & " was not accepted."
+    Next
+    Set OwnFeature = ft
+End Function
+
+' Adds a new feature to the project and names it, or rebuilds an existing one.
+Sub FinishFeature(ByVal fda As Object, ByVal ft As Object, ByVal featName As String, ByVal isNew As Boolean)
+    If isNew Then
+        If Not IsTrue(fda.AddTemporaryFeature(ft)) Then
+            notes.Add featName & " could not be added to the project."
+            Exit Sub
+        End If
+        ft.SetName featName
+        lines.Add "made " & featName
+    ElseIf Not IsTrue(ft.Rebuild(fda)) Then
+        notes.Add featName & " did not rebuild: " & CStr(fda.GetLastRebuildError)
+    End If
+End Sub
+
+Function FeatureNamed(ByVal fda As Object, ByVal featName As String) As Object
+    Dim en As Object, ft As Object
+    Set en = fda.EnumFeatures
+    If en Is Nothing Then Exit Function
+    en.Reset
+    Set ft = en.Next
+    Do While Not ft Is Nothing
+        If StrComp(CStr(ft.Name), featName, vbTextCompare) = 0 Then
+            Set FeatureNamed = ft
+            Exit Function
+        End If
+        Set ft = en.Next
+    Loop
+End Function
+
+' True when a volume source other than "<refU> heat" has refU as a word of its name (made by the user).
+Function OtherSource(ByVal fda As Object, ByVal refU As String) As Boolean
+    Dim en As Object, ft As Object, w As Variant, i As Long, vr As Variant
+    Set en = fda.EnumFeatures
+    If en Is Nothing Then Exit Function
+    en.Reset
+    Set ft = en.Next
+    Do While Not ft Is Nothing
+        vr = ft.Type
+        If IsNumeric(vr) Then
+            If CLng(vr) = nikVolumeSource And StrComp(CStr(ft.Name), refU & " heat", vbTextCompare) <> 0 Then
+                w = Words(CStr(ft.Name))
+                For i = 0 To UBound(w)
+                    If CStr(w(i)) = refU Then
+                        OtherSource = True
+                        Exit Function
+                    End If
+                Next
+            End If
+        End If
+        Set ft = en.Next
+    Loop
+End Function
+
+' Sets the first string parameter of that type. Returns the API code (0 = accepted), -1 when there is none.
+Function SetParamString(ByVal ft As Object, ByVal parType As Long, ByVal valS As String) As Long
+    Dim pf As Object, ep As Object, par As Object
+    SetParamString = -1
+    Set pf = ft.GetInterface("IParametrizedFeature")
+    If pf Is Nothing Then Exit Function
+    Set ep = pf.EnumParameters
+    If ep Is Nothing Then Exit Function
+    ep.Reset
+    Set par = ep.Next
+    Do While Not par Is Nothing
+        If CLng(par.Type) = parType Then
+            SetParamString = CLng(par.SetStringValue(valS))
+            Exit Function
+        End If
+        Set par = ep.Next
+    Loop
+End Function
+
+' Computational domain around the assembly (metres): half the board size at the sides and below, one and a half
+' above, because the warm air rises along +Z (gravity -Z in the template).
+Sub SetDomain(ByVal asm As Object, ByVal fda As Object)
+    Dim bx As Variant, cds As Object, pf As Object, ep As Object, par As Object, lMax As Double, pt As Long, n As Long
+    Dim lims(1 To 6) As Double
+    bx = asm.GetBox(0)
+    If Not IsArray(bx) Then
+        notes.Add "The assembly box could not be read: computational domain left as it is."
+        Exit Sub
+    End If
+    lMax = bx(3) - bx(0)
+    If bx(4) - bx(1) > lMax Then lMax = bx(4) - bx(1)
+    lims(1) = bx(0) - 0.5 * lMax: lims(2) = bx(3) + 0.5 * lMax
+    lims(3) = bx(1) - 0.5 * lMax: lims(4) = bx(4) + 0.5 * lMax
+    lims(5) = bx(2) - 0.5 * lMax: lims(6) = bx(5) + 1.5 * lMax
+    Set cds = fda.ComputationalDomainSettings
+    If cds Is Nothing Then Exit Sub
+    Set pf = cds.GetInterface("IParametrizedFeature")
+    If pf Is Nothing Then Set pf = cds
+    Set ep = pf.EnumParameters
+    If ep Is Nothing Then Exit Sub
+    ep.Reset
+    Set par = ep.Next
+    Do While Not par Is Nothing
+        pt = CLng(par.Type)
+        If pt >= nikDomainXmin And pt <= nikDomainXmin + 5 Then
+            If CLng(par.SetValue(lims(pt))) = 0 Then n = n + 1
+        End If
+        Set par = ep.Next
+    Loop
+    If n = 6 Then
+        lines.Add "computational domain (mm): X " & Format(lims(1) * 1000, "0") & " to " & Format(lims(2) * 1000, "0") & _
+                  ", Y " & Format(lims(3) * 1000, "0") & " to " & Format(lims(4) * 1000, "0") & _
+                  ", Z " & Format(lims(5) * 1000, "0") & " to " & Format(lims(6) * 1000, "0")
+    Else
+        notes.Add "Computational domain: " & n & " of 6 limits were set."
+    End If
+End Sub
+
 ' Volume source: type = Heat generation rate, value = q (W). True when both were accepted.
 Function SetSourceHeat(ByVal ft As Object, ByVal fda As Object, ByVal q As Double) As Boolean
     Dim pf As Object, ep As Object, par As Object, rc As Long, gotQ As Boolean, pass As Long, pt As Long
@@ -512,6 +853,13 @@ Function SetInitialTemperature(ByVal fda As Object, ByVal kelvin As Double) As L
 End Function
 
 ' ---------------------------------------------------------------- names
+' True for the goals Flow adds by itself to every solve (Serv ..., dm/m, Calculate_..., Radiation Energy Delta)
+Function IsServiceGoal(ByVal gname As String) As Boolean
+    Dim u As String
+    u = UCase(gname)
+    IsServiceGoal = (Left(u, 5) = "SERV " Or u = "DM/M" Or Left(u, 10) = "CALCULATE_" Or u = "RADIATION ENERGY DELTA")
+End Function
+
 ' Upper-case words of a text (letters and digits only)
 Function Words(ByVal txt As String) As Variant
     If reWords Is Nothing Then

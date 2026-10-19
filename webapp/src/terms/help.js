@@ -67,7 +67,7 @@ export const HELP = [
       "Mesh: the global size, finer on chips with heat and on TIMs. A chip should be at least three elements thick."],
     "Energy balance: the heat leaving the model must equal the heat put in. Read Results works out the error; above 2 % the run is not converged or a heat load is missing, and its temperatures should not be trusted.",
     "Why hand and simulation differ: the simulation sees the real spreading in the board and the hot spots under parts; the hand check uses one board temperature. Small parts near big ones run hotter in the simulation. Differences above about 5 C usually come from an input that differs: h or emissivity, the PCB k, a body left out of the model, or a chip block k.",
-    "Flow Simulation (Run Flow Simulation, button 7) models the air too. Make the Flow project once by hand on the thermal assembly: a volume heat source per chip with its RefDes in the name, and temperature goals named like 'U1 max'. The macro then sets the heat and ambient from the page, solves, and reads the goals.",
+    "Flow Simulation (Run Flow Simulation, button 7) models the air too. The macro makes the Flow project from the PCBThermal_Flow template the first time (external air, gravity, radiation) and on every run sets its materials, a volume heat source and max/avg goals per chip, PCB and spreader goals and the domain, then the heat and ambient from the page. It solves and reads the goals. Flow uses its own library materials, so chip temperatures differ from the Thermal study where the page's k values matter.",
   ] },
   { id: "tabs", title: "Each tab", body: [] },
   { id: "solidworks", title: "SolidWorks steps", body: [
@@ -108,7 +108,7 @@ export const MACRO_HELP = {
   BuildSpreader: { changes: "Completes the spreader part (plate, pedestals, clearance cuts, named faces) and builds the TIM parts. Writes the plate build to the cad file.", check: "Problems on tab 7, then that each covered chip got its pedestal and TIM." },
   SyncFromCAD: { changes: "Reads the assembly only. Writes what it found (boxes that differ, the plate as built, failed checks) to the cad file.", check: "Tab 10: take the SolidWorks sizes or build again; tick the failed checks once fixed." },
   SetupSim: { changes: "Adds a new study to the assembly and a new run, with a copy of the inputs, to the results file. Never changes an older study.", check: "The message: solved, or the problems that stopped it. Then press Read Results." },
-  RunFlow: { changes: "Changes the heat of the Flow volume sources and the initial temperature of your Flow project, solves it, and adds a run to the results file.", check: "Every chip with heat has a source (the message lists the ones without), and the goals were read." },
+  RunFlow: { changes: "Makes or updates the Flow project <prefix>Flow (materials, heat sources, goals, domain, initial temperature), solves it, and adds a run to the results file.", check: "Every chip with heat has a source (the message lists the ones without), and the goals were read." },
   ReadResults: { changes: "Puts the temperatures, energy balance and the plot picture into the run in the results file.", check: "Tab 9: the energy balance first, then each part against Tj max and the hand check." },
 };
 

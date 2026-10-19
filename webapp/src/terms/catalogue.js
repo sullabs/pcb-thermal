@@ -403,7 +403,7 @@ def("surf.spreaderTopEps", "Emissivity, spreader top", "ε", "", "input", "Emiss
 def("surf.spreaderOtherH", "h, other spreader faces", "h", "W/(m² K)", "input", "Convection on the spreader's sides and underside (the faces not touching a TIM).", undefined, { range: [0, 200] });
 def("surf.spreaderOtherEps", "Emissivity, other spreader faces", "ε", "", "input", "Emissivity of the spreader's sides and underside.", undefined, { range: [0, 1] });
 def("simset.studyType", "Study type", "", "", "input", "Thermal: SolidWorks Simulation, heat conduction with h on the outer faces (button 6). Flow: Flow Simulation, the air is modelled (button 7).",
-  "Start with Thermal: it is fast and uses the same h as the hand check. Use Flow when the air flow decides the result (a fan, a closed box, chimney effect), after a Flow project was made once by hand.");
+  "Start with Thermal: it is fast and uses the same h as the hand check. Use Flow when the air flow decides the result (a fan, a closed box, chimney effect). The Run Flow macro builds the Flow project itself.");
 def("simset.meshGlobal", "Global mesh size", "", "mm", "input", "Element size for the whole model.", "Smaller is more accurate and slower. 2 to 3 mm is a good start for a credit card size board.", { range: [0.3, 10] });
 def("simset.meshFine", "Fine mesh size", "", "mm", "input", "Element size on the chips with heat and on the TIMs.", "A chip should be at least 3 elements thick; TIMs 2. 0.3 to 0.5 mm is usual.", { range: [0.05, 3] });
 def("simset.includePartsWithoutHeat", "Parts without heat in the study", "", "", "input", "Yes: parts without heat stay in the model and conduct and lose heat. No: they are left out (a smaller, faster study).");

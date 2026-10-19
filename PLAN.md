@@ -23,7 +23,7 @@ Reference board: Raspberry Pi 4 Model B (`Raspberry Pi 4 Model B.STEP`).
 | M4 `BuildSpreader` (plate, cuts, pedestals, TIM parts) | written, not yet run |
 | M5 `SyncFromCAD` | written; two-plate version run on RPi4_fresh 2026-10-14, 0 failed checks |
 | M6 `SetupSim` + `ReadResults` (Simulation thermal) | written, not yet run |
-| M7 Flow Simulation spike + `RunFlow` | spike done (`docs/flow_api_notes.md`), `RunFlow.bas` written, run and fixed 2026-10-01 (API Boolean quirk, 0 K goals) |
+| M7 Flow Simulation spike + `RunFlow` | spike done (`docs/flow_api_notes.md`), `RunFlow.bas` written, run and fixed 2026-10-01 (API Boolean quirk, 0 K goals); builds the whole Flow project from `PCBThermal_Flow.fwp` 2026-10-19 |
 | M8 two-resistor chip model | written in SetupSim, not yet run (docs/HOWTO_M8.md) |
 | Test of M1 to M6 in one session | `docs/TEST_PLAN.md` |
 | Register rebuilt with Vin/Iin/Vout/Iout/Pin/Pout/Pd, Ta, Tj, Rja/Rjc/Rjb; L and W moved to CAD geometry | done 2026-10-01, RPi4 refilled: same results |
@@ -385,7 +385,7 @@ Acceptance: AF column fills, AG shows hand minus sim, results row appended.
 
 ### 6.7 Flow Simulation (M7), stage 2
 Start with a spike: what the SW 2023 Flow Simulation API can set (heat sources, materials, ambient, goals,
-run, read goals). Expected route: user builds one Flow project once from a template; macro updates heat source
+run, read goals). Route taken 2026-10-19: the macro builds the Flow project from `PCBThermal_Flow.fwp` itself (no clicks); first route was: user builds one Flow project once from a template; macro updates heat source
 values and materials by name, runs, reads goals into `Sim results`. Output of the spike: a short note in
 `docs/flow_api_notes.md` and a revised M7 spec.
 

@@ -240,7 +240,7 @@ function SimView({ c }) {
         ${two && html`<label><${L} t="simset.layerFrac" /> <${NumField} term="simset.layerFrac" value=${ss.layerFrac} unit="" label="Layer thickness" width="4em" placeholder="0.1" rule=${{ minEx: 0, max: 0.44 }} disabled=${locked} onCommit=${v => setSim(["layerFrac"], "Layer thickness", v, false)} /></label>
           <label><${L} t="simset.kCore" /> <${NumField} term="simset.kCore" value=${ss.kCore} unit="WmK" label="Core k" placeholder="100" rule=${{ minEx: 0 }} disabled=${locked} onCommit=${v => setSim(["kCore"], "Core k", v, false)} /></label>`}
       </div>
-      <p class="hint">${type === "Flow" ? "Flow: the macro sets heat and ambient on the Flow project you made once by hand (docs: HOWTO_M7). Surfaces and contacts below are for Thermal studies only." : "Thermal: SolidWorks Simulation, steady state, h and radiation on the outer faces."}</p>
+      <p class="hint">${type === "Flow" ? "Flow: the macro builds the Flow project itself (air, gravity, radiation, materials, a heat source and goals per chip) and sets heat and ambient. Surfaces and contacts below are for Thermal studies only." : "Thermal: SolidWorks Simulation, steady state, h and radiation on the outer faces."}</p>
     <//>
     <${Card} title="Air and surfaces">
       <table class="grid limits"><thead><tr><th></th><th><${L} t="surf.pcbTopH">h</${L}></th><th><${L} t="surf.pcbTopEps">emissivity</${L}></th></tr></thead>

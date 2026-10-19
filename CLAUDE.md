@@ -28,7 +28,7 @@ Read `PLAN.md` first. It is the spec. This file is the short list of rules that 
   Node, npm or Python: only the built HTML file ships.
 - **Branch `webpage` is the user package** (what users download): `PCB_Thermal.html` at the top, `macros\` with
   `PCBThermal.swp`, the `.bas` files it holds (PTCommon, PTJson, ImportStep, BuildBoard, BuildSpreader, SyncFromCAD, SetupSim,
-  RunFlow, ReadResults, UpdateMacros), the toolbar setup (8 buttons) and icons, and a user `README.md`. **Every change to the page or to one of those macros must also
+  RunFlow, ReadResults, UpdateMacros), the Flow template `PCBThermal_Flow.fwp` (copy of `src/PCBThermal_Flow.fwp`), the toolbar setup (8 buttons) and icons, and a user `README.md`. **Every change to the page or to one of those macros must also
   be brought to `webpage` in the same session**: copy the rebuilt `webapp/dist/PCB_Thermal.html` and the changed
   `.bas` files there, rebuild `PCBThermal.swp` in SolidWorks (Update Macros; ask before driving SolidWorks), commit
   and push. A macro that moves to project files joins the package (`.bas`, button in `SetupToolbar.ps1`, icons,
