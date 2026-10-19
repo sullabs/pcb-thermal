@@ -514,13 +514,13 @@ function App() {
     <nav class="tabs" role="tablist">
       ${states.map(s => html`<button role="tab" aria-selected=${s.n === tab} class=${`tab ${s.status} ${s.n === tab ? "on" : ""}`}
         title=${s.locked ? "Locked: " + s.reason : s.note || ""} onClick=${() => setTab(s.n)}>
-        <span class="n">${s.n}</span> ${s.title}${s.locked ? html` <span class="lock" aria-label="locked">🔒</span>` : ""}${s.badge ? html` <span class="badge">${s.badge}</span>` : ""}
+        <span class="n">${s.n}</span> <span class="t">${s.title}</span>${s.locked ? html` <span class="lock" aria-label="locked">🔒</span>` : ""}${s.badge ? html` <span class="badge">${s.badge}</span>` : ""}
       </button>`)}
     </nav>
     <${Explain.Provider} value=${explainCtx}>
     <div class=${`layout ${explain.length ? "with-panel" : ""}`}>
     <main>
-      <h2>${st.n} ${st.title}</h2>
+      <h2><span class="step-n">${st.n}</span> ${st.title}</h2>
       ${st.locked && html`<div class="locked-banner" role="note"><b>This step is locked.</b> ${st.reason}
         ${st.fixTab !== undefined && html` <button onClick=${() => setTab(st.fixTab)}>Go to tab ${st.fixTab}</button>`}</div>`}
       ${example && html`<div class="example-banner" role="note"><b>Example study, read only.</b> Edits are off and nothing is saved. <button class="small" onClick=${() => setTab(0)}>Choose your own folder</button></div>`}
