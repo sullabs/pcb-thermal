@@ -1,3 +1,4 @@
 *.bas text eol=crlf
 *.bmp binary
 *.xlsx binary
+*.swp binary

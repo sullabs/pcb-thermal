@@ -1,16 +1,9 @@
 # Office and SolidWorks lock files
 ~$*
-# Compiled macro projects (binary, rebuilt from src/*.bas)
+# Compiled macro projects: only the shipped one
 *.swp
+!macros/PCBThermal.swp
 *.sldreg
-# Macro output: built parts, studies, reports, daily workbook copies
+# Project output
 CAD/
 backup/
-*.bak_*
-# Add-in build output
-addin/bin/
-addin/obj/
-addin/dist/
-
-# Web app development tools
-webapp/node_modules/

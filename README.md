@@ -1,78 +1,60 @@
-# PCB Thermal macros for SolidWorks 2023
+# PCB Thermal
 
-Turns a PCB STEP file into a thermal model, with an optional heat spreader on one or both sides, runs the
-SolidWorks thermal simulation and writes the results back to Excel. You need SolidWorks 2023 (with Simulation
-for the thermal study, Flow Simulation for the flow study) and Excel.
+Takes a PCB from its STEP file to a thermal model in SolidWorks. You fill in the parts and their power on a web page;
+SolidWorks macros import the STEP and build the thermal assembly.
 
-## What is in this repo
+You need: Chrome or Edge, SolidWorks 2023. Nothing to install besides the toolbar step below.
 
-What you need to use it:
+## What is here
 
-- `src\` : 9 `.bas` files (one shared module, 8 macros) and `src\icons\` (button icons, 16 and 32 px)
-- `workbook\PCB_thermal_TEMPLATE.xlsx` : the workbook. Make one copy per board and keep the template clean.
-- `docs\` : the workflow and how-to notes (`WORKFLOW_BARE_BOARD.md`, `HOWTO_*.md`)
+| File | What it is |
+|---|---|
+| `PCB_Thermal.html` | The page. Open it from disk in Chrome or Edge. Everything is inside this one file. |
+| `macros\PCBThermal.swp` | The SolidWorks macros, ready to run: Import STEP, Build Board, Update Macros. |
+| `macros\SetupToolbar.cmd` | Makes the **PCB Thermal** tab in SolidWorks with one button per macro. |
+| `macros\*.bas`, `macros\icons\` | The macro source and the button icons (used by the two files above). |
 
-Development only (not needed to run the macros):
+## Install (once)
 
-- `example\RaspberryPi4\` : the reference board: STEP file and filled workbooks
-- `tests\`, `tools\`, `PLAN.md`, `CLAUDE.md`, `docs\TEST_*.md` : test macros, scripts, spec and test records
+1. Put this folder somewhere it will stay, with a short path, for example `C:\PCBThermal\`.
+2. Close SolidWorks (check Task Manager: no `SLDWORKS.exe`).
+3. Double-click `macros\SetupToolbar.cmd`. It says "Made the PCB Thermal tab with 3 buttons".
+4. Start SolidWorks and open a part or assembly. The **PCB Thermal** tab is there.
 
-## 1. Install (once, about 10 minutes)
+If you move the folder later, run `SetupToolbar.cmd` again.
 
-1. Download or clone to a folder with a short path that will not move, for example `C:\PCBThermal\`.
-2. SolidWorks: Tools > Macro > New. Save it as `C:\PCBThermal\PCBThermal.swp`.
-3. In the VBA editor: File > Import File (Ctrl+M). Import every `.bas` file in `src\`
-   (`PTCommon.bas` plus the 8 others). Delete the empty `Module1`.
-4. Debug > Compile VBAProject. Nothing should appear. Press Ctrl+S, then close the editor.
+## Start a new board
 
-If a compile error appears, note the highlighted line and the message and report it as an issue.
+1. Make a folder for the board and put its STEP file in it.
+2. Open `PCB_Thermal.html` in Chrome or Edge. On tab 0 press **Choose the project folder** and pick that folder.
+3. Type your prefix (your initials, for example `AB`) and the board name. Press **Start a new project here**.
+   The page writes `AB_project.json`, `AB_cad.json`, `AB_results.json` and a `CAD` folder. The prefix keeps file
+   names unique.
+4. Follow the tabs in order. A grey tab says what it waits for. **Learn** in the top bar explains each step.
 
-## 2. Make the toolbar tab (optional but easier)
+Have an old workbook (`.xlsx`) for this board? Use **Make it from an old workbook** in step 3 instead.
 
-1. Open any part. Right-click a CommandManager tab > Add Tab > Empty Tab. Rename it `PCB Thermal`.
-2. Tools > Customize > Commands > category Macro. Drag **New Macro Button** onto the tab, fill the box, press OK.
-   Repeat for each row. Macro = `C:\PCBThermal\PCBThermal.swp` for all of them.
-3. Right-click the tab > Copy Tab to Assembly, so it also shows in assemblies.
+Want to look around first? Tab 0: **Open the example study** (Raspberry Pi 4, read only).
 
-| # | Tooltip | Method | Icon (in `src\icons\`) |
-|---|---|---|---|
-| 1 | Prepare Workbook | `SetupWorkbook.main` | `1_PrepareWorkbook_32.bmp` |
-| 2 | Import STEP | `ImportStep.main` | `2_ImportStep_32.bmp` |
-| 3 | Build Board | `BuildBoard.main` | `3_BuildBoard_32.bmp` |
-| 4 | Build Spreader | `BuildSpreader.main` | `4_BuildSpreader_32.bmp` |
-| 5 | Sync CAD to Excel | `SyncFromCAD.main` | `5_SyncCADtoExcel_32.bmp` |
-| 6 | Run Thermal Study | `SetupSim.main` | `6_RunThermalStudy_32.bmp` |
-| 7 | Run Flow Simulation | `RunFlow.main` | `7_RunFlowSim_32.bmp` |
-| 8 | Read Results | `ReadResults.main` | `8_ReadResults_32.bmp` |
+## In SolidWorks
 
-No tab? Run any macro with Tools > Macro > Run, pick `PCBThermal.swp`, then the module and `main`.
+- **Import STEP** (tab 2 on the page): pick `AB_project.json` in the board folder. It reads the STEP and writes
+  `AB_cad.json`. The page reloads it on its own.
+- **Build Board** (tab 6): builds the thermal assembly in the `CAD` folder and writes the build to `AB_cad.json`.
 
-## 3. Use
+Each macro asks which project the first time, then offers the last one.
 
-1. Copy `workbook\PCB_thermal_TEMPLATE.xlsx` to a new name, for example `MyBoard.xlsx`, and open it in Excel.
-2. Fill the `1 Component register` tab (RefDes, heat, theta values). Blue cells are inputs.
-3. Run the macros in order. Each one asks for the workbook the first time.
-   - **Import STEP**: open the board STEP (or the open model). Writes the bodies to the CAD geometry tab.
-   - Set Include = Yes for the PCB and every part with heat. Tick the Change log rows.
-   - **Build Board**: builds the thermal assembly. Read `CAD\<prefix>BuildBoard_report.txt`.
-   - **Run Thermal Study**, then **Read Results**: bare board temperatures go to the Sim results tab.
-4. Spreader (optional, one plate per side of the board):
-   - In the thermal assembly, add a part with ONE sketch named `Outline` on its plane. That is the plate shape.
-     Name the part with `Spreader` in the file name. For the plate under the board also put `Bottom` in the name.
-   - In the `7 Spreader` tab (and `7b Spreader bottom` for the bottom plate) mark the chips it touches and enter
-     plate thickness and TIM thickness.
-   - Run **Build Spreader**, then **Sync CAD to Excel** (checks the CAD against the sheet), then the study again.
+## Saving
 
-Full steps: `docs\WORKFLOW_BARE_BOARD.md`, `docs\HOWTO_M3_M4.md`, `docs\HOWTO_M5.md`.
+The page saves `AB_project.json` on Save (Ctrl+S) and on its own every 30 s. Before the first save of each day it
+copies the old file to `backup\`. The macros write only `AB_cad.json` and `AB_results.json`.
 
-## Rules to know
+## Not in this package yet
 
-- Excel units are mm. Do not edit grey cells.
-- Keep the workbook open in Excel while the macros run.
-- If you move `PCBThermal.swp`, edit each toolbar button and pick the new path.
-- Accuracy of the numbers is not validated. Check them against your own hand calculation before relying on them.
+Spreader, simulation and results macros (tabs 7 to 9) still work from the old workbook only. They come here once they
+read the project files.
 
-## Updating a macro later
+## Updating
 
-Open the project (Tools > Macro > Edit), remove the old module (answer No to export), import the new `.bas`,
-compile, save.
+New `PCB_Thermal.html`: replace the file. New `.bas` files: put them in `macros\`, then press **Update Macros** on the
+PCB Thermal tab.

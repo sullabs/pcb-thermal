@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-<defs><mask id="k"><rect width="24" height="24" fill="#fff"/><circle cx="18" cy="18" r="6.5"/></mask></defs>
-<g mask="url(#k)"><rect x="3" y="2" width="15" height="19" rx="2" fill="#21A366"/>
-<path d="M3 7.5h15M3 11.5h15M3 15.5h15M9.5 2v19" stroke="#fff" stroke-width="1.5"/></g>
-<circle cx="18" cy="18" r="5" fill="#2F7BD6"/>
-<path d="M18 15.5v5M15.5 18h5" stroke="#fff" stroke-width="1.75" stroke-linecap="round"/>
-</svg>
