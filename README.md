@@ -50,8 +50,13 @@ Press **I pressed it** on the card and the page waits until the macro has writte
 | Build Spreader | 7 | Builds the spreader plate, pedestals and TIM parts. |
 | Sync CAD | 7, 10 | Reads the assembly back; tab 10 offers sizes you changed in SolidWorks. |
 | Run Thermal Study | 8 | Makes and solves a new thermal study; the run goes to `AB_results.json`. |
-| Run Flow Simulation | 8 | Builds the Flow project from `PCBThermal_Flow.fwp` (air, radiation, materials, a source and goals per chip), solves it, reads its goals. |
+| Run Flow Simulation | 8 | Builds the Flow project from `PCBThermal_Flow.fwp` with the mesh, convergence, environment, materials, surfaces and contacts of tab 8, solves it, reads its goals and the run health (tab 9). |
 | Read Results | 9 | Reads the solved study: temperatures per part, energy balance, plot picture. |
+
+Flow materials: Flow takes a k or an emissivity only as a named item of its Engineering Database. Tab 8 (study type
+Flow) lists the user materials (`k ...`) and radiative surfaces (`e ...`) a project needs; make each once under
+Solids (or Radiative Surfaces) > User Defined > PCBThermal. A missing one falls back to Flow's generic item and the
+report says so.
 
 Each macro asks which project the first time (pick `AB_project.json`), then offers the last one. The macros write
 only `AB_cad.json` and `AB_results.json`; the page reloads them on its own.
