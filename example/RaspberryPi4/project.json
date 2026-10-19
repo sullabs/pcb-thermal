@@ -1059,6 +1059,44 @@
           "basis": "package"
         }
       },
+      "pcb": "User Defined\\PCBThermal\\k 21.5 0.316",
+      "tims": {
+        "U2": "User Defined\\PCBThermal\\k 2.87",
+        "U1": "User Defined\\PCBThermal\\k 2.87",
+        "U6": "User Defined\\PCBThermal\\k 2.87",
+        "U5": "User Defined\\PCBThermal\\k 2.87",
+        "U4": "User Defined\\PCBThermal\\k 2.87",
+        "U3": "User Defined\\PCBThermal\\k 2.87",
+        "L1": "User Defined\\PCBThermal\\k 2.87",
+        "L2": "User Defined\\PCBThermal\\k 2.87"
+      },
+      "spreaders": {
+        "top": "User Defined\\PCBThermal\\k 162"
+      },
+      "surfaces": {
+        "pcb": "User Defined\\PCBThermal\\e 0.90",
+        "parts": "User Defined\\PCBThermal\\e 0.90",
+        "spreader": "User Defined\\PCBThermal\\e 0.85"
+      },
+      "radiative": [
+        {
+          "name": "e 0.90",
+          "path": "User Defined\\PCBThermal\\e 0.90",
+          "emissivity": 0.9,
+          "usedBy": [
+            "PCB",
+            "parts"
+          ]
+        },
+        {
+          "name": "e 0.85",
+          "path": "User Defined\\PCBThermal\\e 0.85",
+          "emissivity": 0.85,
+          "usedBy": [
+            "spreader"
+          ]
+        }
+      ],
       "materials": [
         {
           "name": "k 19.6",
@@ -1095,6 +1133,40 @@
           "kz": 2.15,
           "usedBy": [
             "U5"
+          ]
+        },
+        {
+          "name": "k 21.5 0.316",
+          "path": "User Defined\\PCBThermal\\k 21.5 0.316",
+          "kxy": 21.5,
+          "kz": 0.316,
+          "usedBy": [
+            "PCB"
+          ]
+        },
+        {
+          "name": "k 162",
+          "path": "User Defined\\PCBThermal\\k 162",
+          "kxy": 162,
+          "kz": 162,
+          "usedBy": [
+            "top spreader"
+          ]
+        },
+        {
+          "name": "k 2.87",
+          "path": "User Defined\\PCBThermal\\k 2.87",
+          "kxy": 2.87,
+          "kz": 2.87,
+          "usedBy": [
+            "TIM U2",
+            "TIM U1",
+            "TIM U6",
+            "TIM U5",
+            "TIM U4",
+            "TIM U3",
+            "TIM L1",
+            "TIM L2"
           ]
         }
       ]

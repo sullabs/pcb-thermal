@@ -7,6 +7,7 @@
 //   meshCheckResult(run, runs, limit) -> the change per chip between the two runs of a mesh check
 //   kStep(k), flowMaterial(kxy, kz)  -> k in 10 % steps (24 per decade) and the user material named after it
 //   flowForSw(project, calc, fs)     -> forSolidWorks.flow: per chip its Tj basis and material(s), and the materials list
+//   flowEmissivity(e)               -> radiative surface named after the emissivity (2 decimals)
 //   tjBasisOf(run, ref)              -> "calibrated block" | "two-resistor" | "package" for a run's part
 
 import { isNum } from "./util.js";
@@ -66,6 +67,11 @@ export function flowMaterial(kxy, kz = kxy) {
   return { name, path: `User Defined\\PCBThermal\\${name}`, kxy: a, kz: b };
 }
 
+export function flowEmissivity(e) {
+  const v = Math.round(e * 100) / 100, name = `e ${v.toFixed(2)}`;
+  return { name, path: `User Defined\\PCBThermal\\${name}`, emissivity: v };
+}
+
 // Chips with heat in the Flow project: a block with the Rjc k (calibrated block), the three bodies of a two-resistor
 // chip (Run Thermal Study makes them; layer k = t / (theta × A), core kCore), or the generic package material.
 export function flowForSw(project, calc, fs) {
@@ -83,7 +89,49 @@ export function flowForSw(project, calc, fs) {
       chips[ref] = { basis: "calibrated block", material: use(flowMaterial(c.kxy > 0 ? c.kxy : c.kz, c.kz), ref) };
     } else chips[ref] = { basis: "package" };
   }
-  return { chips, materials: [...mats.values()] };
+  // F5: PCB, TIMs, spreaders, radiative surfaces and contacts from the page, not Flow's library picks
+  const out = { chips };
+  const notes = [];
+  out.pcb = use(flowMaterial(fs.pcb.kxy, fs.pcb.kz), "PCB");
+  const ct = ss.contacts || {};
+  const tims = {}, spreaders = {};
+  let timArea = 0;
+  for (const side of ["top", "bottom"]) {
+    const pl = fs.plates?.[side];
+    if (!pl) continue;
+    if (pl.k > 0) spreaders[side] = use(flowMaterial(pl.k), `${side} spreader`);
+    for (const ch of pl.chips) {
+      if (ch.timMode !== "Body" || !(ch.timK > 0) || !(ch.timTMm > 0)) continue;
+      const tm = ch.timTMm / 1000, rc = ct.chipToTim > 0 ? ct.chipToTim : 0;
+      tims[ch.refDes] = use(flowMaterial(tm / (tm / ch.timK + rc)), `TIM ${ch.refDes}`);
+      if (ch.timRCW > 0) timArea += (1000 * ch.timTMm) / (ch.timK * ch.timRCW);
+    }
+  }
+  if (Object.keys(tims).length) out.tims = tims;
+  if (Object.keys(spreaders).length) out.spreaders = spreaders;
+  if (ct.chipToTim > 0 && Object.keys(tims).length) notes.push(`chip to TIM contact ${ct.chipToTim} K m²/W is folded into each TIM material: k = t / (t / k TIM + R contact)`);
+  const sf = ss.surfaces || {}, rads = new Map();
+  const rad = (e, who) => { const r = flowEmissivity(e); if (!rads.has(r.path)) rads.set(r.path, { ...r, usedBy: [] }); rads.get(r.path).usedBy.push(who); return r.path; };
+  const surfaces = {};
+  if (isNum(sf.pcbTop?.emissivity)) surfaces.pcb = rad(sf.pcbTop.emissivity, "PCB");
+  if (isNum(sf.parts?.emissivity)) surfaces.parts = rad(sf.parts.emissivity, "parts");
+  if (fs.plates && isNum(sf.spreaderTop?.emissivity)) surfaces.spreader = rad(sf.spreaderTop.emissivity, "spreader");
+  if (Object.keys(surfaces).length) out.surfaces = surfaces;
+  if (isNum(sf.pcbTop?.emissivity) && isNum(sf.pcbBottom?.emissivity) && sf.pcbTop.emissivity !== sf.pcbBottom.emissivity) notes.push(`PCB emissivity: top ${sf.pcbTop.emissivity}, bottom ${sf.pcbBottom.emissivity}; Flow gets the top value on the whole PCB`);
+  if (fs.plates && isNum(sf.spreaderTop?.emissivity) && isNum(sf.spreaderOther?.emissivity) && sf.spreaderTop.emissivity !== sf.spreaderOther.emissivity) notes.push(`spreader emissivity: top ${sf.spreaderTop.emissivity}, other faces ${sf.spreaderOther.emissivity}; Flow gets the top value on the whole spreader`);
+  const contacts = {};
+  if (ct.partToPcb > 0) {
+    const onPcb = fs.bodies.filter(b => Math.abs(b.box.zMin - fs.pcb.h) < 0.05 || Math.abs(b.box.zMin + b.box.h) < 0.05);
+    const a = onPcb.reduce((s, b) => s + b.box.l * b.box.w, 0);
+    if (a > 0) contacts.partToPcb = { rKW: ct.partToPcb / (a * 1e-6), areaMm2: a, rSpecific: ct.partToPcb };
+  }
+  if (ct.timToSpreader > 0 && timArea > 0) contacts.timToSpreader = { rKW: ct.timToSpreader / (timArea * 1e-6), areaMm2: timArea, rSpecific: ct.timToSpreader };
+  if (Object.keys(contacts).length) out.contacts = contacts;
+  if (notes.length) out.notes = notes;
+  out.radiative = [...rads.values()];
+  if (!out.radiative.length) delete out.radiative;
+  out.materials = [...mats.values()];
+  return out;
 }
 
 // What a run's peak means. Flow runs since F4 say it; older Flow runs used a generic plastic block (package).

@@ -167,6 +167,8 @@ same board and spreader.
 
 ## F5. Materials, radiation and contacts from the page
 
+**Status: done 2026-10-19. PCB, TIM and spreader get user materials from the page k; radiation is one owned radiative surface per component group (PCB, parts, spreader) named after the emissivity; contacts are integral values on the PCB (parts to PCB) and the spreader (TIM to spreader); chip to TIM is folded into the TIM material. Face-level surfaces and contacts were not done: they need face selection the API help does not cover well enough to write offline. Tab 8 lists every value and simplification; docs/HOWTO_FLOW_MATERIALS.md says how to make the materials once. Live acceptance not run yet.**
+
 **Problem.** PCB, TIM and spreader materials are fixed library picks; emissivity is 0.9 everywhere; no contact resistance.
 The page already has all of these values.
 
@@ -249,7 +251,7 @@ orientation or air speed does not match the h it assumes (the page's h values ar
 | F2 mesh | S2, F1 | medium | removes the unresolved parts F1 will show | done 2026-10-19 |
 | F3 convergence | S3, F1 | small | | done 2026-10-19 |
 | F4 Tj | S4 | medium | changes the number compared with Tj max | done 2026-10-19 |
-| F5 materials | S4 to S6 | medium | | open |
+| F5 materials | S4 to S6 | medium | | done 2026-10-19 |
 | F8 fixes | none | small | can go any time, good first warm-up | open |
 | F6 environment | S7 | medium | | open |
 | F7 compare | F1, F4 | medium | page only | open |

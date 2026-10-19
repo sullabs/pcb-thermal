@@ -298,9 +298,21 @@ function FlowMaterialsCard({ c }) {
     <${Scroll}><table class="grid"><thead><tr><th><${L} t="part.refDes" /></th><th><${L} t="fchip.basis" /></th><th><${L} t="fchip.material" /></th><th class="num"><${L} t="sim.rjc" /></th><th class="num"><${L} t="fchip.rjcStep" /></th></tr></thead>
     <tbody>${refs.map(r => { const i = String(c.calc.simChips.findIndex(x => x.refDes === r)); return html`<tr><td><${V} t="part.refDes" k=${r} v=${r} /></td><td class=${fl.chips[r].basis === "package" ? "warn" : ""}><${V} t="fchip.basis" k=${r} /></td><td><${V} t="fchip.material" k=${r} /></td>
       <td class="num">${i !== "-1" ? html`<${V} t="sim.rjc" k=${i} d=${2} />` : ""}</td><td class="num"><${V} t="fchip.rjcStep" k=${r} d=${2} /></td></tr>`; })}</tbody></table><//>
+    <h4>Board, TIMs, spreader, surfaces and contacts</h4>
+    <dl class="kv">
+      <dt><${L} t="fsw.pcbMat" /></dt><dd><${V} t="fsw.pcbMat" /></dd>
+      ${Object.keys(fl.spreaders || {}).map(s => html`<dt><${L} t="fsw.sprMat" k=${s} /> (${s})</dt><dd><${V} t="fsw.sprMat" k=${s} /></dd>`)}
+      ${Object.keys(fl.tims || {}).map(r => html`<dt><${L} t="fsw.timMat" k=${r} /> (<${V} t="part.refDes" k=${r} v=${r} />)</dt><dd><${V} t="fsw.timMat" k=${r} /></dd>`)}
+      ${Object.keys(fl.surfaces || {}).map(g => html`<dt><${L} t="fsw.surface" k=${g} /> (${g})</dt><dd><${V} t="fsw.surface" k=${g} /></dd>`)}
+      ${Object.keys(fl.contacts || {}).map(g => html`<dt><${L} t="fsw.contactR" k=${g} /> (${g === "partToPcb" ? "parts to PCB" : "TIM to spreader"})</dt><dd><${V} t="fsw.contactR" k=${g} d=${3} u /> over <${V} t="fsw.contactA" k=${g} d=${0} u /></dd>`)}
+    </dl>
+    ${(fl.notes || []).length > 0 && html`<ul class="reasons">${fl.notes.map(x => html`<li>${marked(x.charAt(0).toUpperCase() + x.slice(1) + ".")}</li>`)}</ul>`}
     ${fl.materials.length > 0 && html`<h4>Make these once in Flow (Tools > Flow Simulation > Tools > Engineering Database > Materials > Solids > User Defined, folder PCBThermal)</h4>
       <${Scroll}><table class="grid"><thead><tr><th><${L} t="fmat.name" /></th><th class="num"><${L} t="fmat.kxy" /></th><th class="num"><${L} t="fmat.kz" /></th><th><${L} t="fmat.usedBy" /></th></tr></thead>
       <tbody>${fl.materials.map((m, i) => html`<tr><td><${V} t="fmat.name" k=${String(i)} /></td><td class="num"><${V} t="fmat.kxy" k=${String(i)} /></td><td class="num"><${V} t="fmat.kz" k=${String(i)} /></td><td><${V} t="fmat.usedBy" k=${String(i)} /></td></tr>`)}</tbody></table><//>
+      ${(fl.radiative || []).length > 0 && html`<h4>And these radiative surfaces (Radiative Surfaces > User Defined, folder PCBThermal, type real surface)</h4>
+      <${Scroll}><table class="grid"><thead><tr><th><${L} t="frad.name" /></th><th class="num"><${L} t="frad.eps" /></th><th><${L} t="frad.usedBy" /></th></tr></thead>
+      <tbody>${fl.radiative.map((m, i) => html`<tr><td><${V} t="frad.name" k=${String(i)} /></td><td class="num"><${V} t="frad.eps" k=${String(i)} d=${2} /></td><td><${V} t="frad.usedBy" k=${String(i)} /></td></tr>`)}</tbody></table><//>`}
       <p class="hint">Conductivity anisotropic (axial with axis Z) when k xy and k z differ. Density 2000 kg/m³ and specific heat 1000 J/(kg K) for every one: a steady state result does not depend on them. A material that is missing makes Run Flow use the generic one and say so; the chip is then marked package on tab 9.</p>`}
   <//>`;
 }

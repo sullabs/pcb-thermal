@@ -101,7 +101,7 @@ export function macroChecks(id, c) {
       const thin = calc.flow?.thin || [];
       out.push(ok(!thin.length, thin.length ? `May not be meshed (thinner than the estimated smallest cell): ${thin.map(x => x.refDes).join(", ")}. Turn on the local mesh or raise the mesh level.` : "Every part with heat is thicker than the estimated smallest cell", 8, true));
       if (calc.flow?.settings.meshCheck) out.push(ok(true, `Mesh check is on: Yes solves twice (level ${calc.flow.settings.meshLevel} and ${calc.flow.settings.meshLevel + 1}).`, 8, true));
-      out.push(ok(true, "Flow Simulation is turned on in SolidWorks (Tools > Add-Ins) and PCBThermal_Flow.fwp sits next to PCBThermal.swp. Materials are Flow's own (PCB 4/8/12 layers, typical plastic package, GR25A TIM), not the k values on this page.", undefined, true));
+      out.push(ok(true, "Flow Simulation is turned on in SolidWorks (Tools > Add-Ins), PCBThermal_Flow.fwp sits next to PCBThermal.swp, and the user materials and radiative surfaces listed on this tab are in Flow's Engineering Database (a missing one falls back to Flow's generic pick, and the report says so).", undefined, true));
     }
   } else if (id === "ReadResults") {
     const waiting = (results.runs || []).filter(r => r.studyType === "Thermal" && (r.status === "solved" || r.status === "set up"));

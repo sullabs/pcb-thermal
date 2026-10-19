@@ -429,6 +429,16 @@
         "flow": { "$ref": "#/$defs/flowForSw" }
       }
     },
+    "flowContact": {
+      "type": "object",
+      "required": ["rKW", "areaMm2", "rSpecific"],
+      "additionalProperties": false,
+      "properties": {
+        "rKW": { "type": "number", "exclusiveMinimum": 0, "description": "Integral resistance = rSpecific / area (K/W)." },
+        "areaMm2": { "type": "number", "exclusiveMinimum": 0, "description": "Contact area it spreads over (mm2)." },
+        "rSpecific": { "type": "number", "exclusiveMinimum": 0, "description": "K m2/W from simSetup.contacts." }
+      }
+    },
     "flowForSw": {
       "type": "object",
       "description": "What Run Flow Simulation needs beyond the rest of forSolidWorks (Flow plan F4, F5). Material paths are user materials in Flow's Engineering Database, named after their k in 10 % steps.",
@@ -451,6 +461,39 @@
                 "additionalProperties": false,
                 "properties": { "bottom": { "type": "string" }, "core": { "type": "string" }, "top": { "type": "string" } }
               }
+            }
+          }
+        },
+        "pcb": { "type": "string", "description": "PCB material path (k xy, k z of the stack)." },
+        "tims": { "type": "object", "description": "TIM material path per chip RefDes (TIM k with the chip to TIM contact folded in).", "additionalProperties": { "type": "string" } },
+        "spreaders": {
+          "type": "object", "additionalProperties": false,
+          "properties": { "top": { "type": "string" }, "bottom": { "type": "string" } }
+        },
+        "surfaces": {
+          "type": "object", "description": "Radiative surface path per component group (emissivity of tab 5 and 8).", "additionalProperties": false,
+          "properties": { "spreader": { "type": "string" }, "pcb": { "type": "string" }, "parts": { "type": "string" } }
+        },
+        "contacts": {
+          "type": "object", "description": "Contact resistances as Flow integral values (K/W over the contact area).", "additionalProperties": false,
+          "properties": {
+            "partToPcb": { "$ref": "#/$defs/flowContact" },
+            "timToSpreader": { "$ref": "#/$defs/flowContact" }
+          }
+        },
+        "notes": { "type": "array", "items": { "type": "string" }, "description": "Where the Flow model is simpler than the page (shown on tab 8)." },
+        "radiative": {
+          "type": "array",
+          "description": "Every user radiative surface the paths above name (Radiative Surfaces > User Defined > PCBThermal).",
+          "items": {
+            "type": "object",
+            "required": ["name", "path", "emissivity"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string" },
+              "path": { "type": "string" },
+              "emissivity": { "type": "number", "minimum": 0, "maximum": 1 },
+              "usedBy": { "type": "array", "items": { "type": "string" } }
             }
           }
         },

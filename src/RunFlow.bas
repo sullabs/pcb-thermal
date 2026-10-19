@@ -46,6 +46,8 @@ Const nikVolumeSource As Long = 4
 Const nikSolidMaterial As Long = 8
 Const nikVolumeGoal As Long = 13
 Const nikLocalMesh As Long = 14
+Const nikRadiationSurface As Long = 9
+Const nikThermalContactResistance As Long = 15
 ' nikFeatureTopolReferenceTypes_e
 Const nikFTR_topology As Long = 0
 ' nikGoalParameters_e, nikGoalValueCalculateTypes_e
@@ -62,6 +64,12 @@ Const nikEnvRadiativeTemperature As Long = 30
 Const nikHeatGenerationRate As Long = 21
 Const nikVolumeSourceType As Long = 43
 Const nikInitialMeshLevel As Long = 7
+Const nikPathToRadiationMedia As Long = 45
+Const nikIntegralThermalResistance As Long = 88
+Const nikThermalContactResistanceType As Long = 89
+Const nikContactSolidSolidOnly As Long = 90
+' nikThermalContactResistanceTypes_e
+Const nikTCR_Integral As Long = 1
 Const nikSolidCellsRefinementLevel As Long = 68
 Const nikFluidSolidBoundaryCellsRefinementLevel As Long = 69
 ' nikVolumeSourceTypes_e
@@ -664,6 +672,9 @@ Function BuildFlowProject(ByVal asm As Object, ByVal fda As Object, ByVal heat A
     Set refComps = CreateObject("Scripting.Dictionary")
     Set refObj = CreateObject("Scripting.Dictionary")      ' RefDes -> first SolidWorks component (layer bodies)
     Set compRef = CreateObject("Scripting.Dictionary")     ' component name -> RefDes
+    Dim timRef As Object, fl As Object, timRest As Collection, timOk As Boolean, pth As String, wantT As Object
+    Set timRef = CreateObject("Scripting.Dictionary")      ' TIM component name -> chip RefDes
+    If jsonMode Then Set fl = PJ_Obj(PJ_Project, "forSolidWorks/flow")
     Set partC = New Collection: Set pcbC = New Collection: Set sprC = New Collection: Set timC = New Collection
     Set tg = PT_ListTagged(asm)
     For Each it In tg
@@ -680,7 +691,9 @@ Function BuildFlowProject(ByVal asm As Object, ByVal fda As Object, ByVal heat A
                 End If
             Case "PCB": pcbC.Add cn
             Case "Spreader": sprC.Add cn
-            Case "TIM": timC.Add cn
+            Case "TIM"
+                timC.Add cn
+                If CStr(it(2)) <> "" Then timRef(cn) = UCase(CStr(it(2)))
         End Select
     Next
     If pcbC.Count = 0 Then
@@ -696,7 +709,14 @@ Function BuildFlowProject(ByVal asm As Object, ByVal fda As Object, ByVal heat A
     Else
         layersS = "4"
     End If
-    SetMaterial fda, "PCB material", "Pre-Defined\Non-isotropic\PCB " & layersS & "-layers", pcbC
+    ' PCB, TIMs and spreader from the page (F5); Flow's library picks when a user material is missing
+    pth = ""
+    If Not fl Is Nothing Then pth = PJ_Str(fl, "pcb", "")
+    If pth = "" Then
+        SetMaterial fda, "PCB material", "Pre-Defined\Non-isotropic\PCB " & layersS & "-layers", pcbC
+    ElseIf Not SetMaterial(fda, "PCB material", pth, pcbC) Then
+        SetMaterial fda, "PCB material", "Pre-Defined\Non-isotropic\PCB " & layersS & "-layers", pcbC
+    End If
     ' chips (F4): a calibrated block or the three layer bodies of a two-resistor chip, as forSolidWorks.flow says;
     ' every other part keeps the generic package material, and its peak is the package temperature
     Set okChip = CreateObject("Scripting.Dictionary")
@@ -745,8 +765,40 @@ Function BuildFlowProject(ByVal asm As Object, ByVal fda As Object, ByVal heat A
     Next
     SetMaterial fda, "Parts material", MAT_PARTS, partRest
     If sprK >= 300 Then sprMat = MAT_COPPER Else sprMat = MAT_ALUMINUM
-    SetMaterial fda, "Spreader material", sprMat, sprC
-    SetMaterial fda, "TIM material", MAT_TIM, timC
+    pth = ""
+    If Not fl Is Nothing Then
+        pth = PJ_Str(fl, "spreaders/top", "")
+        If pth = "" Then pth = PJ_Str(fl, "spreaders/bottom", "")
+    End If
+    If pth = "" Then
+        SetMaterial fda, "Spreader material", sprMat, sprC
+    ElseIf Not SetMaterial(fda, "Spreader material", pth, sprC) Then
+        SetMaterial fda, "Spreader material", sprMat, sprC
+    End If
+    Set timRest = New Collection
+    Set wantT = CreateObject("Scripting.Dictionary")
+    For Each it In timC
+        timOk = False
+        If timRef.Exists(CStr(it)) And Not fl Is Nothing Then
+            pth = PJ_Str(fl, "tims/" & PageRef(fl, "tims", timRef(CStr(it))), "")
+            If pth <> "" Then
+                wantT("TIM MATERIAL " & timRef(CStr(it))) = 1
+                timOk = SetMaterial(fda, "TIM material " & timRef(CStr(it)), pth, OneItem(CStr(it)))
+            End If
+        End If
+        If Not timOk Then timRest.Add CStr(it)
+    Next
+    DropOldOwned fda, nikSolidMaterial, "TIM MATERIAL ", wantT
+    SetMaterial fda, "TIM material", MAT_TIM, timRest
+
+    ' radiation and contacts from the page (F5)
+    If Not fl Is Nothing Then
+        OwnRadiative fda, "Radiation PCB", PJ_Str(fl, "surfaces/pcb", ""), pcbC
+        OwnRadiative fda, "Radiation parts", PJ_Str(fl, "surfaces/parts", ""), partC
+        OwnRadiative fda, "Radiation spreader", PJ_Str(fl, "surfaces/spreader", ""), sprC
+        OwnContact fda, "Contact parts to PCB", PJ_Num(fl, "contacts/partToPcb/rKW", 0), pcbC
+        OwnContact fda, "Contact TIM to spreader", PJ_Num(fl, "contacts/timToSpreader/rKW", 0), sprC
+    End If
 
     ' sources and goals per part with heat
     For Each k In heat.Keys
@@ -1239,6 +1291,78 @@ Sub WarnThinParts(ByVal heat As Object)
     If s <> "" Then notes.Add "Thinner than the estimated smallest cell (" & Format(cellMm, "0.00") & " mm): " & s & _
         ". They may not be meshed. Turn on the local mesh or raise the mesh level on tab 8."
 End Sub
+
+' ---------------------------------------------------------------- radiation and contacts (Flow plan F5)
+' Radiative surface of the macro on comps: a user radiative surface named after the emissivity. Removed when the
+' page has no path or the database does not have it (the project's default walls then apply, noted).
+Sub OwnRadiative(ByVal fda As Object, ByVal featName As String, ByVal radPath As String, ByVal comps As Collection)
+    Dim ft As Object, isNew As Boolean, rc As Long, empty0 As Collection
+    Set empty0 = New Collection
+    If radPath = "" Then
+        Set ft = OwnFeature(fda, nikRadiationSurface, featName, empty0, isNew)
+        Exit Sub
+    End If
+    Set ft = OwnFeature(fda, nikRadiationSurface, featName, comps, isNew)
+    If ft Is Nothing Then Exit Sub
+    rc = SetParamString(ft, nikPathToRadiationMedia, radPath)
+    If rc <> 0 Then
+        notes.Add featName & ": " & radPath & " is not in the Flow engineering database (code " & rc & "). Make it once (tab 8 lists it); the project's default surface is used."
+        If Not isNew Then ft.Delete
+        Exit Sub
+    End If
+    FinishFeature fda, ft, featName, isNew
+End Sub
+
+' Contact resistance of the macro on comps (solid to solid faces only), integral value rKW (K/W). Removed at 0.
+Sub OwnContact(ByVal fda As Object, ByVal featName As String, ByVal rKW As Double, ByVal comps As Collection)
+    Dim ft As Object, isNew As Boolean, n As Long, empty0 As Collection
+    Set empty0 = New Collection
+    If rKW <= 0 Then
+        Set ft = OwnFeature(fda, nikThermalContactResistance, featName, empty0, isNew)
+        Exit Sub
+    End If
+    Set ft = OwnFeature(fda, nikThermalContactResistance, featName, comps, isNew)
+    If ft Is Nothing Then Exit Sub
+    n = SetParamLong(ft, nikThermalContactResistanceType, nikTCR_Integral)
+    n = n + SetParamNum(ft, nikIntegralThermalResistance, rKW)
+    SetParamBool ft, nikContactSolidSolidOnly, True
+    If n < 2 Then notes.Add featName & ": " & n & " of 2 values were accepted (type integral, " & Format(rKW, "0.0000") & " K/W)."
+    FinishFeature fda, ft, featName, isNew
+    lines.Add featName & " = " & Format(rKW, "0.0000") & " K/W (integral)"
+End Sub
+
+' Sets every Boolean parameter of that type. Returns how many took it.
+Function SetParamBool(ByVal obj As Object, ByVal parType As Long, ByVal valB As Boolean) As Long
+    Dim pf As Object, ep As Object, par As Object, rc As Long
+    On Error Resume Next
+    Set pf = obj.GetInterface("IParametrizedFeature")
+    If pf Is Nothing Then Set pf = obj
+    Err.Clear
+    Set ep = pf.EnumParameters
+    If ep Is Nothing Then Exit Function
+    ep.Reset
+    Set par = ep.Next
+    Do While Not par Is Nothing
+        If CLng(par.Type) = parType Then
+            rc = -1
+            rc = CLng(par.SetBoolValue(valB))
+            If rc = 0 And Err.Number = 0 Then SetParamBool = SetParamBool + 1
+            Err.Clear
+        End If
+        Set par = ep.Next
+    Loop
+End Function
+
+' RefDes as the page wrote it under d/<section> (the page keeps the typed case), refU when not found.
+Function PageRef(ByVal d As Object, ByVal section As String, ByVal refU As String) As String
+    Dim sec As Object, k As Variant
+    PageRef = refU
+    Set sec = PJ_Obj(d, section)
+    If sec Is Nothing Then Exit Function
+    For Each k In sec.Keys
+        If UCase(CStr(k)) = refU Then PageRef = CStr(k): Exit Function
+    Next
+End Function
 
 ' ---------------------------------------------------------------- chips (Flow plan F4)
 ' Item of a dictionary by key, ignoring case (the page writes RefDes as typed). Nothing when missing.

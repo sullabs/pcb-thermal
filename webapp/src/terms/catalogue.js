@@ -461,6 +461,15 @@ def("fmat.name", "Material", "", "", "calculated", "Name of the user material: k
 def("fmat.kxy", "k xy", "", "W/(m K)", "calculated", "In-plane conductivity of the material (k in X and Y).");
 def("fmat.kz", "k z", "", "W/(m K)", "calculated", "Through conductivity of the material (k in Z).");
 def("fmat.usedBy", "Used by", "", "", "calculated", "Chips (and layers) that use this material.");
+def("fsw.pcbMat", "PCB in Flow", "", "", "calculated", "User material Run Flow gives the PCB: the k xy and k z of the stack, not a library PCB.");
+def("fsw.timMat", "TIM in Flow", "", "", "calculated", "User material Run Flow gives this TIM: its k with the chip to TIM contact folded in.");
+def("fsw.sprMat", "Spreader in Flow", "", "", "calculated", "User material Run Flow gives this plate: the plate k of tab 7.");
+def("fsw.surface", "Radiative surface in Flow", "", "", "calculated", "User radiative surface Run Flow puts on this group: the emissivity of the page.");
+def("fsw.contactR", "Contact R in Flow", "", "K/W", "calculated", "Integral contact resistance Run Flow sets: the K m²/W of tab 8 over the whole contact area.");
+def("fsw.contactA", "Contact area", "A", "mm²", "calculated", "Area the contact resistance spreads over.");
+def("frad.name", "Radiative surface", "", "", "calculated", "Name of the user radiative surface: emissivity to 2 decimals. Make it once under Radiative Surfaces > User Defined > PCBThermal.");
+def("frad.eps", "Emissivity", "ε", "", "calculated", "Emissivity of the radiative surface.");
+def("frad.usedBy", "Used by", "", "", "calculated", "Component groups that use this radiative surface.");
 def("flow.minTravels", "Minimum travels", "", "", "input", "The solve stops only after this many travels, and only when the goals have converged. Blank = 2.",
   "Flow's own criteria are often met after about one travel; on the RPi4 the chip goals then still had criteria of about 2.3 K. Two travels let the air settle so runs can be compared within 1 to 2 C. The API cannot set the criterion of a goal, so a goal still moving more than the goal criterion is flagged on tab 9.", { range: [1, 10] });
 def("flow.goalCriteria", "Goal criterion", "", "C", "input", "A goal whose last change is above this is shown as not converged on tab 9. Blank = 0.2 C.", undefined, { range: [0.05, 2] });

@@ -6,6 +6,7 @@
 //     shows the Flow mesh card, a mesh check pair is compared per chip on tab 9.
 // F3. Convergence: minTravels and goalCriteriaC are valid, default to 2 and 0.2, and drive the health reasons.
 // F4. Tj basis: k steps and material names, forSolidWorks.flow per chip, two-resistor layers, tjBasis on tab 9.
+// F5. PCB, TIM, spreader materials, radiative surfaces and contacts from the page, with the simplifications noted.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,7 +16,7 @@ import { makeValidator } from "./validate.mjs";
 import { calcProject } from "../src/calc/index.js";
 import { valueOf } from "../src/calc/formulas.js";
 import { runHealth } from "../src/calc/runs.js";
-import { flowSettings, kStep, flowMaterial, tjBasisOf } from "../src/calc/flow.js";
+import { flowSettings, kStep, flowMaterial, tjBasisOf, flowEmissivity } from "../src/calc/flow.js";
 import { tabStates, blockingProblems } from "../src/page/tabs.js";
 import { openIssues } from "../src/page/report.js";
 import { Explain } from "../src/page/explain.js";
@@ -184,6 +185,31 @@ const flowRun = (over = {}) => ({
   check(t9.includes('data-term="runp.tjBasis"') && t9.includes("package, no "), "tab 9 shows the Tj basis and marks package parts");
   const t8 = show("SimTab", c);
   check(t8.includes("Flow materials") && t8.includes("Make these once in Flow") && t8.includes("k 19.6"), "tab 8 lists the Flow materials to make");
+}
+
+// ---------- F5 ----------
+{
+  const c0 = ctxOf(P);
+  const fl = c0.calc.fsNow.flow;
+  check(fl.pcb.endsWith(flowMaterial(P.forSolidWorks.pcb.kxy, P.forSolidWorks.pcb.kz).name) && fl.spreaders.top.endsWith("k 162"), "PCB from the stack k, spreader from the plate k (167 to 162)", [fl.pcb, fl.spreaders]);
+  check(fl.tims.U1.endsWith("k 2.87") && !fl.notes, "TIM k 3 to step 2.87, no notes when contacts are 0 and emissivities agree", [fl.tims.U1, fl.notes]);
+  check(fl.surfaces.pcb.endsWith("e 0.90") && fl.surfaces.spreader.endsWith("e 0.85") && fl.radiative.length === 2, "radiative surfaces from tab 5 and 8 emissivities", fl.surfaces);
+  check(flowEmissivity(0.854).name === "e 0.85" && flowEmissivity(0.9).name === "e 0.90", "emissivity names to 2 decimals");
+
+  const P2 = structuredClone(P);
+  P2.simSetup.contacts = { partToPcb: 2e-5, chipToTim: 1e-5, timToSpreader: 4e-5 };
+  P2.simSetup.surfaces.pcbBottom.emissivity = 0.8;
+  const c2 = ctxOf(P2);
+  const f2 = c2.calc.fsNow.flow;
+  valid("project.schema.json", { ...P2, forSolidWorks: { ...c2.calc.fsNow, computedAt: NOW } }, "project.json with F5 contacts and surfaces");
+  const tm = 0.2e-3, kEff = tm / (tm / 3 + 1e-5);
+  check(f2.tims.U1.endsWith(`k ${kStep(kEff)}`), `chip to TIM folded into the TIM: k ${kEff.toFixed(3)} to step ${kStep(kEff)}`, f2.tims.U1);
+  const onPcb = c2.calc.fsNow.bodies.filter(b => Math.abs(b.box.zMin - c2.calc.fsNow.pcb.h) < 0.05 || Math.abs(b.box.zMin + b.box.h) < 0.05).reduce((s, b) => s + b.box.l * b.box.w, 0);
+  check(Math.abs(f2.contacts.partToPcb.rKW - 2e-5 / (onPcb * 1e-6)) < 1e-9 && f2.contacts.partToPcb.areaMm2 === onPcb, "part to PCB: integral R = R contact / sum of footprints", f2.contacts.partToPcb);
+  check(f2.contacts.timToSpreader.rKW > 0 && Math.abs(c2.value("fsw.contactR", "timToSpreader") - f2.contacts.timToSpreader.rKW) < 1e-12, "TIM to spreader contact on the page");
+  check(f2.notes.some(x => /folded into each TIM/.test(x)) && f2.notes.some(x => /PCB emissivity: top 0.9, bottom 0.8/.test(x)), "simplifications are noted", f2.notes);
+  const t8 = show("SimTab", ctxOf({ ...P2, simSetup: { ...P2.simSetup, studyType: "Flow" } }));
+  check(t8.includes('data-term="fsw.pcbMat"') && t8.includes('data-term="fsw.contactR"') && t8.includes("And these radiative surfaces") && t8.includes("is folded into each"), "tab 8 lists what goes to Flow, the radiative surfaces and the notes");
 }
 
 console.log(`Flow plan: ${n - fails} of ${n} checks passed.`);

@@ -413,6 +413,15 @@ export const VALUES = {
   "fmat.kxy": (c, k) => c.calc.fsNow?.flow?.materials?.[+k]?.kxy,
   "fmat.kz": (c, k) => c.calc.fsNow?.flow?.materials?.[+k]?.kz,
   "fmat.usedBy": (c, k) => c.calc.fsNow?.flow?.materials?.[+k]?.usedBy?.join(", "),
+  "fsw.pcbMat": c => c.calc.fsNow?.flow?.pcb,
+  "fsw.timMat": (c, k) => c.calc.fsNow?.flow?.tims?.[k],
+  "fsw.sprMat": (c, k) => c.calc.fsNow?.flow?.spreaders?.[k],
+  "fsw.surface": (c, k) => c.calc.fsNow?.flow?.surfaces?.[k],
+  "fsw.contactR": (c, k) => c.calc.fsNow?.flow?.contacts?.[k]?.rKW,
+  "fsw.contactA": (c, k) => c.calc.fsNow?.flow?.contacts?.[k]?.areaMm2,
+  "frad.name": (c, k) => c.calc.fsNow?.flow?.radiative?.[+k]?.name,
+  "frad.eps": (c, k) => c.calc.fsNow?.flow?.radiative?.[+k]?.emissivity,
+  "frad.usedBy": (c, k) => c.calc.fsNow?.flow?.radiative?.[+k]?.usedBy?.join(", "),
   "flow.minTravels": c => c.calc.flow?.settings.minTravels,
   "flow.goalCriteria": c => c.calc.flow?.settings.goalCriteriaC,
   "run.goalsLoose": (c, k) => { const r = runOf(c, k), lim = c.calc.flow?.settings.goalCriteriaC; if (!r?.goalsHealth || !isNum(lim)) return undefined; const l = Object.entries(r.goalsHealth).filter(([, g]) => g.deltaC > lim).map(([n]) => n); return l.length ? l.join(", ") : "none"; },
@@ -786,6 +795,15 @@ F["fmat.name"] = () => ({ text: "k <k xy> <k z>, or k <k> when both are the same
 F["fmat.kxy"] = () => ({ text: "k xy step = 10^(round(24 × log10(k xy)) / 24), 3 digits", inputs: [] });
 F["fmat.kz"] = () => ({ text: "k z step = 10^(round(24 × log10(k z)) / 24), 3 digits", inputs: [] });
 F["fmat.usedBy"] = () => ({ text: "The chips (and layers) that use this material", inputs: [] });
+F["fsw.pcbMat"] = () => ({ text: "Material named after the PCB k xy and k z of the stack (tab 3), in 10 % steps", inputs: [["k xy", "pcb.kxy", ""], ["k z", "pcb.kz", ""]] });
+F["fsw.timMat"] = () => ({ text: "Material named after k TIM eff = t / (t / k TIM + R chip to TIM), in 10 % steps", inputs: [["R chip to TIM", "simset.contactChipTim", ""]] });
+F["fsw.sprMat"] = () => ({ text: "Material named after the plate k (tab 7), in 10 % steps", inputs: [] });
+F["fsw.surface"] = () => ({ text: "Radiative surface named after the emissivity: PCB top (tab 5), parts (tab 5), spreader top (tab 8)", inputs: [] });
+F["fsw.contactR"] = (c, k) => { const x = c.calc.fsNow?.flow?.contacts?.[k]; return x ? { text: "R integral = R contact / A", inputs: [["R contact", k === "partToPcb" ? "simset.contactPartPcb" : "simset.contactTimSpreader", ""], ["A", "fsw.contactA", k]], fn: v => v["R contact"] / (v.A * 1e-6) } : null; };
+F["fsw.contactA"] = (c, k) => ({ text: k === "partToPcb" ? "A = sum of L × W of the bodies that sit on the PCB" : "A = sum of the TIM areas (1000 × t / (k × R TIM))", inputs: [] });
+F["frad.name"] = () => ({ text: "e <emissivity, 2 decimals>", inputs: [] });
+F["frad.eps"] = () => ({ text: "Emissivity rounded to 2 decimals", inputs: [] });
+F["frad.usedBy"] = () => ({ text: "The component groups that get this radiative surface", inputs: [] });
 F["run.healthReasons"] = (c, k) => ({ text: "Each reason behind the health of the run, in plain words", inputs: [["health", "run.health", k]] });
 F["run.changes"] = () => ({ text: "Inputs of the run (a copy kept in the results file) compared with the inputs now: ambient, PCB, Pd per part, bodies, chip models, plates, surfaces, contacts, mesh", inputs: [] });
 F["runp.margin"] = (c, k) => { const ref = k.split("|")[1]; return isNum(runpCalc(c, k)?.marginC) ? { text: "Margin = Tj max - peak", inputs: [["Tj max", "part.tjMax", ref], ["peak", "runp.peak", k]], fn: v => v["Tj max"] - v.peak } : null; };
