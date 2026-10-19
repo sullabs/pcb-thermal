@@ -4,9 +4,14 @@ Option Explicit
 ' ImportStep  -  SolidWorks 2023 macro
 '
 ' Reads a PCB assembly (a STEP file, or the model already open in SolidWorks) and
-' writes every body's size, position and rotation into the 'STEP import' tab of the
-' workbook. Works for any board. Only SolidWorks and Excel are used.
-' Needs module PTCommon in the same macro, and a copy of PCB_thermal_TEMPLATE.xlsx.
+' writes every body's size, position and rotation. Works for any board.
+' Needs modules PTCommon and PTJson in the same macro.
+'
+' Where it writes (asked at the start, the last one is the default):
+'   project.json picked (board folder of the page) -> cad.json in that folder: import, importPrevious, changes.
+'       Settings come from project.json (settings.import, tolerances). project.json itself is never written:
+'       the page keeps include, RefDes and overrides by body key, and new bodies start not included.
+'   a workbook picked (copy of PCB_thermal_TEMPLATE.xlsx) -> tabs STEP import, CAD geometry, Change log (below).
 '
 ' What is imported (setting Imp_TopOnly on the STEP import tab):
 '   No  = EVERY solid body gets its own row (default; small parts are not lost inside bigger ones)
@@ -69,7 +74,14 @@ Dim srcMode() As Long       ' how to turn part-space points into model space: 0 
 Dim srcXf() As Double       ' (item, 0..12) component transform: 9 rotation, 3 translation (m), scale
 Dim n As Long
 Dim msgs As Collection
+Dim msgLvl As Collection    ' level of each message: info or warning (cad.json messages)
 Dim capRows As Long         ' body rows available on CAD geometry
+' the model in board coordinates (Measure), read by both writers
+Dim mOut() As Variant       ' rows (0 = PCB): 0 #, 1 name, 2..4 min, 5..7 size, 8 side, 9 key, 10 rot, 11 own L, 12 own W
+Dim mCnt As Long            ' rows in mOut
+Dim mFr(8) As Double        ' board frame: board X, Y, Z as unit vectors in model space
+Dim mPcbL As Double, mPcbW As Double, mPcbT As Double
+Dim mTurned As Long         ' bodies turned in the board plane
 Dim nSheetBodies As Long    ' surface bodies seen (not imported)
 Dim itemsCapped As Boolean
 
@@ -77,13 +89,24 @@ Sub main()
     Set swApp = Application.SldWorks
     PT_Trace MACRO_NAME & ": started (VBA macro)."
     Set msgs = New Collection
+    Set msgLvl = New Collection
     PT_LogReset
     nSheetBodies = 0: itemsCapped = False
+
+    ' ---------- project folder (page) or workbook ----------
+    Select Case PJ_PickSource(MACRO_NAME)
+        Case "json"
+            RunProject
+            Exit Sub
+        Case "xlsx"
+        Case Else
+            Exit Sub
+    End Select
 
     ' ---------- workbook ----------
     Dim xl As Object, wb As Object, wsI As Object, wsG As Object
     Set xl = PT_GetExcel()
-    Set wb = PT_PickWorkbook(xl, MACRO_NAME, "STEP import|CAD geometry")
+    Set wb = PT_PickWorkbook(xl, MACRO_NAME, "STEP import|CAD geometry", PJ_WbPath)
     If wb Is Nothing Then Exit Sub
     If Not PT_NeedNames(wb, "Imp_Table|Imp_PcbName|Imp_MinSize|Imp_TopOnly|Imp_Model|Imp_Time|Imp_Frame|Imp_Messages|" & _
                             "ImpPrev_Table|ImpPrev_Model|ImpPrev_Time|Geo_Table|Log_Header|Set_TolPos|Set_TolSize", MACRO_NAME) Then Exit Sub
@@ -95,7 +118,7 @@ Sub main()
                "Close any cell you are editing in Excel and run again.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
-    If upg <> "" Then msgs.Add upg
+    If upg <> "" Then Note "info", upg
 
     Dim rImp As Object, rGeo As Object, rMsg As Object, rRot As Object
     Set rImp = PT_Rng(wb, "Imp_Table")
@@ -114,16 +137,234 @@ Sub main()
 
     ' ---------- model ----------
     Dim doc As Object, srcName As String
-    Set doc = GetModel(srcName)
+    Set doc = GetModel(srcName, "")
     If doc Is Nothing Then Exit Sub
-    xl.StatusBar = "ImportStep: reading the bodies of " & srcName & " ..."
+    If Not Measure(doc, srcName, pcbKey, minSize, perBody, xl) Then Exit Sub
+
+    ' ---------- room for the bodies: grow CAD geometry and STEP import when needed ----------
+    Dim added As Long, k As Long
+    added = EnsureCapacity(wb, xl, mCnt - 1)
+    If added < 0 Then
+        PT_Msg "ImportStep stopped while making room for " & (mCnt - 1) & " bodies on the CAD geometry tab:" & vbCrLf & PT_LastErr & vbCrLf & _
+               "Nothing else was written. Close any cell you are editing in Excel and run again.", vbExclamation, MACRO_NAME
+        Exit Sub
+    End If
+    If added > 0 Then Note "info", "CAD geometry and STEP import were extended by " & added & " body rows (Excel moved every formula that points to them)."
+    Set rImp = PT_Rng(wb, "Imp_Table")
+    Set rGeo = PT_Rng(wb, "Geo_Table")
+    Set rRot = PT_Rng(wb, "Imp_Rot")
+    Set wsI = rImp.Worksheet
+    Set wsG = rGeo.Worksheet
+    capRows = BodyCapacity(rGeo)
+    If mCnt - 1 > capRows Or mCnt > rImp.Rows.Count Then
+        PT_Msg CStr(mCnt - 1) & " bodies to import; CAD geometry holds " & capRows & "." & vbCrLf & "Nothing was written.", vbExclamation, MACRO_NAME
+        Exit Sub
+    End If
+
+    ' ---------- save current CAD geometry inputs, keyed by body key ----------
+    ' rec: 0 imported name, 1 name override, 2 RefDes, 3 Include, 4..9 overrides,
+    '      10..15 imported box, used to match by position when names differ
+    Dim saved As Object: Set saved = CreateObject("Scripting.Dictionary")
+    Dim refByKey As Object: Set refByKey = CreateObject("Scripting.Dictionary")
+    Dim geoKeys As Object: Set geoKeys = CreateObject("Scripting.Dictionary")
+    Dim coll As Collection
+    Dim old As Variant, rec As Variant, key As String, r As Long
+    old = rGeo.Resize(capRows, G_OVR + 6).Value        ' 1-based, column 1 = #
+    For r = 1 To UBound(old, 1)
+        If IsError(old(r, 1 + G_NAME)) Then
+        ElseIf PT_Str(old(r, 1 + G_NAME)) <> "" Then
+            rec = Array(CStr(old(r, 1 + G_NAME)), old(r, 1 + G_OVNAME), old(r, 1 + G_REF), old(r, 1 + G_INC), _
+                        old(r, 1 + G_OVR), old(r, 2 + G_OVR), old(r, 3 + G_OVR), old(r, 4 + G_OVR), old(r, 5 + G_OVR), old(r, 6 + G_OVR), _
+                        old(r, 1 + G_IMP), old(r, 2 + G_IMP), old(r, 3 + G_IMP), old(r, 4 + G_IMP), old(r, 5 + G_IMP), old(r, 6 + G_IMP))
+            key = PT_UniqueKey(geoKeys, PT_Key(CStr(old(r, 1 + G_NAME))))
+            If Not saved.Exists(key) Then saved.Add key, New Collection
+            Set coll = saved(key)
+            coll.Add rec
+            If Not refByKey.Exists(key) Then refByKey.Add key, PT_Str(old(r, 1 + G_REF))
+        End If
+    Next
+
+    ' ---------- change report: last import vs this one ----------
+    Dim oldImp As Variant, oldModel As Variant, oldTime As Variant
+    oldImp = rImp.Value
+    oldModel = PT_Rng(wb, "Imp_Model").Value
+    oldTime = PT_Rng(wb, "Imp_Time").Value
+    Dim counts As Object: Set counts = CreateObject("Scripting.Dictionary")
+    Dim hadOld As Boolean, newLevel As String, oldLevel As String, levelChanged As Boolean, hadRows As Boolean
+    newLevel = IIf(perBody, "bodies", "components")
+    oldLevel = GetLevelUsed(wb)
+    For r = 2 To UBound(oldImp, 1)
+        If PT_Str(oldImp(r, 2)) <> "" Then hadRows = True: Exit For
+    Next
+    If oldLevel = "" And hadRows Then oldLevel = "components"       ' workbooks from before this version
+    levelChanged = (hadRows And oldLevel <> newLevel)
+    If levelChanged Then
+        Note "warning", "Import level changed from " & oldLevel & " to " & newLevel & ": the change report was skipped once, because nearly every row is new. " & _
+                        "Inputs on CAD geometry were kept by name or position where the body still exists."
+    Else
+        hadOld = CompareImports(oldImp, mOut, mCnt, refByKey, tolPos, tolSize, counts)
+    End If
+
+    ' ---------- write ----------
+    On Error GoTo writeFail
+    xl.ScreenUpdating = False
+    PT_Rng(wb, "ImpPrev_Table").Value = oldImp
+    PT_Rng(wb, "ImpPrev_Model").Value = oldModel
+    PT_Rng(wb, "ImpPrev_Time").Value = oldTime
+
+    rImp.ClearContents
+    rMsg.ClearContents
+    If Not rRot Is Nothing Then rRot.ClearContents
+    Dim outW() As Variant, outR() As Variant
+    ReDim outW(1 To mCnt, 1 To rImp.Columns.Count)
+    For r = 0 To mCnt - 1
+        For k = 0 To 9
+            If k < rImp.Columns.Count Then outW(r + 1, k + 1) = mOut(r, k)
+        Next
+    Next
+    rImp.Resize(mCnt, rImp.Columns.Count).Value = outW
+    If Not rRot Is Nothing Then
+        ReDim outR(1 To mCnt, 1 To G_ROTCOLS)
+        For r = 0 To mCnt - 1
+            For k = 1 To G_ROTCOLS: outR(r + 1, k) = mOut(r, 9 + k): Next
+        Next
+        rRot.Resize(mCnt, G_ROTCOLS).Value = outR
+    End If
+    PT_Rng(wb, "Imp_Model").Value = srcName
+    PT_Rng(wb, "Imp_Time").Value = Format(Now, "yyyy-mm-dd hh:nn")
+    PT_Rng(wb, "Imp_Frame").Value = FrameText(mFr) & " Origin at the PCB corner on its bottom face. Units mm."
+    SetLevelUsed wb, newLevel
+
+    Dim g0 As Long, gc As Long
+    g0 = rGeo.Row: gc = rGeo.Column
+    wsG.Cells(g0, gc + G_OVNAME).Resize(capRows, 1).ClearContents
+    wsG.Cells(g0, gc + G_REF).Resize(capRows, 2).ClearContents
+    wsG.Cells(g0, gc + G_OVR).Resize(capRows, 6).ClearContents
+
+    Dim assigned() As Boolean, byName As Long, byBox As Long, hit As Boolean
+    Dim kk As Variant, t As Long, s As String
+    ReDim assigned(mCnt - 1)
+    Dim isNewRow() As Boolean
+    ReDim isNewRow(mCnt - 1)
+    ' pass 1: same key
+    For r = 1 To mCnt - 1
+        key = CStr(mOut(r, 9))
+        If saved.Exists(key) Then
+            Set coll = saved(key)
+            If coll.Count > 0 Then
+                rec = coll(1): coll.Remove 1
+                PutInputs wsG, g0 + r - 1, gc, rec
+                assigned(r) = True: byName = byName + 1
+            End If
+        End If
+    Next
+    ' pass 2: same box (position and size within 0.05 mm), for names that changed
+    For r = 1 To mCnt - 1
+        If Not assigned(r) Then
+            hit = False
+            For Each kk In saved.Keys
+                Set coll = saved(kk)
+                For t = 1 To coll.Count
+                    rec = coll(t)
+                    If SameBox(rec, mOut, r) Then
+                        coll.Remove t
+                        PutInputs wsG, g0 + r - 1, gc, rec
+                        assigned(r) = True: byBox = byBox + 1: hit = True
+                        Exit For
+                    End If
+                Next
+                If hit Then Exit For
+            Next
+            If Not hit Then
+                wsG.Cells(g0 + r - 1, gc + G_INC).Value = "No"         ' new body: off until you switch it on
+                isNewRow(r) = True
+            End If
+        End If
+    Next
+    Dim restored As Long: restored = byName + byBox
+    If byBox > 0 Then Note "info", byBox & " rows kept their inputs by matching position and size, because the body name changed."
+
+    ' pass 3: empty RefDes cells get the register RefDes whose key equals the body name
+    ' (ECAD exports name each body by its designator, e.g. "U1"). Typed RefDes cells are never changed.
+    Dim nAuto As Long
+    Dim nOn As Long
+    nAuto = AutoLinkRefDes(wb, wsG, g0, gc, mOut, mCnt, isNewRow, nOn)
+    If nAuto > 0 Then Note "info", nAuto & " RefDes filled on CAD geometry because the body name equals a register RefDes. Check column F."
+    If nOn > 0 Then Note "info", nOn & " bodies linked to a register RefDes for the first time were set to Include = Yes (column G)."
+
+    ' inputs whose body is no longer in the model
+    For Each kk In saved.Keys
+        Set coll = saved(kk)
+        For t = 1 To coll.Count
+            rec = coll(t)
+            If HasInput(rec) Then
+                s = "Not in this model, inputs not applied: " & rec(0) & "  [name " & rec(1) & ", RefDes " & rec(2) & _
+                    ", Include " & rec(3) & ", overrides " & rec(4) & "/" & rec(5) & "/" & rec(6) & "/" & rec(7) & "/" & rec(8) & "/" & rec(9) & "]"
+                Note "warning", s
+            End If
+        Next
+    Next
+
+    Dim nLog As Long
+    nLog = PT_LogFlush(wb)
+    If Not hadOld And Not levelChanged Then Note "info", "First import into this workbook: nothing to compare, no Change log rows."
+    If mTurned > 0 Then Note "info", mTurned & " bodies are turned in the board plane (Rot column on STEP import). BuildBoard builds them as turned rectangles."
+    If mCnt > 1 Then Note "info", (mCnt - 1) & " body rows have Include = No unless you had set Yes before. Set Yes on CAD geometry (column G) for the parts to build."
+
+    If msgs.Count = 0 Then Note "info", "No warnings."
+    For t = 1 To msgs.Count
+        If t <= rMsg.Rows.Count Then rMsg.Cells(t, 1).Value = msgs(t)
+    Next
+    xl.ScreenUpdating = True
+    xl.Calculate
+    Dim chipRows As Long
+    chipRows = PT_FillChipLists(wb)
+    If chipRows > 0 Then Note "info", chipRows & " chip rows written to the Spreader and Sim setup tabs (they were empty)."
+    wb.Save
+
+    PT_Msg "Written and saved to:" & vbCrLf & wb.FullName & vbCrLf & "(tabs STEP import, CAD geometry, Change log)" & vbCrLf & vbCrLf & _
+           "Imported " & (mCnt - 1) & " bodies plus the PCB (" & Round(mPcbL, 2) & " x " & _
+           Round(mPcbW, 2) & " x " & Round(mPcbT, 2) & " mm), level: " & newLevel & "." & vbCrLf & _
+           mTurned & " bodies turned in the board plane." & vbCrLf & _
+           restored & " rows kept their CAD geometry inputs (" & byName & " by key, " & byBox & " by position)." & vbCrLf & vbCrLf & _
+           "Changes since the last import: " & ChangeSummary(counts, nLog, hadOld, levelChanged, _
+               " rows added to the Change log tab. Check them there (type Yes under Checked).") & vbCrLf & vbCrLf & _
+           "Messages:" & vbCrLf & JoinMsgs("(more on the STEP import tab)"), vbInformation, MACRO_NAME
+    Exit Sub
+writeFail:
+    xl.ScreenUpdating = True
+    xl.StatusBar = False
+    PT_Msg "Stopped while writing to Excel: " & Err.Description & vbCrLf & _
+           "The workbook was not saved. Close any cell you are editing in Excel, close the workbook without saving, and run again.", _
+           vbExclamation, MACRO_NAME
+End Sub
+
+Sub Note(ByVal lvl As String, ByVal txt As String)
+    msgs.Add txt
+    msgLvl.Add lvl
+End Sub
+
+Sub ShowStatus(ByVal xl As Object, ByVal txt As String)
+    If xl Is Nothing Then Exit Sub
+    On Error Resume Next
+    If txt = "" Then xl.StatusBar = False Else xl.StatusBar = txt
+End Sub
+
+' ---------------------------------------------------------------- the model in board coordinates
+' Reads the bodies of doc, finds the PCB and the board frame, and measures every body in that frame (mm).
+' Fills mOut, mCnt, mFr, mPcbL, mPcbW, mPcbT and mTurned. Both writers (workbook, cad.json) use them.
+' False when the model has no solid body (the user has been told).
+Function Measure(ByVal doc As Object, ByVal srcName As String, ByVal pcbKey As String, ByVal minSize As Double, _
+                 ByVal perBody As Boolean, ByVal xl As Object) As Boolean
+    ShowStatus xl, "ImportStep: reading the bodies of " & srcName & " ..."
     CollectItems doc, perBody
     If n = 0 Then
-        xl.StatusBar = False
-        PT_Msg "No solid bodies found in " & srcName & ". Nothing was written.", vbExclamation, MACRO_NAME: Exit Sub
+        ShowStatus xl, ""
+        PT_Msg "No solid bodies found in " & srcName & ". Nothing was written.", vbExclamation, MACRO_NAME
+        Exit Function
     End If
-    If itemsCapped Then msgs.Add "The model has more than " & MAX_ITEMS & " bodies; only the first " & MAX_ITEMS & " were read."
-    If nSheetBodies > 0 Then msgs.Add nSheetBodies & " surface (sheet) bodies were not imported. Only solid bodies are."
+    If itemsCapped Then Note "warning", "The model has more than " & MAX_ITEMS & " bodies; only the first " & MAX_ITEMS & " were read."
+    If nSheetBodies > 0 Then Note "info", nSheetBodies & " surface (sheet) bodies were not imported. Only solid bodies are."
 
     ' ---------- PCB ----------
     Dim pcb As Long, i As Long, k As Long, best As Double, v As Double
@@ -137,7 +378,7 @@ Sub main()
         For i = 0 To n - 1
             v = Flatness(i): If v > best Then best = v: pcb = i
         Next
-        msgs.Add "No body name contains '" & pcbKey & "'. PCB picked by shape: " & nm(pcb) & ". Check it is the board, or change the PCB name setting."
+        Note "warning", "No body name contains '" & pcbKey & "'. PCB picked by shape: " & nm(pcb) & ". Check it is the board, or change the PCB name setting."
     End If
 
     ' ---------- board frame: axes ----------
@@ -187,14 +428,14 @@ Sub main()
     End If
     Erase pPts
     For k = 0 To 10: shPcb(k) = sh(k): Next
-    If turn <> 0 Then msgs.Add "The board is turned " & Round(turn, 2) & " degrees about its normal in the model file. The board frame was turned with it."
-    If Not havePcb Then msgs.Add "The PCB surface points could not be read. The board frame follows the model axes."
+    If turn <> 0 Then Note "info", "The board is turned " & Round(turn, 2) & " degrees about its normal in the model file. The board frame was turned with it."
+    If Not havePcb Then Note "warning", "The PCB surface points could not be read. The board frame follows the model axes."
 
     ' ---------- shape of every item in the board frame ----------
     Dim shp() As Double, nNoPts As Long, nTurned As Long
     ReDim shp(n - 1, 10)
     For i = 0 To n - 1
-        If i Mod 5 = 0 Then xl.StatusBar = "ImportStep: measuring body " & (i + 1) & " of " & n & " ..."
+        If i Mod 5 = 0 Then ShowStatus xl, "ImportStep: measuring body " & (i + 1) & " of " & n & " ..."
         If i = pcb And havePcb Then
             For k = 0 To 10: shp(i, k) = shPcb(k): Next
         ElseIf ItemShape(i, fr, sh) Then
@@ -206,8 +447,8 @@ Sub main()
         End If
         If Abs(shp(i, 6)) >= 0.3 Then nTurned = nTurned + 1
     Next
-    xl.StatusBar = False
-    If nNoPts > 0 Then msgs.Add nNoPts & " bodies gave no surface points; their plain bounding box was used (no rotation)."
+    ShowStatus xl, ""
+    If nNoPts > 0 Then Note "info", nNoPts & " bodies gave no surface points; their plain bounding box was used (no rotation)."
 
     Dim bmin() As Double, bmax() As Double
     ReDim bmin(n - 1, 2): ReDim bmax(n - 1, 2)
@@ -223,8 +464,8 @@ Sub main()
     boxV = (bmax(pcb, 0) - bmin(pcb, 0)) * (bmax(pcb, 1) - bmin(pcb, 1)) * tPcb
     If bodyVol > 0 And boxV > 0 Then
         fill = bodyVol / boxV
-        If fill < 0.9 Then msgs.Add "PCB fills only " & Format(fill, "0%") & " of its box: the board has large cutouts or is not rectangular. " & _
-            "Check L and W on CAD geometry and override if needed."
+        If fill < 0.9 Then Note "warning", "PCB fills only " & Format(fill, "0%") & " of its box: the board has large cutouts or is not rectangular. " & _
+            "Check the PCB L and W and override them if needed."
     End If
 
     ' ---------- rows: PCB first, then components that pass the size filter ----------
@@ -241,231 +482,304 @@ Sub main()
             End If
         End If
     Next
-    If skipped > 0 Then msgs.Add skipped & " bodies smaller than " & minSize & " mm in both L and W were skipped (size filter setting)."
+    If skipped > 0 Then Note "info", skipped & " bodies smaller than " & minSize & " mm in both L and W were skipped (size filter setting)."
 
-    ' ---------- room for the bodies: grow CAD geometry and STEP import when needed ----------
-    Dim added As Long
-    added = EnsureCapacity(wb, xl, cnt - 1)
-    If added < 0 Then
-        PT_Msg "ImportStep stopped while making room for " & (cnt - 1) & " bodies on the CAD geometry tab:" & vbCrLf & PT_LastErr & vbCrLf & _
-               "Nothing else was written. Close any cell you are editing in Excel and run again.", vbExclamation, MACRO_NAME
-        Exit Sub
-    End If
-    If added > 0 Then msgs.Add "CAD geometry and STEP import were extended by " & added & " body rows (Excel moved every formula that points to them)."
-    Set rImp = PT_Rng(wb, "Imp_Table")
-    Set rGeo = PT_Rng(wb, "Geo_Table")
-    Set rRot = PT_Rng(wb, "Imp_Rot")
-    Set wsI = rImp.Worksheet
-    Set wsG = rGeo.Worksheet
-    capRows = BodyCapacity(rGeo)
-    If cnt - 1 > capRows Or cnt > rImp.Rows.Count Then
-        PT_Msg CStr(cnt - 1) & " bodies to import; CAD geometry holds " & capRows & "." & vbCrLf & "Nothing was written.", vbExclamation, MACRO_NAME
-        Exit Sub
-    End If
-
-    ' outv columns: 0 #, 1 name, 2..4 min, 5..7 size, 8 side, 9 key, 10 rot, 11 own L, 12 own W
-    Dim outv() As Variant, r As Long, j As Long, usedKeys As Object, rd As Double
+    ' mOut columns: 0 #, 1 name, 2..4 min, 5..7 size, 8 side, 9 key, 10 rot, 11 own L, 12 own W
+    Dim r As Long, j As Long, usedKeys As Object, rd As Double
     Set usedKeys = CreateObject("Scripting.Dictionary")
-    ReDim outv(0 To cnt - 1, 0 To 12)
+    ReDim mOut(0 To cnt - 1, 0 To 12)
     For r = 0 To cnt - 1
         j = order(r)
-        outv(r, 0) = IIf(r = 0, "PCB", r)
-        outv(r, 1) = nm(j)
+        mOut(r, 0) = IIf(r = 0, "PCB", r)
+        mOut(r, 1) = nm(j)
         For k = 0 To 2
-            outv(r, 2 + k) = Round(bmin(j, k) - org(k), 3)
-            outv(r, 5 + k) = Round(bmax(j, k) - bmin(j, k), 3)
+            mOut(r, 2 + k) = Round(bmin(j, k) - org(k), 3)
+            mOut(r, 5 + k) = Round(bmax(j, k) - bmin(j, k), 3)
         Next
         If r = 0 Then
-            outv(r, 8) = "Board"
-            outv(r, 9) = PT_UniqueKey(usedKeys, "pcb")
+            mOut(r, 8) = "Board"
+            mOut(r, 9) = PT_UniqueKey(usedKeys, "pcb")
         Else
-            If ((bmin(j, 2) + bmax(j, 2)) / 2 - org(2)) >= tPcb / 2 Then outv(r, 8) = "Top" Else outv(r, 8) = "Bottom"
-            outv(r, 9) = PT_UniqueKey(usedKeys, PT_Key(nm(j)))
+            If ((bmin(j, 2) + bmax(j, 2)) / 2 - org(2)) >= tPcb / 2 Then mOut(r, 8) = "Top" Else mOut(r, 8) = "Bottom"
+            mOut(r, 9) = PT_UniqueKey(usedKeys, PT_Key(nm(j)))
         End If
         rd = shp(j, 6)
         If r = 0 Or Abs(rd) < 0.3 Then
-            outv(r, 10) = 0: outv(r, 11) = outv(r, 5): outv(r, 12) = outv(r, 6)
+            mOut(r, 10) = 0: mOut(r, 11) = mOut(r, 5): mOut(r, 12) = mOut(r, 6)
         Else
-            outv(r, 10) = Round(rd, 3): outv(r, 11) = Round(shp(j, 7), 3): outv(r, 12) = Round(shp(j, 8), 3)
+            mOut(r, 10) = Round(rd, 3): mOut(r, 11) = Round(shp(j, 7), 3): mOut(r, 12) = Round(shp(j, 8), 3)
         End If
     Next
+    mCnt = cnt
+    For k = 0 To 8: mFr(k) = fr(k): Next
+    mPcbL = bmax(pcb, 0) - bmin(pcb, 0)
+    mPcbW = bmax(pcb, 1) - bmin(pcb, 1)
+    mPcbT = tPcb
+    mTurned = nTurned
+    Measure = True
+End Function
 
-    ' ---------- save current CAD geometry inputs, keyed by body key ----------
-    ' rec: 0 imported name, 1 name override, 2 RefDes, 3 Include, 4..9 overrides,
-    '      10..15 imported box, used to match by position when names differ
-    Dim saved As Object: Set saved = CreateObject("Scripting.Dictionary")
-    Dim refByKey As Object: Set refByKey = CreateObject("Scripting.Dictionary")
-    Dim geoKeys As Object: Set geoKeys = CreateObject("Scripting.Dictionary")
-    Dim coll As Collection
-    Dim old As Variant, rec As Variant, key As String
-    old = rGeo.Resize(capRows, G_OVR + 6).Value        ' 1-based, column 1 = #
-    For r = 1 To UBound(old, 1)
-        If IsError(old(r, 1 + G_NAME)) Then
-        ElseIf PT_Str(old(r, 1 + G_NAME)) <> "" Then
-            rec = Array(CStr(old(r, 1 + G_NAME)), old(r, 1 + G_OVNAME), old(r, 1 + G_REF), old(r, 1 + G_INC), _
-                        old(r, 1 + G_OVR), old(r, 2 + G_OVR), old(r, 3 + G_OVR), old(r, 4 + G_OVR), old(r, 5 + G_OVR), old(r, 6 + G_OVR), _
-                        old(r, 1 + G_IMP), old(r, 2 + G_IMP), old(r, 3 + G_IMP), old(r, 4 + G_IMP), old(r, 5 + G_IMP), old(r, 6 + G_IMP))
-            key = PT_UniqueKey(geoKeys, PT_Key(CStr(old(r, 1 + G_NAME))))
-            If Not saved.Exists(key) Then saved.Add key, New Collection
-            Set coll = saved(key)
-            coll.Add rec
-            If Not refByKey.Exists(key) Then refByKey.Add key, PT_Str(old(r, 1 + G_REF))
-        End If
-    Next
+' ================================================================= project folder (page) mode
+' Reads the import settings from project.json and writes cad.json: import (this run), importPrevious (the run
+' before) and change records for what came, went, moved, changed size or was renamed. project.json is never written:
+' the page keeps the user's choices (include, RefDes, overrides) by body key, and new bodies start not included.
+Sub RunProject()
+    Dim cad As Object, cadPath As String, pcbKey As String, minSize As Double, perBody As Boolean
+    Dim tolPos As Double, tolSize As Double, stepF As String, doc As Object, srcName As String
+    cadPath = PJ_Dir & "\cad.json"
+    Set cad = PJ_ReadOwn("cad.json", "pcb-thermal/cad")
+    If cad Is Nothing Then
+        PT_Msg "ImportStep did not run. Nothing was changed." & vbCrLf & vbCrLf & cadPath & " could not be read:" & vbCrLf & PT_LastErr & vbCrLf & vbCrLf & _
+               "Move that file out of the folder (a copy of each day is in backup\) and run again.", vbExclamation, MACRO_NAME
+        Exit Sub
+    End If
+    pcbKey = PJ_Str(PJ_Project, "settings/import/pcbNameContains", "PCB")
+    minSize = PJ_Num(PJ_Project, "settings/import/minSizeMm", 0)
+    perBody = Not PJ_Bool(PJ_Project, "settings/import/topLevelOnly", False)
+    tolPos = PJ_Num(PJ_Project, "settings/tolPosMm", 0.05)
+    tolSize = PJ_Num(PJ_Project, "settings/tolSizeMm", 0.05)
+    stepF = PJ_Str(PJ_Project, "board/stepFile", "")
+    If stepF <> "" And InStr(stepF, ":") = 0 And Left$(stepF, 2) <> "\\" Then stepF = PJ_Dir & "\" & stepF
 
-    ' ---------- change report: last import vs this one ----------
-    Dim oldImp As Variant, oldModel As Variant, oldTime As Variant
-    oldImp = rImp.Value
-    oldModel = PT_Rng(wb, "Imp_Model").Value
-    oldTime = PT_Rng(wb, "Imp_Time").Value
-    Dim counts As Object: Set counts = CreateObject("Scripting.Dictionary")
-    Dim hadOld As Boolean, newLevel As String, oldLevel As String, levelChanged As Boolean, hadRows As Boolean
+    ' ---------- model ----------
+    Set doc = GetModel(srcName, stepF)
+    If doc Is Nothing Then Exit Sub
+    If Not Measure(doc, srcName, pcbKey, minSize, perBody, Nothing) Then Exit Sub
+
+    ' ---------- keys and change report ----------
+    Dim prevImp As Object, hadOld As Boolean, levelChanged As Boolean, newLevel As String, oldLevel As String, nKept As Long
+    Dim counts As Object
+    Set counts = CreateObject("Scripting.Dictionary")
     newLevel = IIf(perBody, "bodies", "components")
-    oldLevel = GetLevelUsed(wb)
-    For r = 2 To UBound(oldImp, 1)
-        If PT_Str(oldImp(r, 2)) <> "" Then hadRows = True: Exit For
-    Next
-    If oldLevel = "" And hadRows Then oldLevel = "components"       ' workbooks from before this version
-    levelChanged = (hadRows And oldLevel <> newLevel)
+    Set prevImp = PJ_Obj(cad, "import")
+    If Not prevImp Is Nothing Then
+        hadOld = True
+        If PJ_Has(prevImp, "settingsUsed/topLevelOnly") Then
+            oldLevel = IIf(PJ_Bool(prevImp, "settingsUsed/topLevelOnly", False), "components", "bodies")
+            levelChanged = (oldLevel <> newLevel)
+        End If
+    End If
+    nKept = KeepKeysByBox(prevImp, tolPos, tolSize)
+    If nKept > 0 Then Note "info", nKept & " bodies kept the key of the earlier body with the same position and size, because their name changed. " & _
+                                   "Their choices on the page stay with them."
     If levelChanged Then
-        msgs.Add "Import level changed from " & oldLevel & " to " & newLevel & ": the change report was skipped once, because nearly every row is new. " & _
-                 "Inputs on CAD geometry were kept by name or position where the body still exists."
-    Else
-        hadOld = CompareImports(oldImp, outv, cnt, refByKey, tolPos, tolSize, counts)
+        Note "warning", "Import level changed from " & oldLevel & " to " & newLevel & ": the change report was skipped once, because nearly every body is new."
+    ElseIf hadOld Then
+        CompareProject prevImp, tolPos, tolSize, counts
     End If
 
-    ' ---------- write ----------
-    On Error GoTo writeFail
-    xl.ScreenUpdating = False
-    PT_Rng(wb, "ImpPrev_Table").Value = oldImp
-    PT_Rng(wb, "ImpPrev_Model").Value = oldModel
-    PT_Rng(wb, "ImpPrev_Time").Value = oldTime
-
-    rImp.ClearContents
-    rMsg.ClearContents
-    If Not rRot Is Nothing Then rRot.ClearContents
-    Dim outW() As Variant, outR() As Variant
-    ReDim outW(1 To cnt, 1 To rImp.Columns.Count)
-    For r = 0 To cnt - 1
-        For k = 0 To 9
-            If k < rImp.Columns.Count Then outW(r + 1, k + 1) = outv(r, k)
-        Next
+    ' ---------- bodies new to the project, and choices whose body is gone ----------
+    Dim choices As Object, inNew As Object, r As Long, nNew As Long, kk As Variant, refD As String
+    Set choices = PJ_Obj(PJ_Project, "bodies")
+    Set inNew = CreateObject("Scripting.Dictionary")
+    For r = 1 To mCnt - 1
+        inNew(CStr(mOut(r, 9))) = 1
+        If choices Is Nothing Then
+            nNew = nNew + 1
+        ElseIf Not choices.Exists(CStr(mOut(r, 9))) Then
+            nNew = nNew + 1
+        End If
     Next
-    rImp.Resize(cnt, rImp.Columns.Count).Value = outW
-    If Not rRot Is Nothing Then
-        ReDim outR(1 To cnt, 1 To G_ROTCOLS)
-        For r = 0 To cnt - 1
-            For k = 1 To G_ROTCOLS: outR(r + 1, k) = outv(r, 9 + k): Next
+    If Not choices Is Nothing Then
+        For Each kk In choices.Keys
+            If Not inNew.Exists(CStr(kk)) And Not PJ_Has(choices(kk), "manual") Then
+                refD = PJ_Str(choices(kk), "refDes", "")
+                If refD <> "" Or PJ_Has(choices(kk), "override") Or PJ_Has(choices(kk), "nameOverride") Then
+                    Note "warning", "Not in this model: body " & kk & IIf(refD <> "", " (RefDes " & refD & ")", "") & _
+                                    ". Its choices on the page are kept but not used."
+                End If
+            End If
         Next
-        rRot.Resize(cnt, G_ROTCOLS).Value = outR
     End If
-    PT_Rng(wb, "Imp_Model").Value = srcName
-    PT_Rng(wb, "Imp_Time").Value = Format(Now, "yyyy-mm-dd hh:nn")
-    PT_Rng(wb, "Imp_Frame").Value = FrameText(fr) & " Origin at the PCB corner on its bottom face. Units mm."
-    SetLevelUsed wb, newLevel
+    If Not hadOld Then Note "info", "First import into this project: nothing to compare, no change records."
+    If mTurned > 0 Then Note "info", mTurned & " bodies are turned in the board plane. Build Board builds them as turned rectangles."
+    If nNew > 0 Then Note "info", nNew & " bodies are new to this project and start not included. Include and link them on tab 3 of the page."
+    If msgs.Count = 0 Then Note "info", "No warnings."
 
-    Dim g0 As Long, gc As Long
-    g0 = rGeo.Row: gc = rGeo.Column
-    wsG.Cells(g0, gc + G_OVNAME).Resize(capRows, 1).ClearContents
-    wsG.Cells(g0, gc + G_REF).Resize(capRows, 2).ClearContents
-    wsG.Cells(g0, gc + G_OVR).Resize(capRows, 6).ClearContents
-
-    Dim assigned() As Boolean, byName As Long, byBox As Long, hit As Boolean
-    Dim kk As Variant, t As Long, s As String
-    ReDim assigned(cnt - 1)
-    Dim isNewRow() As Boolean
-    ReDim isNewRow(cnt - 1)
-    ' pass 1: same key
-    For r = 1 To cnt - 1
-        key = CStr(outv(r, 9))
-        If saved.Exists(key) Then
-            Set coll = saved(key)
-            If coll.Count > 0 Then
-                rec = coll(1): coll.Remove 1
-                PutInputs wsG, g0 + r - 1, gc, rec
-                assigned(r) = True: byName = byName + 1
-            End If
+    ' ---------- cad.json ----------
+    Dim impD As Object, su As Object, pc As Object, bl As Collection, b As Object, ml As Collection, t As Long
+    Set impD = PJ_Dict()
+    PJ_Put impD, "model", srcName
+    PJ_Put impD, "date", PJ_Now()
+    PJ_Put impD, "frame", FrameText(mFr) & " Origin at the PCB corner on its bottom face. Units mm."
+    Set su = PJ_Dict()
+    PJ_Put su, "pcbNameContains", pcbKey
+    PJ_Put su, "minSizeMm", minSize
+    PJ_Put su, "topLevelOnly", Not perBody
+    PJ_Put impD, "settingsUsed", su
+    Set pc = PJ_Dict()
+    PJ_Put pc, "name", CStr(mOut(0, 1))
+    PJ_Put pc, "box", RowBox(0)
+    PJ_Put impD, "pcb", pc
+    Set bl = New Collection
+    For r = 1 To mCnt - 1
+        Set b = PJ_Dict()
+        PJ_Put b, "key", CStr(mOut(r, 9))
+        PJ_Put b, "name", CStr(mOut(r, 1))
+        PJ_Put b, "box", RowBox(r)
+        PJ_Put b, "side", CStr(mOut(r, 8))
+        If Abs(CDbl(mOut(r, 10))) >= 0.3 Then
+            PJ_Put b, "rotDeg", CDbl(mOut(r, 10))
+            PJ_Put b, "ownL", PJ_Pos(CDbl(mOut(r, 11)))
+            PJ_Put b, "ownW", PJ_Pos(CDbl(mOut(r, 12)))
         End If
+        bl.Add b
     Next
-    ' pass 2: same box (position and size within 0.05 mm), for names that changed
-    For r = 1 To cnt - 1
-        If Not assigned(r) Then
-            hit = False
-            For Each kk In saved.Keys
-                Set coll = saved(kk)
-                For t = 1 To coll.Count
-                    rec = coll(t)
-                    If SameBox(rec, outv, r) Then
-                        coll.Remove t
-                        PutInputs wsG, g0 + r - 1, gc, rec
-                        assigned(r) = True: byBox = byBox + 1: hit = True
-                        Exit For
-                    End If
-                Next
-                If hit Then Exit For
-            Next
-            If Not hit Then
-                wsG.Cells(g0 + r - 1, gc + G_INC).Value = "No"         ' new body: off until you switch it on
-                isNewRow(r) = True
-            End If
-        End If
+    PJ_Put impD, "bodies", bl
+    Set ml = New Collection
+    For t = 1 To msgs.Count
+        ml.Add PJ_Message(msgLvl(t), msgs(t))
     Next
-    Dim restored As Long: restored = byName + byBox
-    If byBox > 0 Then msgs.Add byBox & " rows kept their inputs by matching position and size, because the body name changed."
-
-    ' pass 3: empty RefDes cells get the register RefDes whose key equals the body name
-    ' (ECAD exports name each body by its designator, e.g. "U1"). Typed RefDes cells are never changed.
-    Dim nAuto As Long
-    Dim nOn As Long
-    nAuto = AutoLinkRefDes(wb, wsG, g0, gc, outv, cnt, isNewRow, nOn)
-    If nAuto > 0 Then msgs.Add nAuto & " RefDes filled on CAD geometry because the body name equals a register RefDes. Check column F."
-    If nOn > 0 Then msgs.Add nOn & " bodies linked to a register RefDes for the first time were set to Include = Yes (column G)."
-
-    ' inputs whose body is no longer in the model
-    For Each kk In saved.Keys
-        Set coll = saved(kk)
-        For t = 1 To coll.Count
-            rec = coll(t)
-            If HasInput(rec) Then
-                s = "Not in this model, inputs not applied: " & rec(0) & "  [name " & rec(1) & ", RefDes " & rec(2) & _
-                    ", Include " & rec(3) & ", overrides " & rec(4) & "/" & rec(5) & "/" & rec(6) & "/" & rec(7) & "/" & rec(8) & "/" & rec(9) & "]"
-                msgs.Add s
-            End If
-        Next
-    Next
+    PJ_Put impD, "messages", ml
+    If Not prevImp Is Nothing Then PJ_Put cad, "importPrevious", prevImp
+    PJ_Put cad, "import", impD
 
     Dim nLog As Long
-    nLog = PT_LogFlush(wb)
-    If Not hadOld And Not levelChanged Then msgs.Add "First import into this workbook: nothing to compare, no Change log rows."
-    If nTurned > 0 Then msgs.Add nTurned & " bodies are turned in the board plane (Rot column on STEP import). BuildBoard builds them as turned rectangles."
-    If cnt > 1 Then msgs.Add (cnt - 1) & " body rows have Include = No unless you had set Yes before. Set Yes on CAD geometry (column G) for the parts to build."
+    nLog = PJ_FlushChanges(cad)
+    If Not PJ_SaveOwn(cad, "cad.json", MACRO_NAME) Then
+        PT_Msg "ImportStep read the model but could not write" & vbCrLf & cadPath & vbCrLf & PT_LastErr & vbCrLf & vbCrLf & _
+               "Nothing else was changed. Close any program that has the file open and run again.", vbExclamation, MACRO_NAME
+        Exit Sub
+    End If
 
-    If msgs.Count = 0 Then msgs.Add "No warnings."
-    For t = 1 To msgs.Count
-        If t <= rMsg.Rows.Count Then rMsg.Cells(t, 1).Value = msgs(t)
-    Next
-    xl.ScreenUpdating = True
-    xl.Calculate
-    Dim chipRows As Long
-    chipRows = PT_FillChipLists(wb)
-    If chipRows > 0 Then msgs.Add chipRows & " chip rows written to the Spreader and Sim setup tabs (they were empty)."
-    wb.Save
-
-    PT_Msg "Written and saved to:" & vbCrLf & wb.FullName & vbCrLf & "(tabs STEP import, CAD geometry, Change log)" & vbCrLf & vbCrLf & _
-           "Imported " & (cnt - 1) & " bodies plus the PCB (" & Round(bmax(pcb, 0) - bmin(pcb, 0), 2) & " x " & _
-           Round(bmax(pcb, 1) - bmin(pcb, 1), 2) & " x " & Round(tPcb, 2) & " mm), level: " & newLevel & "." & vbCrLf & _
-           nTurned & " bodies turned in the board plane." & vbCrLf & _
-           restored & " rows kept their CAD geometry inputs (" & byName & " by key, " & byBox & " by position)." & vbCrLf & vbCrLf & _
-           "Changes since the last import: " & ChangeSummary(counts, nLog, hadOld, levelChanged) & vbCrLf & vbCrLf & _
-           "Messages:" & vbCrLf & JoinMsgs(), vbInformation, MACRO_NAME
-    Exit Sub
-writeFail:
-    xl.ScreenUpdating = True
-    xl.StatusBar = False
-    PT_Msg "Stopped while writing to Excel: " & Err.Description & vbCrLf & _
-           "The workbook was not saved. Close any cell you are editing in Excel, close the workbook without saving, and run again.", _
-           vbExclamation, MACRO_NAME
+    PT_Msg "Written to:" & vbCrLf & cadPath & vbCrLf & "The page reloads it on its own (tab 2 Import geometry)." & vbCrLf & vbCrLf & _
+           "Imported " & (mCnt - 1) & " bodies plus the PCB (" & Round(mPcbL, 2) & " x " & Round(mPcbW, 2) & " x " & _
+           Round(mPcbT, 2) & " mm), level: " & newLevel & "." & vbCrLf & _
+           mTurned & " bodies turned in the board plane." & vbCrLf & _
+           nNew & " bodies new to this project (not included until you include them on tab 3)." & vbCrLf & vbCrLf & _
+           "Changes since the last import: " & ChangeSummary(counts, nLog, hadOld, levelChanged, _
+               " change records written to cad.json. Tick them on tab 10 of the page (Changes) before Build Board.") & vbCrLf & vbCrLf & _
+           "Messages:" & vbCrLf & JoinMsgs("(all messages are on tab 2 of the page)"), vbInformation, MACRO_NAME
 End Sub
+
+' Box of row r of mOut as a JSON object.
+Function RowBox(ByVal r As Long) As Object
+    Set RowBox = PJ_Box(CDbl(mOut(r, 2)), CDbl(mOut(r, 3)), CDbl(mOut(r, 4)), CDbl(mOut(r, 5)), CDbl(mOut(r, 6)), CDbl(mOut(r, 7)))
+End Function
+
+' A body whose name changed since the last import gets the key of the old body with the same box (within the
+' tolerances), when no body of this import uses that key. The page keeps the user's choices by key, so they stay
+' with the body. Returns the number of keys kept this way.
+Function KeepKeysByBox(ByVal prevImp As Object, ByVal tolPos As Double, ByVal tolSize As Double) As Long
+    Dim oldB As Object, it As Variant, used As Object, oldKeys As Object, freeOld As Collection
+    Dim r As Long, j As Long, oldKey As String
+    If prevImp Is Nothing Then Exit Function
+    Set oldB = PJ_Obj(prevImp, "bodies")
+    If oldB Is Nothing Then Exit Function
+    Set used = CreateObject("Scripting.Dictionary")
+    Set oldKeys = CreateObject("Scripting.Dictionary")
+    For r = 0 To mCnt - 1: used(CStr(mOut(r, 9))) = 1: Next
+    Set freeOld = New Collection
+    For Each it In oldB
+        If IsObject(it) Then
+            oldKey = PJ_Str(it, "key", "")
+            If oldKey <> "" Then
+                oldKeys(oldKey) = 1
+                If Not used.Exists(oldKey) Then freeOld.Add it
+            End If
+        End If
+    Next
+    If freeOld.Count = 0 Then Exit Function
+    For r = 1 To mCnt - 1
+        If Not oldKeys.Exists(CStr(mOut(r, 9))) Then
+            For j = 1 To freeOld.Count
+                If BoxMatches(freeOld(j), r, tolPos, tolSize) Then
+                    mOut(r, 9) = PJ_Str(freeOld(j), "key", "")
+                    freeOld.Remove j
+                    KeepKeysByBox = KeepKeysByBox + 1
+                    Exit For
+                End If
+            Next
+        End If
+        If freeOld.Count = 0 Then Exit For
+    Next
+End Function
+
+' True when the box of an imported body (cad.json) equals row r of mOut within the tolerances.
+Function BoxMatches(ByVal ob As Object, ByVal r As Long, ByVal tolPos As Double, ByVal tolSize As Double) As Boolean
+    Dim flds As Variant, k As Long, tol As Double
+    flds = Array("xMin", "yMin", "zMin", "l", "w", "h")
+    For k = 0 To 5
+        If Not PJ_IsNum(ob, "box/" & flds(k)) Then Exit Function
+        If k < 3 Then tol = tolPos Else tol = tolSize
+        If Abs(PJ_Num(ob, "box/" & flds(k), 0) - CDbl(mOut(r, 2 + k))) > tol Then Exit Function
+    Next
+    BoxMatches = True
+End Function
+
+' Change records (PT_LogAdd) for this import against the last one in cad.json. PJ_FlushChanges writes them.
+Sub CompareProject(ByVal prevImp As Object, ByVal tolPos As Double, ByVal tolSize As Double, ByVal counts As Object)
+    Dim oldByKey As Object, used As Object, oldB As Object, it As Variant, r As Long, keyS As String
+    Dim ob As Object, nameS As String, oldName As String
+    Set oldByKey = CreateObject("Scripting.Dictionary")
+    Set used = CreateObject("Scripting.Dictionary")
+    If Not PJ_Obj(prevImp, "pcb") Is Nothing Then oldByKey.Add "pcb", PJ_Obj(prevImp, "pcb")
+    Set oldB = PJ_Obj(prevImp, "bodies")
+    If Not oldB Is Nothing Then
+        For Each it In oldB
+            If IsObject(it) Then
+                keyS = PJ_Str(it, "key", "")
+                If keyS <> "" And Not oldByKey.Exists(keyS) Then oldByKey.Add keyS, it
+            End If
+        Next
+    End If
+    For r = 0 To mCnt - 1
+        keyS = CStr(mOut(r, 9))
+        If r = 0 Then nameS = "PCB" Else nameS = CStr(mOut(r, 1))
+        If oldByKey.Exists(keyS) Then
+            used(keyS) = 1
+            Set ob = oldByKey(keyS)
+            CompareOne keyS, nameS, BodyRefDes(keyS), ob, r, tolPos, tolSize, counts
+            oldName = PJ_Str(ob, "name", "")
+            If r > 0 And oldName <> "" And oldName <> nameS Then
+                PT_LogAdd MACRO_NAME, keyS, nameS, BodyRefDes(keyS), "renamed", "Name", oldName, nameS
+                Bump counts, "renamed"
+            End If
+        ElseIf r > 0 Then
+            PT_LogAdd MACRO_NAME, keyS, nameS, "", "added", "Box", "", _
+                      BoxText(mOut(r, 2), mOut(r, 3), mOut(r, 4), mOut(r, 5), mOut(r, 6), mOut(r, 7))
+            Bump counts, "added"
+        End If
+    Next
+    For Each it In oldByKey.Keys
+        If Not used.Exists(it) And it <> "pcb" Then
+            Set ob = oldByKey(it)
+            PT_LogAdd MACRO_NAME, CStr(it), PJ_Str(ob, "name", ""), BodyRefDes(CStr(it)), "removed", "Box", _
+                      BoxText(PJ_Num(ob, "box/xMin", 0), PJ_Num(ob, "box/yMin", 0), PJ_Num(ob, "box/zMin", 0), _
+                              PJ_Num(ob, "box/l", 0), PJ_Num(ob, "box/w", 0), PJ_Num(ob, "box/h", 0)), ""
+            Bump counts, "removed"
+        End If
+    Next
+End Sub
+
+Sub CompareOne(ByVal keyS As String, ByVal nameS As String, ByVal refD As String, ByVal ob As Object, ByVal r As Long, _
+               ByVal tolPos As Double, ByVal tolSize As Double, ByVal counts As Object)
+    Dim flds As Variant, labels As Variant, k As Long, a As Double, b As Double
+    flds = Array("xMin", "yMin", "zMin", "l", "w", "h")
+    labels = Array("X min", "Y min", "Z min", "L", "W", "H")
+    For k = 0 To 5
+        If PJ_IsNum(ob, "box/" & flds(k)) Then
+            a = PJ_Num(ob, "box/" & flds(k), 0)
+            b = CDbl(mOut(r, 2 + k))
+            If k < 3 Then
+                If Abs(b - a) > tolPos Then
+                    PT_LogAdd MACRO_NAME, keyS, nameS, refD, "moved", CStr(labels(k)), a, b
+                    Bump counts, "moved"
+                End If
+            Else
+                If Abs(b - a) > tolSize Then
+                    PT_LogAdd MACRO_NAME, keyS, nameS, refD, "resized", CStr(labels(k)), a, b
+                    Bump counts, "resized"
+                End If
+            End If
+        End If
+    Next
+End Sub
+
+' RefDes the page links to a body key ("" when none).
+Function BodyRefDes(ByVal keyS As String) As String
+    BodyRefDes = PJ_Str(PJ_Project, "bodies/" & keyS & "/refDes", "")
+End Function
 
 ' ---------------------------------------------------------------- change report
 ' Compares the previous STEP import table (oldImp, 1-based, columns B..K) with the new rows.
@@ -588,7 +902,8 @@ Sub RemoveFrom(ByVal coll As Collection, ByVal what As String)
 End Sub
 
 ' ---------------------------------------------------------------- model access
-Function GetModel(ByRef srcName As String) As Object
+' The model to import: the one open in SolidWorks, or a STEP file (the picker starts at stepDefault when given).
+Function GetModel(ByRef srcName As String, ByVal stepDefault As String) As Object
     Dim act As Object, a As VbMsgBoxResult
     Set act = swApp.ActiveDoc
     If Not act Is Nothing Then
@@ -604,7 +919,10 @@ Function GetModel(ByRef srcName As String) As Object
         End If
     End If
     Dim f As String, opt As Long, cfg As String, disp As String
-    f = swApp.GetOpenFileName("Pick the PCB STEP file", "", "STEP files (*.step;*.stp)|*.step;*.stp|All files (*.*)|*.*||", opt, cfg, disp)
+    If stepDefault <> "" Then
+        If Dir(stepDefault) = "" Then stepDefault = ""
+    End If
+    f = swApp.GetOpenFileName("Pick the PCB STEP file", stepDefault, "STEP files (*.step;*.stp)|*.step;*.stp|All files (*.*)|*.*||", opt, cfg, disp)
     If f = "" Then Exit Function
     Dim impData As Object, errs As Long
     Set impData = swApp.GetImportFileData(f)
@@ -1287,10 +1605,10 @@ Function AutoLinkRefDes(ByVal wb As Object, ByVal wsG As Object, ByVal g0 As Lon
     Next
 End Function
 
-Function JoinMsgs() As String
+Function JoinMsgs(ByVal moreWhere As String) As String
     Dim t As Long, s As String
     For t = 1 To msgs.Count
-        If t > 8 Then s = s & "(more on the STEP import tab)": Exit For
+        If t > 8 Then s = s & moreWhere: Exit For
         s = s & "- " & msgs(t) & vbCrLf
     Next
     JoinMsgs = s
@@ -1503,7 +1821,9 @@ Function AxisText(ByRef fr() As Double, ByVal o As Long) As String
     End If
 End Function
 
-Function ChangeSummary(ByVal counts As Object, ByVal nLog As Long, ByVal hadOld As Boolean, ByVal levelChanged As Boolean) As String
+' tailS follows the number of change rows, e.g. " rows added to the Change log tab. Check them there."
+Function ChangeSummary(ByVal counts As Object, ByVal nLog As Long, ByVal hadOld As Boolean, ByVal levelChanged As Boolean, _
+                       ByVal tailS As String) As String
     Dim s As String, it As Variant
     If levelChanged Then ChangeSummary = "not compared (import level changed, see messages).": Exit Function
     If Not hadOld Then ChangeSummary = "none (first import).": Exit Function
@@ -1511,6 +1831,6 @@ Function ChangeSummary(ByVal counts As Object, ByVal nLog As Long, ByVal hadOld 
     For Each it In counts.Keys
         s = s & counts(it) & " " & it & ", "
     Next
-    ChangeSummary = Left(s, Len(s) - 2) & "." & vbCrLf & nLog & " rows added to the Change log tab. Check them there (type Yes under Checked)."
+    ChangeSummary = Left(s, Len(s) - 2) & "." & vbCrLf & nLog & tailS
 End Function
 

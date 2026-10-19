@@ -46,18 +46,21 @@ End Function
 
 ' Asks which workbook to use (starts at the last one used), opens it if needed and
 ' checks the tabs in needSheets ("Tab one|Tab two"). Returns Nothing if the user cancels
-' or a check fails (the user has been told why).
-Public Function PT_PickWorkbook(ByVal xl As Object, ByVal macroName As String, ByVal needSheets As String) As Object
+' or a check fails (the user has been told why). givenPath (already picked, PJ_PickSource) skips the question.
+Public Function PT_PickWorkbook(ByVal xl As Object, ByVal macroName As String, ByVal needSheets As String, _
+                                Optional ByVal givenPath As String = "") As Object
     Dim f As String, opt As Long, cfg As String, disp As String, lastF As String
     Dim wbk As Object, s As Variant, missing As String, asked As Boolean
     lastF = GetSetting(PT_APP, "Common", "Workbook", "")
     If lastF = "" Then lastF = GetSetting(PT_APP, "ImportStep", "Workbook", "")
+    If givenPath <> "" Then lastF = givenPath
     ' the workbook used last time is still open in Excel: use it without asking (close it to pick another one)
     If lastF <> "" Then
         For Each wbk In xl.Workbooks
             If StrComp(wbk.FullName, lastF, vbTextCompare) = 0 Then Set PT_PickWorkbook = wbk: Exit For
         Next
     End If
+    If PT_PickWorkbook Is Nothing And givenPath <> "" Then Set PT_PickWorkbook = xl.Workbooks.Open(givenPath)
     If PT_PickWorkbook Is Nothing Then
         asked = True
         f = swApp.GetOpenFileName("Pick the project workbook (a copy of PCB_thermal_TEMPLATE)", lastF, _
@@ -371,6 +374,12 @@ End Sub
 
 Public Function PT_LogCount() As Long
     If Not logRows Is Nothing Then PT_LogCount = logRows.Count
+End Function
+
+' Row i (1-based) of the collected change rows: Array(date, macro, key, name, RefDes, change, field, old, new, delta, checked).
+' PTJson writes them to cad.json instead of the Change log tab.
+Public Function PT_LogItem(ByVal i As Long) As Variant
+    PT_LogItem = logRows(i)
 End Function
 
 ' Writes the collected rows to the top of the Change log tab (newest on top). Returns the count.

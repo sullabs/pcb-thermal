@@ -6,6 +6,11 @@ Read `PLAN.md` first. It is the spec. This file is the short list of rules that 
 
 - SolidWorks 2023 VBA macros, delivered as `.bas` files in `src/`. The user imports each into a `.swp`
   (Tools > Macro > New, then File > Import File in the VBA editor). A `.swp` is binary; never try to write one.
+  Each macro is `PTCommon.bas` + its own module; ImportStep and BuildBoard also need `PTJson.bas` (project folder,
+  JSON files). They ask at the start: `project.json` (page) or an old workbook.
+  Normal use: all modules in one `src/PCBThermal.swp`, filled by `UpdateMacros.bas`, run from the **PCB Thermal** tab
+  that `src/SetupToolbar.cmd` writes (docs/HOWTO_TOOLBAR.md). A new `.bas` in `src/` is picked up by Update Macros, so
+  no public name may be defined in two modules. A new button needs an entry in `SetupToolbar.ps1` and a bitmap.
 - Excel template `workbook/PCB_thermal_TEMPLATE.xlsx` (plain `.xlsx`, no macros inside it). One copy per board.
   Reference case: `example/RaspberryPi4/RaspberryPi4.xlsx`. Tabs are numbered ("7 Spreader"); macros find them with `PT_Sheet`
   by the words after the number, never by the full name.

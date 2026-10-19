@@ -271,7 +271,7 @@ The user picks one run or all runs for the report and the workbook.
 | Change | Where |
 |---|---|
 | JSON reader and writer in pure VBA (no install) | new module `PTJson.bas` |
-| Pick and remember the project folder; log it | `PTCommon.bas` (replaces `PT_PickWorkbook`) |
+| Pick and remember the project folder (or an old workbook); log it | `PTJson.bas` (`PJ_PickSource`) |
 | Read inputs from `project.json` `forSolidWorks` instead of named cells | every macro |
 | Write their outputs to `cad.json` or `results.json` (temp file, then rename) | every macro |
 | Change records go to `cad.json` `changes[]`; the "refuse to build while unchecked" rule reads the ticks from `project.json` `checks` | Import STEP, Build Board, Build Spreader, Sync CAD |
@@ -315,7 +315,7 @@ Per macro:
 | W3 | Page shell: folder picking, save and reload, tabs with unlock rules and reasons, undo | RPi4 example opens, edits save, a locked tab names its reason. **Done 2026-10-18** (`webapp/src/page/`, `npm run build` makes `dist/PCB_Thermal.html`; `tools/test_w3.mjs` checks the unlock rules, undo and save output; RPi4 opened, edited, saved and reloaded in the browser) |
 | W4 | Term catalogue and Explain panel: hover text, abbreviations, formulas with numbers, trace | every value on every tab has a hover text and, if calculated, a formula. **Done 2026-10-18** (`src/terms/catalogue.js`, about 230 terms, glossary, status words; `src/calc/formulas.js`; `tools/test_w4.mjs` renders every tab for both RPi4 examples and checks each value, label and input has a term, and that every formula, worked out from its inputs, equals the calculated value: about 830 formulas) |
 | W5 | Tabs 1 to 5 complete (parts to bare board hand check), Learn mode texts | a new user can fill a board from a datasheet list without the workbook. **Done 2026-10-18** (Paste a parts list on tab 1, body suggestions and bodies by hand on tab 3, PCB stack, import settings, flag limits, air and surfaces, heat paths drawing per part on tab 5; `src/terms/learn.js`; `tools/test_w5.mjs` starts a new project, pastes the RPi4 list, links bodies from the suggestions and by hand, and gets the example's Pd, Tj est, flags and hand check Tj for every part) |
-| W6 | Macros on JSON: `PTJson.bas`, project folder, Import STEP and Build Board read and write JSON | RPi4: import and build from the page give the same model as from the workbook |
+| W6 | Macros on JSON: `PTJson.bas`, project folder, Import STEP and Build Board read and write JSON | RPi4: import and build from the page give the same model as from the workbook. **Code done 2026-10-19, waiting for the SolidWorks run** (`docs/HOWTO_W6.md`; the JSON reader and writer and the change report were checked on the RPi4 files through a VBScript copy, output valid against the schemas) |
 | W7 | Remaining macros on JSON, tabs 6 to 10, SolidWorks cards and file watching | full RPi4 run from the page: build, spreader, study, results |
 | W8 | Help page and glossary | every catalogue term in the glossary; each tab has its help section |
 | W9 | Exports: PDF report, workbook, archive | RPi4 report and workbook made and checked by the user |
