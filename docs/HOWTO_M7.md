@@ -54,3 +54,8 @@ ProgramData template folder to `macros\`.
 - Macro-built run 2026-10-19 (RPi4, 40 C, 6.86 W, radiation on, spreader): chips 89 to 124 C, PCB 72 to 123 C, spreader
   86 to 88 C. The Thermal study gave U1 90, U4 88, U2 82, U6 82, U5 113 and U3 229 C (its own chip k). Without radiation
   the same Flow project ran 40 C hotter.
+- Checks 2026-10-19 on that run: the PCB material keeps Axis Z (global, the board normal) after the macro re-points it.
+  Mesh: automatic level 3 gives 28 177 cells (24 s). A local mesh on the chips, TIMs and spreader, solid and boundary
+  refinement 3, gives 59 863 cells and moves chips by 0.6 C at most; level 5 gives 1.43 M cells (11 min) and moves them
+  by 2.8 C at most (U3 124.5 to 121.7 C, PCB max 122.8 to 120.1 C). So RunFlow adds no local mesh. For a final number on
+  a small hot chip, add a local mesh (feature 14, parameters 68 and 69) on it by hand; RunFlow keeps it.
