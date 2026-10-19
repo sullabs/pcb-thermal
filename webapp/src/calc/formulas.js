@@ -424,6 +424,13 @@ export const VALUES = {
   "frad.usedBy": (c, k) => c.calc.fsNow?.flow?.radiative?.[+k]?.usedBy?.join(", "),
   "hnb.pd": (c, k) => c.calc.heatNoBody?.find(x => x.refDes === k)?.pdW,
   "hnb.accepted": (c, k) => c.calc.heatNoBody?.find(x => x.refDes === k)?.accepted,
+  "env.orientation": c => c.calc.flow?.env.orientation,
+  "env.pressure": c => c.project.simSetup?.flow?.environment?.pressureKPa,
+  "env.altitude": c => c.project.simSetup?.flow?.environment?.altitudeM,
+  "env.airSpeed": c => c.calc.flow?.env.airSpeedMs,
+  "env.airDirection": c => c.project.simSetup?.flow?.environment?.airDirection,
+  "env.pressureUsed": c => c.calc.flow?.env.pressureKPa,
+  "env.up": c => c.calc.flow?.env.up,
   "flow.minTravels": c => c.calc.flow?.settings.minTravels,
   "flow.goalCriteria": c => c.calc.flow?.settings.goalCriteriaC,
   "run.goalsLoose": (c, k) => { const r = runOf(c, k), lim = c.calc.flow?.settings.goalCriteriaC; if (!r?.goalsHealth || !isNum(lim)) return undefined; const l = Object.entries(r.goalsHealth).filter(([, g]) => g.deltaC > lim).map(([n]) => n); return l.length ? l.join(", ") : "none"; },
@@ -807,6 +814,11 @@ F["frad.name"] = () => ({ text: "e <emissivity, 2 decimals>", inputs: [] });
 F["frad.eps"] = () => ({ text: "Emissivity rounded to 2 decimals", inputs: [] });
 F["frad.usedBy"] = () => ({ text: "The component groups that get this radiative surface", inputs: [] });
 F["hnb.pd"] = (c, k) => ({ text: "Pd of the part (tab 1)", inputs: [["Pd", "part.pd", k]], fn: v => v.Pd });
+F["env.pressureUsed"] = c => { const e = c.project.simSetup?.flow?.environment || {};
+  if (isNum(e.pressureKPa)) return { text: "p = the pressure typed", inputs: [["p", "env.pressure", ""]], fn: v => v.p };
+  if (isNum(e.altitudeM)) return { text: "p = 101.325 × (1 - 2.25577e-5 × altitude)^5.25588 (standard atmosphere)", inputs: [["altitude", "env.altitude", ""]], fn: v => 101.325 * (1 - 2.25577e-5 * v.altitude) ** 5.25588 };
+  return { text: "p = 101.325 kPa (sea level)", inputs: [], fn: () => 101.325 }; };
+F["env.up"] = () => ({ text: "Against gravity: +Z flat parts up, -Z flat parts down, along the short board size for long side up, along the long size for short side up", inputs: [["orientation", "env.orientation", ""]] });
 F["run.healthReasons"] = (c, k) => ({ text: "Each reason behind the health of the run, in plain words", inputs: [["health", "run.health", k]] });
 F["run.changes"] = () => ({ text: "Inputs of the run (a copy kept in the results file) compared with the inputs now: ambient, PCB, Pd per part, bodies, chip models, plates, surfaces, contacts, mesh", inputs: [] });
 F["runp.margin"] = (c, k) => { const ref = k.split("|")[1]; return isNum(runpCalc(c, k)?.marginC) ? { text: "Margin = Tj max - peak", inputs: [["Tj max", "part.tjMax", ref], ["peak", "runp.peak", k]], fn: v => v["Tj max"] - v.peak } : null; };

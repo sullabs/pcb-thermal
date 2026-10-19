@@ -192,6 +192,8 @@ features. Flow and Thermal differ by less than with the old fixed materials (com
 
 ## F6. Environment: orientation, pressure, forced air
 
+**Status: done 2026-10-19 (orientation, pressure or altitude, forced air speed and direction; gravity, pressure, velocity and per-side domain margins computed by the page into forSolidWorks.flow.environment and set by RunFlow; tab 8 card with a side view and the gravity arrow; tab 5 and tab 8 note when the hand check h is not the same case). 'Vertical, long side up' = standing on a long edge, so up runs along the short size (+Y on the RPi4). Live acceptance not run yet.**
+
 **Problem.** Only a flat board in still air at sea level.
 
 **project.json** (`simSetup.flow.environment`):
@@ -255,7 +257,7 @@ orientation or air speed does not match the h it assumes (the page's h values ar
 | F4 Tj | S4 | medium | changes the number compared with Tj max | done 2026-10-19 |
 | F5 materials | S4 to S6 | medium | | done 2026-10-19 |
 | F8 fixes | none | small | can go any time, good first warm-up | done 2026-10-19 |
-| F6 environment | S7 | medium | | open |
+| F6 environment | S7 | medium | | done 2026-10-19 |
 | F7 compare | F1, F4 | medium | page only | open |
 
 Not in this plan: transient runs and power profiles, enclosures and fans built by the macro, the add-in port.

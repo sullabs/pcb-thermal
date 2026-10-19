@@ -64,6 +64,9 @@ Const nikEnvRadiativeTemperature As Long = 30
 Const nikHeatGenerationRate As Long = 21
 Const nikVolumeSourceType As Long = 43
 Const nikInitialMeshLevel As Long = 7
+Const nikEnvironmentPressure As Long = 9
+Const nikVelocityX As Long = 11          ' Y 12, Z 13
+Const nikGravityX As Long = 83           ' Y 84, Z 85
 Const nikPathToRadiationMedia As Long = 45
 Const nikIntegralThermalResistance As Long = 88
 Const nikThermalContactResistanceType As Long = 89
@@ -851,6 +854,7 @@ Function BuildFlowProject(ByVal asm As Object, ByVal fda As Object, ByVal heat A
     End If
     If fMinTravels >= 1 Then SetConvergence fda
 
+    SetEnvironment fda
     SetDomain asm, fda
     BuildFlowProject = True
 End Function
@@ -1011,7 +1015,7 @@ End Function
 ' above, because the warm air rises along +Z (gravity -Z in the template).
 Sub SetDomain(ByVal asm As Object, ByVal fda As Object)
     Dim bx As Variant, cds As Object, pf As Object, ep As Object, par As Object, lMax As Double, pt As Long, n As Long
-    Dim lims(1 To 6) As Double
+    Dim lims(1 To 6) As Double, mg(1 To 6) As Double, mgo As Object, sideN As Variant
     bx = asm.GetBox(0)
     If Not IsArray(bx) Then
         notes.Add "The assembly box could not be read: computational domain left as it is."
@@ -1019,9 +1023,20 @@ Sub SetDomain(ByVal asm As Object, ByVal fda As Object)
     End If
     lMax = bx(3) - bx(0)
     If bx(4) - bx(1) > lMax Then lMax = bx(4) - bx(1)
-    lims(1) = bx(0) - 0.5 * lMax: lims(2) = bx(3) + 0.5 * lMax
-    lims(3) = bx(1) - 0.5 * lMax: lims(4) = bx(4) + 0.5 * lMax
-    lims(5) = bx(2) - 0.5 * lMax: lims(6) = bx(5) + 1.5 * lMax
+    ' margins per side as a share of lMax: the page's (F6, gravity and forced air), else 0.5 and 1.5 above
+    For pt = 1 To 6: mg(pt) = 0.5: Next
+    mg(6) = 1.5
+    If jsonMode Then Set mgo = PJ_Obj(PJ_Project, "forSolidWorks/flow/environment/margins")
+    If Not mgo Is Nothing Then
+        pt = 0
+        For Each sideN In Array("xMin", "xMax", "yMin", "yMax", "zMin", "zMax")
+            pt = pt + 1
+            mg(pt) = PJ_Num(mgo, CStr(sideN), mg(pt))
+        Next
+    End If
+    lims(1) = bx(0) - mg(1) * lMax: lims(2) = bx(3) + mg(2) * lMax
+    lims(3) = bx(1) - mg(3) * lMax: lims(4) = bx(4) + mg(4) * lMax
+    lims(5) = bx(2) - mg(5) * lMax: lims(6) = bx(5) + mg(6) * lMax
     Set cds = fda.ComputationalDomainSettings
     If cds Is Nothing Then Exit Sub
     Set pf = cds.GetInterface("IParametrizedFeature")
@@ -1290,6 +1305,49 @@ Sub WarnThinParts(ByVal heat As Object)
     lines.Add "estimated smallest solid cell: " & Format(cellMm, "0.00") & " mm"
     If s <> "" Then notes.Add "Thinner than the estimated smallest cell (" & Format(cellMm, "0.00") & " mm): " & s & _
         ". They may not be meshed. Turn on the local mesh or raise the mesh level on tab 8."
+End Sub
+
+' ---------------------------------------------------------------- environment (Flow plan F6)
+' Gravity (board axes, m/s2), ambient pressure (Pa) and air velocity (m/s) from forSolidWorks.flow.environment.
+Sub SetEnvironment(ByVal fda As Object)
+    Dim env As Object, gv As Object, vv As Object, gs As Object, ic As Object, i As Long, n As Long, s As String
+    If Not jsonMode Then Exit Sub
+    Set env = PJ_Obj(PJ_Project, "forSolidWorks/flow/environment")
+    If env Is Nothing Then Exit Sub
+    Set gv = PJ_Obj(env, "gravity")
+    If Not gv Is Nothing Then
+        On Error Resume Next
+        fda.EnableGravitation = True
+        Set gs = fda.GravitationSettings
+        On Error GoTo 0
+        If Not gs Is Nothing And gv.Count = 3 Then
+            For i = 1 To 3
+                n = n + SetParamNum(gs, nikGravityX + i - 1, CDbl(gv(i)))
+                s = s & IIf(i > 1, ", ", "") & Format(CDbl(gv(i)), "0.00")
+            Next
+        End If
+        If n = 3 Then lines.Add "gravity = (" & s & ") m/s2" Else notes.Add "Gravity: " & n & " of 3 components were set. Check General Settings > Gravity."
+    End If
+    Set ic = fda.GlobalInitialConditions
+    If ic Is Nothing Then Exit Sub
+    If PJ_IsNum(env, "pressurePa") Then
+        If SetParamNum(ic, nikEnvironmentPressure, PJ_Num(env, "pressurePa", 101325)) > 0 Then
+            lines.Add "ambient pressure = " & Format(PJ_Num(env, "pressurePa", 101325), "0") & " Pa"
+        Else
+            notes.Add "Ambient pressure was not accepted: the project keeps its own."
+        End If
+    End If
+    Set vv = PJ_Obj(env, "velocity")
+    If Not vv Is Nothing Then
+        If vv.Count = 3 Then
+            n = 0: s = ""
+            For i = 1 To 3
+                n = n + SetParamNum(ic, nikVelocityX + i - 1, CDbl(vv(i)))
+                s = s & IIf(i > 1, ", ", "") & Format(CDbl(vv(i)), "0.00")
+            Next
+            If n = 3 Then lines.Add "ambient air velocity = (" & s & ") m/s" Else notes.Add "Air velocity: " & n & " of 3 components were set."
+        End If
+    End If
 End Sub
 
 ' ---------------------------------------------------------------- radiation and contacts (Flow plan F5)

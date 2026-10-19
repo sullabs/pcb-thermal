@@ -7,6 +7,7 @@
 // F3. Convergence: minTravels and goalCriteriaC are valid, default to 2 and 0.2, and drive the health reasons.
 // F4. Tj basis: k steps and material names, forSolidWorks.flow per chip, two-resistor layers, tjBasis on tab 9.
 // F5. PCB, TIM, spreader materials, radiative surfaces and contacts from the page, with the simplifications noted.
+// F6. Environment: gravity from the orientation, pressure from altitude, forced air, domain margins, hand check note.
 // F8. Heat with no body: listed on tab 6, accepted with a tick, open ones in forSolidWorks.openChecks (macros refuse).
 import fs from "node:fs";
 import path from "node:path";
@@ -17,7 +18,7 @@ import { makeValidator } from "./validate.mjs";
 import { calcProject } from "../src/calc/index.js";
 import { valueOf } from "../src/calc/formulas.js";
 import { runHealth } from "../src/calc/runs.js";
-import { flowSettings, kStep, flowMaterial, tjBasisOf, flowEmissivity } from "../src/calc/flow.js";
+import { flowSettings, kStep, flowMaterial, tjBasisOf, flowEmissivity, flowEnvironment, flowDomainMm } from "../src/calc/flow.js";
 import { tabStates, blockingProblems } from "../src/page/tabs.js";
 import { macroChecks } from "../src/page/swcard.js";
 import { openIssues } from "../src/page/report.js";
@@ -234,6 +235,34 @@ const flowRun = (over = {}) => ({
   check(c3.calc.heatNoBody[0].accepted && !c3.calc.fsNow.openChecks, "ticked: no open check left");
   valid("project.schema.json", { ...P3, forSolidWorks: { ...c3.calc.fsNow, computedAt: NOW } }, "project.json with the accepted check");
   check(macroChecks("RunFlow", c3).some(x => x.ok && /on purpose: J1/.test(x.text)), "Run Flow card says J1 is left out on purpose");
+}
+
+// ---------- F6 ----------
+{
+  const withEnv = e => ({ ...P, simSetup: { ...P.simSetup, studyType: "Flow", flow: { environment: e } } });
+  const fs = ctxOf(P).calc.fsNow;
+  const flat = flowEnvironment(P, fs);
+  check(flat.up === "+Z" && flat.gravity.join() === "0,0,-9.81" && flat.pressureKPa === 101.325 && flat.natural && flat.margins.zMax === 1.5 && flat.margins.xMin === 0.5, "default: flat, parts up, g -Z, sea level, margins 0.5 and 1.5 above", flat);
+  check(JSON.stringify(fs.flow.environment.margins) === JSON.stringify(flat.margins) && fs.flow.environment.pressurePa === 101325, "forSolidWorks.flow.environment carries the same", fs.flow.environment);
+  const old = flowDomainMm(fs), now = flowDomainMm(fs, flat);
+  check(JSON.stringify(old) === JSON.stringify(now), "default margins give the domain RunFlow used before F6");
+  const v = flowEnvironment(withEnv({ orientation: "vertical, long side up" }), fs);
+  check(v.up === "+Y" && v.gravity.join() === "0,-9.81,0" && v.margins.yMax === 1.5 && v.margins.zMax === 0.5 && !v.natural, "RPi4 standing on its long edge: g -Y, domain grows along +Y", v);
+  check(flowEnvironment(withEnv({ orientation: "vertical, short side up" }), fs).up === "+X" && flowEnvironment(withEnv({ orientation: "flat, parts down" }), fs).gravity[2] === 9.81, "short side up: +X; parts down: g +Z");
+  const alt = flowEnvironment(withEnv({ altitudeM: 2000 }), fs);
+  check(Math.abs(alt.pressureKPa - 79.5) < 0.1, `2000 m: ${alt.pressureKPa.toFixed(2)} kPa (standard atmosphere 79.5)`);
+  check(flowEnvironment(withEnv({ altitudeM: 2000, pressureKPa: 90 }), fs).pressureKPa === 90, "a typed pressure wins over the altitude");
+  const fan = flowEnvironment(withEnv({ airSpeedMs: 1.5, airDirection: "-X" }), fs);
+  check(fan.velocity.join() === "-1.5,0,0" && fan.margins.xMin === 2 && fan.margins.zMax === 1.5, "forced air -X: velocity and 2 x downstream", fan);
+  const Pv = withEnv({ orientation: "vertical, long side up", airSpeedMs: 1 });
+  valid("project.schema.json", Pv, "project.json with simSetup.flow.environment");
+  const cv = ctxOf(Pv);
+  valid("project.schema.json", { ...Pv, forSolidWorks: { ...cv.calc.fsNow, computedAt: NOW } }, "forSolidWorks with the environment");
+  check(Math.abs(cv.value("env.pressureUsed") - 101.325) < 1e-9 && cv.value("env.up") === "+Y", "environment values on the page");
+  const t8 = show("SimTab", cv);
+  check(t8.includes("Flow environment") && t8.includes('data-term="env.orientation"') && t8.includes("svg") && t8.includes("assumes a flat board in still air"), "tab 8 shows the environment, the drawing and the hand check note");
+  check(show("BareTab", cv).includes("are not the same case"), "tab 5 notes that the hand check is a different case");
+  check(!show("BareTab", ctxOf(withEnv({}))).includes("are not the same case"), "no note for a flat board in still air");
 }
 
 console.log(`Flow plan: ${n - fails} of ${n} checks passed.`);

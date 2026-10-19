@@ -633,8 +633,10 @@ function BareView({ c }) {
   const setSim = (path, label, v) => v !== undefined && c.editFn(label, q => setIn(withSimSetup(q), ["simSetup", ...path], v), "simSetup." + path.join("."));
   const runs = (results?.runs || []).map(r => r.name);
   const surf = [["pcbTop", "surf.pcbTopH", "surf.pcbTopEps", "PCB top"], ["pcbBottom", "surf.pcbBottomH", "surf.pcbBottomEps", "PCB bottom"], ["parts", "surf.partsH", "surf.partsEps", "parts"]];
+  const env = calc.flow?.env;
   return html`
     ${c.learn && html`<${Reading} c=${c} parts=${worst} />`}
+    ${p.simSetup?.studyType === "Flow" && env && !env.natural && html`<p class="warn">The h values here are for a flat board, parts up, in still air. The Flow study on tab 8 has the board ${env.orientation}${env.airSpeedMs > 0 ? ` with ${env.airSpeedMs} m/s of air` : ""}, so this hand check and the Flow run are not the same case.</p>`}
     <${Card} title="Air and surfaces">
       <table class="grid limits"><thead><tr><th></th><th><${L} t="surf.pcbTopH">h</${L}></th><th><${L} t="surf.pcbTopEps">emissivity</${L}></th></tr></thead>
       <tbody>${surf.map(([f, th, te, name]) => html`<tr><td>${name}</td>

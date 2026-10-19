@@ -10,6 +10,7 @@ import { setIn, withSimSetup, addPlate, removePlate, newPlateChip, addSolution, 
 import { swFiles, withFound } from "./swfiles.js";
 import { unticked } from "./tabs.js";
 import { BALANCE_LIMIT_PCT } from "../calc/runs.js";
+import { ORIENTATIONS, AIR_DIRECTIONS } from "../calc/flow.js";
 import { TERMS } from "../terms/catalogue.js";
 import { isNum } from "../calc/util.js";
 
@@ -258,6 +259,7 @@ function SimView({ c }) {
       <p class="hint">${type === "Flow" ? "Flow: the macro builds the Flow project itself (air, gravity, radiation, materials, a heat source and goals per chip) and sets heat and ambient. Surfaces and contacts below are for Thermal studies only." : "Thermal: SolidWorks Simulation, steady state, h and radiation on the outer faces."}</p>
     <//>
     ${type === "Flow" && html`<${FlowMeshCard} c=${c} f=${ss.flow || {}} setSim=${setSim} locked=${locked} />`}
+    ${type === "Flow" && html`<${FlowEnvCard} c=${c} e=${ss.flow?.environment || {}} setSim=${setSim} locked=${locked} />`}
     ${type === "Flow" && html`<${FlowMaterialsCard} c=${c} />`}
     <${Card} title="Air and surfaces">
       <table class="grid limits"><thead><tr><th></th><th><${L} t="surf.pcbTopH">h</${L}></th><th><${L} t="surf.pcbTopEps">emissivity</${L}></th></tr></thead>
@@ -302,6 +304,40 @@ function FlowMeshCard({ c, f, setSim, locked }) {
       : html`<p class="hint">Every part with heat is thicker than the estimated smallest cell.</p>`}
     ${c.learn && html`<p class="hint">More cells cost time: each level gives about 7 times more. A local mesh refines only the parts with heat, TIMs and spreader, which is what decides the chip temperatures. Run a mesh check once per design: if the chips move less than the limit at the next level, the mesh is fine enough. The solve stops when the goals have converged and the minimum travels are done; more travels take longer but let the air settle.</p>`}
   <//>`;
+}
+
+// Where the board sits in Flow (F6): orientation, pressure, forced air, and a side view with the gravity arrow.
+function FlowEnvCard({ c, e, setSim, locked }) {
+  const env = c.calc.flow?.env;
+  if (!env) return null;
+  const set = (f, label, v) => setSim(["flow", "environment", f], label, v, false);
+  return html`<${Card} title="Flow environment">
+    <div class="cols"><div class="form">
+      <label><${L} t="env.orientation" /> <${Select} term="env.orientation" value=${e.orientation} options=${ORIENTATIONS} label="Orientation" disabled=${locked} onCommit=${v => set("orientation", "Orientation", v || undefined)} /></label>
+      <label><${L} t="env.pressure" /> <${NumField} term="env.pressure" value=${e.pressureKPa} unit="kPa" width="5em" placeholder="101.325" label="Ambient pressure" rule=${{ minEx: 0 }} disabled=${locked} onCommit=${v => set("pressureKPa", "Ambient pressure", v)} /></label>
+      <label><${L} t="env.altitude" /> <${NumField} term="env.altitude" value=${e.altitudeM} unit="m" width="5em" placeholder="0" label="Altitude" rule=${{ min: -500, max: 10000 }} disabled=${locked || isNum(e.pressureKPa)} onCommit=${v => set("altitudeM", "Altitude", v)} /></label>
+      <label><${L} t="env.pressureUsed" /> <span><${V} t="env.pressureUsed" d=${2} u /></span></label>
+      <label><${L} t="env.airSpeed" /> <${NumField} term="env.airSpeed" value=${e.airSpeedMs} unit="m/s" width="4em" placeholder="0" label="Air speed" rule=${{ min: 0 }} disabled=${locked} onCommit=${v => set("airSpeedMs", "Air speed", v)} /></label>
+      <label><${L} t="env.airDirection" /> <${Select} term="env.airDirection" value=${e.airDirection} options=${AIR_DIRECTIONS} label="Air direction" disabled=${locked || !(env.airSpeedMs > 0)} onCommit=${v => set("airDirection", "Air direction", v || undefined)} /></label>
+      <label><${L} t="env.up" /> <span><${V} t="env.up" /></span></label>
+    </div><${EnvDrawing} env=${env} /></div>
+    ${!env.natural && html`<p class="warn">The hand check (tab 5) assumes a flat board in still air. With ${env.orientation !== ORIENTATIONS[0] ? `the board ${env.orientation}` : ""}${env.orientation !== ORIENTATIONS[0] && env.airSpeedMs > 0 ? " and " : ""}${env.airSpeedMs > 0 ? `${env.airSpeedMs} m/s of air` : ""} its h values do not match this Flow run, so expect them to differ.</p>`}
+  <//>`;
+}
+
+// Side view of the board for the environment card: the board as it stands, the gravity arrow, forced air.
+function EnvDrawing({ env }) {
+  const o = env.orientation;
+  const board = o === "flat, parts up" ? html`<rect class="pcb" x="25" y="62" width="90" height="5" /><rect class="body linked" x="40" y="55" width="16" height="7" /><rect class="body linked" x="72" y="57" width="12" height="5" />`
+    : o === "flat, parts down" ? html`<rect class="pcb" x="25" y="45" width="90" height="5" /><rect class="body linked" x="40" y="50" width="16" height="7" /><rect class="body linked" x="72" y="50" width="12" height="5" />`
+    : o === "vertical, long side up" ? html`<rect class="pcb" x="25" y="30" width="90" height="56" /><rect class="body linked" x="45" y="45" width="18" height="18" />`
+    : html`<rect class="pcb" x="45" y="12" width="50" height="78" /><rect class="body linked" x="58" y="35" width="18" height="18" />`;
+  return html`<svg class="board env" viewBox="0 0 160 100" role="img" aria-label=${`Board ${o}, gravity down${env.airSpeedMs > 0 ? `, air ${env.airDirection}` : ""}`}>
+    ${board}
+    <g class="arrow"><line x1="140" y1="18" x2="140" y2="76" /><path d="M134 70 L140 82 L146 70 Z" /><text x="146" y="50">g</text></g>
+    <g class="arrow warm"><line x1="12" y1="80" x2="12" y2="26" /><path d="M6 32 L12 20 L18 32 Z" /><text x="3" y="94">warm</text></g>
+    ${env.airSpeedMs > 0 && html`<g class="arrow air"><line x1="30" y1="96" x2="110" y2="96" /><text x="62" y="92">air ${env.airDirection} ${env.airSpeedMs} m/s</text></g>`}
+  </svg>`;
 }
 
 // Flow materials (F4, F5): what each chip becomes in Flow and the user materials to have in the Engineering Database.

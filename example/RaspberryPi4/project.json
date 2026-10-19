@@ -1059,6 +1059,28 @@
           "basis": "package"
         }
       },
+      "environment": {
+        "up": "+Z",
+        "gravity": [
+          0,
+          0,
+          -9.81
+        ],
+        "pressurePa": 101325,
+        "velocity": [
+          0,
+          0,
+          0
+        ],
+        "margins": {
+          "xMin": 0.5,
+          "xMax": 0.5,
+          "yMin": 0.5,
+          "yMax": 0.5,
+          "zMin": 0.5,
+          "zMax": 1.5
+        }
+      },
       "pcb": "User Defined\\PCBThermal\\k 21.5 0.316",
       "tims": {
         "U2": "User Defined\\PCBThermal\\k 2.87",

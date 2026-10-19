@@ -119,6 +119,12 @@ table.grid { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: 1
 .grid td.num { font-family: var(--display); }
 .grid tr.dim td { opacity: .55; }
 .cols.dim > div:first-child, td.dim { opacity: .45; }
+svg.board.env { max-width: 240px; }
+svg.env .arrow line { stroke: var(--text); stroke-width: 1.5; }
+svg.env .arrow path { fill: var(--text); }
+svg.env .arrow text { fill: var(--muted, var(--text)); font-size: 9px; }
+svg.env .arrow.warm line { stroke: var(--crit); } svg.env .arrow.warm path { fill: var(--crit); }
+svg.env .arrow.air line { stroke: var(--minor); stroke-dasharray: 4 2; }
 .health .status { padding: 1px 8px; border-radius: 3px; font-weight: 600; }
 .health ul.reasons { margin: 4px 0 8px 18px; padding: 0; }
 .loads .field input { padding: 2px 4px; }

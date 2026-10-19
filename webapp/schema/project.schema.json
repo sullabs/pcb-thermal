@@ -136,7 +136,19 @@
             "meshCheck": { "type": "boolean", "description": "Solve twice, at meshLevel and one level finer, and compare. Blank = no." },
             "meshCheckLimitC": { "type": "number", "exclusiveMinimum": 0, "description": "A mesh check is OK when every chip moved less than this (C). Blank = 1." },
             "minTravels": { "type": "number", "minimum": 1, "maximum": 20, "description": "The solve stops only after this many travels and with the goals converged. Blank = 2." },
-            "goalCriteriaC": { "type": "number", "exclusiveMinimum": 0, "description": "A goal whose last change is above this (C) is flagged as not converged on tab 9. Blank = 0.2." }
+            "goalCriteriaC": { "type": "number", "exclusiveMinimum": 0, "description": "A goal whose last change is above this (C) is flagged as not converged on tab 9. Blank = 0.2." },
+            "environment": {
+              "type": "object",
+              "description": "Where the board sits (F6). Blank = flat, parts up, sea level, still air.",
+              "additionalProperties": false,
+              "properties": {
+                "orientation": { "enum": ["flat, parts up", "flat, parts down", "vertical, long side up", "vertical, short side up"] },
+                "pressureKPa": { "type": "number", "exclusiveMinimum": 0, "description": "Ambient pressure. Blank = from altitudeM, else 101.325." },
+                "altitudeM": { "type": "number", "minimum": -500, "maximum": 10000, "description": "Used for the pressure when pressureKPa is blank." },
+                "airSpeedMs": { "type": "number", "minimum": 0, "description": "Forced air speed. 0 or blank = natural convection." },
+                "airDirection": { "enum": ["+X", "-X", "+Y", "-Y", "+Z"], "description": "Direction the air blows (board axes). Blank = +X." }
+              }
+            }
           }
         },
         "chips": {
@@ -462,6 +474,25 @@
                 "additionalProperties": false,
                 "properties": { "bottom": { "type": "string" }, "core": { "type": "string" }, "top": { "type": "string" } }
               }
+            }
+          }
+        },
+        "environment": {
+          "type": "object",
+          "description": "Gravity, pressure, air velocity and domain margins for Run Flow (F6), from simSetup.flow.environment.",
+          "required": ["gravity", "pressurePa", "velocity", "margins"],
+          "additionalProperties": false,
+          "properties": {
+            "up": { "enum": ["+X", "-X", "+Y", "-Y", "+Z", "-Z"], "description": "Where the warm air goes (against gravity)." },
+            "gravity": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "m/s2 in board axes." },
+            "pressurePa": { "type": "number", "exclusiveMinimum": 0 },
+            "velocity": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "m/s in board axes; all 0 for natural convection." },
+            "margins": {
+              "type": "object",
+              "description": "Domain margin per side as a share of the largest board size.",
+              "required": ["xMin", "xMax", "yMin", "yMax", "zMin", "zMax"],
+              "additionalProperties": false,
+              "properties": { "xMin": { "type": "number" }, "xMax": { "type": "number" }, "yMin": { "type": "number" }, "yMax": { "type": "number" }, "zMin": { "type": "number" }, "zMax": { "type": "number" } }
             }
           }
         },

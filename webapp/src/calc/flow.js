@@ -7,6 +7,7 @@
 //   meshCheckResult(run, runs, limit) -> the change per chip between the two runs of a mesh check
 //   kStep(k), flowMaterial(kxy, kz)  -> k in 10 % steps (24 per decade) and the user material named after it
 //   flowForSw(project, calc, fs)     -> forSolidWorks.flow: per chip its Tj basis and material(s), and the materials list
+//   flowEnvironment(project, fs)    -> orientation, up, gravity, pressure, air velocity and domain margins (F6)
 //   flowEmissivity(e)               -> radiative surface named after the emissivity (2 decimals)
 //   tjBasisOf(run, ref)              -> "calibrated block" | "two-resistor" | "package" for a run's part
 
@@ -21,16 +22,45 @@ export function flowSettings(project) {
   return out;
 }
 
-// The box of the PCB and every included body, with RunFlow's margins: half the largest board size at the sides and
-// below, one and a half above (warm air rises along +Z).
-export function flowDomainMm(fs) {
+export const ORIENTATIONS = ["flat, parts up", "flat, parts down", "vertical, long side up", "vertical, short side up"];
+export const AIR_DIRECTIONS = ["+X", "-X", "+Y", "-Y", "+Z"];
+const AX = { X: 0, Y: 1, Z: 2 };
+const SIDE = d => (d[1] === "X" ? "x" : d[1] === "Y" ? "y" : "z") + (d[0] === "+" ? "Max" : "Min");
+
+// Where the board sits (F6). Board axes: X along its length L, Y along W, Z out of the top face. "Long side up" means
+// the board stands on a long edge, so up runs along the short size. The domain grows 1.5 × the largest board size on
+// the side the warm air goes, 2 × downstream of forced air, 0.5 × elsewhere.
+export function flowEnvironment(project, fs) {
+  const e = project.simSetup?.flow?.environment || {};
+  const orientation = e.orientation || ORIENTATIONS[0];
+  const longX = fs ? fs.pcb.l >= fs.pcb.w : true;
+  const up = orientation === "flat, parts down" ? "-Z" : orientation === "vertical, long side up" ? (longX ? "+Y" : "+X")
+    : orientation === "vertical, short side up" ? (longX ? "+X" : "+Y") : "+Z";
+  const gravity = [0, 0, 0];
+  gravity[AX[up[1]]] = up[0] === "+" ? -9.81 : 9.81;
+  const pressureKPa = isNum(e.pressureKPa) ? e.pressureKPa : isNum(e.altitudeM) ? 101.325 * (1 - 2.25577e-5 * e.altitudeM) ** 5.25588 : 101.325;
+  const airSpeedMs = isNum(e.airSpeedMs) ? e.airSpeedMs : 0;
+  const dir = e.airDirection || "+X";
+  const velocity = [0, 0, 0];
+  if (airSpeedMs > 0) velocity[AX[dir[1]]] = dir[0] === "+" ? airSpeedMs : -airSpeedMs;
+  const margins = { xMin: 0.5, xMax: 0.5, yMin: 0.5, yMax: 0.5, zMin: 0.5, zMax: 0.5 };
+  margins[SIDE(up)] = 1.5;
+  if (airSpeedMs > 0) margins[SIDE(dir)] = Math.max(margins[SIDE(dir)], 2);
+  return { orientation, up, gravity, pressureKPa, pressurePa: pressureKPa * 1000, airSpeedMs, airDirection: airSpeedMs > 0 ? dir : undefined, velocity, margins,
+    natural: orientation === ORIENTATIONS[0] && airSpeedMs === 0 };
+}
+
+// The box of the PCB and every included body, with RunFlow's margins (flowEnvironment): by default half the largest
+// board size at the sides and below, one and a half above (warm air rises along +Z).
+export function flowDomainMm(fs, env) {
   if (!fs) return undefined;
+  const mg = env?.margins || { xMin: 0.5, xMax: 0.5, yMin: 0.5, yMax: 0.5, zMin: 0.5, zMax: 1.5 };
   const boxes = [{ xMin: 0, yMin: 0, zMin: 0, l: fs.pcb.l, w: fs.pcb.w, h: fs.pcb.h }, ...fs.bodies.map(b => b.box)];
   const lo = f => Math.min(...boxes.map(b => b[f + "Min"]));
   const hi = (f, s) => Math.max(...boxes.map(b => b[f + "Min"] + b[s]));
   const x = [lo("x"), hi("x", "l")], y = [lo("y"), hi("y", "w")], z = [lo("z"), hi("z", "h")];
   const m = Math.max(x[1] - x[0], y[1] - y[0]);
-  return { x: [x[0] - 0.5 * m, x[1] + 0.5 * m], y: [y[0] - 0.5 * m, y[1] + 0.5 * m], z: [z[0] - 0.5 * m, z[1] + 1.5 * m] };
+  return { x: [x[0] - mg.xMin * m, x[1] + mg.xMax * m], y: [y[0] - mg.yMin * m, y[1] + mg.yMax * m], z: [z[0] - mg.zMin * m, z[1] + mg.zMax * m] };
 }
 
 // Mean cell of the domain at the global level (calibrated on the RPi4 runs of 2026-10-19: level 3 gave 28 000
@@ -46,7 +76,8 @@ export function flowMinCellMm(s, d) {
 export function flowCheck(project, calc) {
   const settings = flowSettings(project);
   const fs = calc.fsNow;
-  const domain = flowDomainMm(fs);
+  const env = flowEnvironment(project, fs);
+  const domain = flowDomainMm(fs, env);
   const minCellMm = flowMinCellMm(settings, domain);
   const thin = [];
   if (fs && isNum(minCellMm)) {
@@ -55,7 +86,7 @@ export function flowCheck(project, calc) {
       if (!thin.some(t => t.refDes === b.refDes)) thin.push({ refDes: b.refDes, hMm: b.box.h });
     }
   }
-  return { settings, domain, minCellMm, thin };
+  return { settings, env, domain, minCellMm, thin };
 }
 
 // Flow cannot take a k from the API (F0, S4): only a material path from its Engineering Database. So every k is
@@ -92,6 +123,8 @@ export function flowForSw(project, calc, fs) {
   // F5: PCB, TIMs, spreaders, radiative surfaces and contacts from the page, not Flow's library picks
   const out = { chips };
   const notes = [];
+  const env = flowEnvironment(project, fs);
+  out.environment = { up: env.up, gravity: env.gravity, pressurePa: Math.round(env.pressurePa * 10) / 10, velocity: env.velocity, margins: env.margins };
   out.pcb = use(flowMaterial(fs.pcb.kxy, fs.pcb.kz), "PCB");
   const ct = ss.contacts || {};
   const tims = {}, spreaders = {};

@@ -472,6 +472,14 @@ def("frad.eps", "Emissivity", "ε", "", "calculated", "Emissivity of the radiati
 def("frad.usedBy", "Used by", "", "", "calculated", "Component groups that use this radiative surface.");
 def("hnb.pd", "Heat with no body", "", "W", "calculated", "Pd of a part that has no included body: this heat is in no model, so every simulation misses it.");
 def("hnb.accepted", "On purpose", "", "", "input", "Tick when the part has no body on purpose (its heat is small, or it sits off the board). The macros refuse while a part with heat and no body is not ticked.");
+def("env.orientation", "Orientation", "", "", "input", "How the board sits: flat with the parts up or down, or standing on a long or short edge. Blank = flat, parts up.",
+  "Gravity decides where the warm air goes. A board standing up has a chimney along its face and usually runs a few C cooler than flat; a board with its parts facing down traps warm air under it. The hand check's h values are for a flat board in still air.");
+def("env.pressure", "Ambient pressure", "p", "kPa", "input", "Air pressure around the board. Blank = from the altitude, else 101.325 kPa.", undefined, { range: [50, 110] });
+def("env.altitude", "Altitude", "", "m", "input", "Height above sea level, used for the pressure when the pressure is blank. Thin air cools worse.", undefined, { range: [0, 5000] });
+def("env.airSpeed", "Air speed", "", "m/s", "input", "Forced air speed (fan or wind). 0 or blank = natural convection.", undefined, { range: [0, 20] });
+def("env.airDirection", "Air direction", "", "", "input", "Board axis the air blows along: X along the length, Y along the width, Z out of the top face. Blank = +X.");
+def("env.pressureUsed", "Pressure used", "p", "kPa", "calculated", "Pressure Run Flow sets: typed, from the altitude, or sea level.");
+def("env.up", "Warm air goes", "", "", "calculated", "Board axis the warm air rises along (against gravity). The domain is longer on that side.");
 def("flow.minTravels", "Minimum travels", "", "", "input", "The solve stops only after this many travels, and only when the goals have converged. Blank = 2.",
   "Flow's own criteria are often met after about one travel; on the RPi4 the chip goals then still had criteria of about 2.3 K. Two travels let the air settle so runs can be compared within 1 to 2 C. The API cannot set the criterion of a goal, so a goal still moving more than the goal criterion is flagged on tab 9.", { range: [1, 10] });
 def("flow.goalCriteria", "Goal criterion", "", "C", "input", "A goal whose last change is above this is shown as not converged on tab 9. Blank = 0.2 C.", undefined, { range: [0.05, 2] });
