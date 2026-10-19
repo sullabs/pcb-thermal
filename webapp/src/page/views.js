@@ -280,7 +280,10 @@ function PartsSheet({ c }) {
   const partCols = SHEET_COLS.filter(x => x.where === "part" && x.key !== "notes");
   const loadCols = SHEET_COLS.filter(x => x.where === "load");
   const notesCol = SHEET_COLS.find(x => x.key === "notes");
-  const head = col => html`<th class=${col.kind === "num" ? "num" : col.kind === "refdes" ? "refcol" : ""}><${L} t=${col.term}>${col.short || TERMS[col.term]?.label}</${L}>${col.unit ? html`<span class="unit">${unitText(col.unit)}</span>` : ""}</th>`;
+  // Section of a column, for its colour: part, datasheet, loads, results (calculated), notes.
+  const DATASHEET = new Set(["tjMaxC", "rjaCW", "rjcCW", "rjbCW", "taOverrideC"]);
+  const grp = col => "g-" + (col.key === "notes" ? "notes" : col.where === "load" ? "load" : DATASHEET.has(col.key) ? "ds" : "part");
+  const head = col => html`<th class=${`${col.kind === "num" ? "num" : col.kind === "refdes" ? "refcol" : ""} ${grp(col)}`}><${L} t=${col.term}>${col.short || TERMS[col.term]?.label}</${L}>${col.unit ? html`<span class="unit">${unitText(col.unit)}</span>` : ""}</th>`;
   const m = menu && p.parts[menu.i];
 
   return html`
@@ -296,16 +299,16 @@ function PartsSheet({ c }) {
     <div class="sheet-wrap">
       <table class=${`sheet ${drag ? "dragging" : ""}`} onKeyDown=${onKeyDown} onPaste=${onPaste} onDragEnd=${endDrag}>
         <thead>
-          <tr class="groups"><th rowspan="2" class="rownum-h"></th><th colspan=${4}>Part</th><th colspan=${5}>Datasheet</th><th class="grip-h" rowspan="2"></th>
-            <th colspan=${loadCols.length}>Loads: one row per heat source</th><th colspan=${5 + (more ? MORE.length + 1 : 0)} class="calc">Results</th><th>Notes</th></tr>
+          <tr class="groups"><th rowspan="2" class="rownum-h"></th><th class="refcol g-part">Part</th><th colspan=${3} class="g-part g-cont"></th><th colspan=${5} class="g-ds">Datasheet</th><th class="grip-h g-load" rowspan="2"></th>
+            <th colspan=${loadCols.length} class="g-load">Loads: one row per heat source</th><th colspan=${5 + (more ? MORE.length + 1 : 0)} class="calc g-res">Results</th><th class="g-notes">Notes</th></tr>
           <tr>${partCols.map(head)}${loadCols.map(head)}
-            <th class="num calc"><${L} t="load.pd" /><span class="unit">W</span></th>
-            <th class="num calc"><${L} t="part.pd">Part Pd</${L}><span class="unit">W</span></th>
-            <th class="num calc"><${L} t="part.tjEst">Tj est</${L}><span class="unit">C</span></th>
-            <th class="num calc"><${L} t="part.margin" /><span class="unit">C</span></th>
-            <th class="calc"><${L} t="part.flag" /></th>
-            ${more && MORE.map(([t]) => html`<th class="num calc"><${L} t=${t} /></th>`)}
-            ${more && html`<th class="calc"><${L} t="part.why" /></th>`}
+            <th class="num calc g-res"><${L} t="load.pd" /><span class="unit">W</span></th>
+            <th class="num calc g-res"><${L} t="part.pd">Part Pd</${L}><span class="unit">W</span></th>
+            <th class="num calc g-res"><${L} t="part.tjEst">Tj est</${L}><span class="unit">C</span></th>
+            <th class="num calc g-res"><${L} t="part.margin" /><span class="unit">C</span></th>
+            <th class="calc g-res"><${L} t="part.flag" /></th>
+            ${more && MORE.map(([t]) => html`<th class="num calc g-res"><${L} t=${t} /></th>`)}
+            ${more && html`<th class="calc g-res"><${L} t="part.why" /></th>`}
             ${head(notesCol)}</tr>
         </thead>
         ${p.parts.map((x, i) => {
