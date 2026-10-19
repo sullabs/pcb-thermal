@@ -3,11 +3,12 @@
 // Tabs that keep their own view state (open editors, the selected part) render a small component, because the
 // page calls each tab as a plain function. The SolidWorks cards come with W7.
 
-import { useState, useMemo, useContext } from "preact/hooks";
-import { html, NumField, TextField, Select, Check, Card } from "./ui.js";
+import { useState, useMemo, useContext, useEffect } from "preact/hooks";
+import { html, NumField, TextField, Select, Check, Card, unitText } from "./ui.js";
 import { V, L, marked, Explain, fmtValue } from "./explain.js";
 import { CLASSES, METHODS, CLASS_METHOD } from "../calc/constants.js";
-import { addPart, duplicatePart, deletePart, renameRefDes, nextLoadId, setIn, withSimSetup, addManualBody } from "./model.js";
+import { duplicatePart, deletePart, renameRefDes, nextPartId, setIn, withSimSetup, addManualBody } from "./model.js";
+import { SHEET_COLS, sheetRows, insertPart, movePart, addLoad, moveLoad, deleteLoad, pasteCells, isBlock } from "./sheet.js";
 import { readPartsList, applyPartsList, partsListText, suggestLinks, LIST_HEADER } from "./lists.js";
 import { valueOf } from "../calc/formulas.js";
 import { TERMS } from "../terms/catalogue.js";
@@ -76,85 +77,271 @@ const METHOD_NEEDS = {
   "Resistive (I squared R)": { used: ["iinA", "ioutA", "rOhm"], need: ["iinA", "rOhm"], text: "a current (Iin or Iout) and R" },
   "Manual entry": { used: [], need: ["pdMeasuredW"], text: "Pd measured" },
 };
-const LOAD_FIELDS = [
-  ["load.vin", "vinV", "V", "Vin", {}],
-  ["load.iin", "iinA", "A", "Iin", { min: 0 }],
-  ["load.vout", "voutV", "V", "Vout", {}],
-  ["load.iout", "ioutA", "A", "Iout", { min: 0 }],
-  ["load.eff", "efficiency", "", "Efficiency (0 to 1)", { minEx: 0, max: 1 }],
-  ["load.r", "rOhm", "ohm", "R", { min: 0 }],
-  ["load.pdMeas", "pdMeasuredW", "W", "Pd measured", { min: 0 }],
-];
+
+// The register is a sheet like the workbook's: one row per load, the part's own cells span its load rows. Click a
+// cell and type; Enter and the arrow keys move between cells; a block copied from Excel pastes from the cell it
+// lands in, with new parts below the last row. Drag the grip of a part (or of a load) to move it; right-click a
+// row, or click its number, for insert, duplicate, move and delete.
+const MORE = [["part.ta", 1], ["part.area", 1], ["part.density", 2], ["part.share", 3]];
 
 export function PartsTab(c) {
+  return html`<${PartsSheet} c=${c} />`;
+}
+
+function PartsSheet({ c }) {
   const { project: p, calc, locked } = c;
   const reg = calc.register;
+  const [more, setMore] = useState(false);
+  const [menu, setMenu] = useState(null);
+  const [drag, setDrag] = useState(null);
+  const [over, setOver] = useState(null);
+  const [note, setNote] = useState(null);
   const count = {};
   for (const x of p.parts) count[x.refDes] = (count[x.refDes] || 0) + 1;
+  const rows = sheetRows(p);
+  const firstRow = [];
+  rows.forEach((r, n) => { if (r.j === 0) firstRow[r.i] = n; });
   const setPart = (i, key, label, v) => c.edit(label, ["parts", i, key], v, `parts.${p.parts[i].id}.${key}`);
   const setLoad = (i, j, key, label, v) => c.edit(label, ["parts", i, "loads", j, key], v, `loads.${p.parts[i].loads[j].id}.${key}`);
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = e => { if (e.type === "keydown" ? e.key === "Escape" : !e.target.closest?.(".sheet-menu")) setMenu(null); };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", close);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", close); };
+  }, [menu]);
+
+  // The new row exists only after the next render: try for up to half a second.
+  const focusCell = (id, col = "refDes", tries = 20) => setTimeout(() => {
+    const el = document.querySelector(`.sheet tbody[data-id="${id}"] td[data-col="${col}"] :is(input, select)`);
+    if (el) { el.focus(); el.select?.(); el.scrollIntoView({ block: "nearest" }); } else if (tries > 0) focusCell(id, col, tries - 1);
+  }, 25);
+  const insertAt = at => {
+    const id = nextPartId(p);
+    c.editFn("Add part", q => insertPart(q, at).project);
+    focusCell(id);
+  };
+  const act = (label, fn) => { setMenu(null); c.editFn(label, fn); };
+
+  // Keyboard moves like Excel: Enter and the up/down arrows go down a column, left/right at the edge of the text
+  // go along the row. A part cell spans its load rows, so a row without it falls back to the part's first row.
+  const cellAt = (n, key) => {
+    const r = rows[n];
+    if (!r) return null;
+    const tb = `.sheet tbody[data-id="${r.part.id}"]`;
+    return document.querySelector(`${tb} tr[data-row="${n}"] td[data-col="${key}"] :is(input, select)`)
+      || document.querySelector(`${tb} tr[data-row="${firstRow[r.i]}"] td[data-col="${key}"] :is(input, select)`);
+  };
+  const go = el => { if (el) { el.focus(); el.select?.(); return true; } return false; };
+  const onKeyDown = e => {
+    const td = e.target.closest?.("td[data-col]");
+    const tr = td?.closest("tr[data-row]");
+    if (!td || !tr || e.altKey || e.ctrlKey || e.metaKey) return;
+    const n = Number(tr.dataset.row), key = td.dataset.col;
+    const isSel = e.target.tagName === "SELECT";
+    let dn = 0;
+    if (e.key === "Enter") dn = e.shiftKey ? -1 : 1;
+    else if (!isSel && e.key === "ArrowDown") dn = 1;
+    else if (!isSel && e.key === "ArrowUp") dn = -1;
+    if (dn) {
+      const r = rows[n];
+      const step = SHEET_COLS.find(x => x.key === key)?.where === "part" ? "part" : "row";
+      for (let k = n + dn; k >= 0 && k < rows.length; k += dn) {
+        if (step === "part" && rows[k].i === r.i) continue;
+        if (step === "part" && rows[k].j !== 0) continue;
+        if (go(cellAt(k, key))) { e.preventDefault(); return; }
+      }
+      return;
+    }
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      const t = e.target, d = e.key === "ArrowLeft" ? -1 : 1;
+      const whole = t.tagName === "INPUT" && t.selectionStart === 0 && t.selectionEnd === t.value.length;
+      if (t.tagName === "INPUT" && !whole) {
+        if (t.selectionStart !== t.selectionEnd) return;
+        if (d < 0 ? t.selectionStart !== 0 : t.selectionEnd !== t.value.length) return;
+      }
+      for (let k = SHEET_COLS.findIndex(x => x.key === key) + d; k >= 0 && k < SHEET_COLS.length; k += d) {
+        if (go(cellAt(n, SHEET_COLS[k].key))) { e.preventDefault(); return; }
+      }
+    }
+  };
+  const onPaste = e => {
+    const td = e.target.closest?.("td[data-col]");
+    const tr = td?.closest("tr[data-row]");
+    const text = e.clipboardData?.getData("text/plain") ?? "";
+    if (!td || !tr || locked || !isBlock(text)) return;
+    e.preventDefault();
+    const n = Number(tr.dataset.row), key = td.dataset.col;
+    const res = pasteCells(p, n, key, text);
+    const lines = text.replace(/\r/g, "").replace(/\n$/, "").split("\n").length;
+    c.editFn(`Paste ${lines} rows`, q => pasteCells(q, n, key, text).project);
+    setNote({ text: `Pasted ${lines} row${lines === 1 ? "" : "s"}${res.added ? `, ${res.added} new part${res.added === 1 ? "" : "s"}` : ""}.`, problems: res.problems });
+  };
+
+  // Drag a part by its row number grip, a load by its own grip. The drop goes above or below the row under the mouse.
+  const startDrag = (e, d) => {
+    if (locked) { e.preventDefault(); return; }
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", "");
+    const g = e.currentTarget.closest(d.kind === "part" ? "tbody" : "tr");
+    if (g && e.dataTransfer.setDragImage) e.dataTransfer.setDragImage(g, 12, 12);
+    setDrag(d);
+  };
+  const half = e => { const b = e.currentTarget.getBoundingClientRect(); return e.clientY > b.top + b.height / 2; };
+  const partOver = (e, i) => {
+    if (drag?.kind !== "part") return;
+    e.preventDefault();
+    const after = half(e);
+    if (over?.i !== i || over?.after !== after || over?.j !== undefined) setOver({ i, after });
+  };
+  const loadOver = (e, i, j) => {
+    if (drag?.kind !== "load" || drag.i !== i) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const after = half(e);
+    if (over?.i !== i || over?.j !== j || over?.after !== after) setOver({ i, j, after });
+  };
+  const drop = e => {
+    e.preventDefault();
+    if (drag && over) {
+      if (drag.kind === "part") {
+        let to = over.i + (over.after ? 1 : 0);
+        if (drag.i < to) to--;
+        if (to !== drag.i) c.editFn(`Move ${p.parts[drag.i].refDes}`, q => movePart(q, drag.i, to));
+      } else if (over.j !== undefined) {
+        let to = over.j + (over.after ? 1 : 0);
+        if (drag.j < to) to--;
+        if (to !== drag.j) c.editFn(`Move a load of ${p.parts[drag.i].refDes}`, q => moveLoad(q, p.parts[drag.i].id, drag.j, to));
+      }
+    }
+    setDrag(null); setOver(null);
+  };
+  const endDrag = () => { setDrag(null); setOver(null); };
+
+  const cell = (col, x, l, i, j) => {
+    const k = x.refDes, lk = l.id;
+    const label = TERMS[col.term]?.label || col.key;
+    const onPart = col.where === "part";
+    const tkey = onPart ? k : lk;
+    const value = onPart ? x[col.field] : l[col.field];
+    const commit = v => (onPart ? setPart(i, col.field, label, v) : setLoad(i, j, col.field, label, v));
+    const span = onPart ? x.loads.length : 1;
+    const tdc = `${col.kind === "num" ? "num" : ""} ${col.kind === "refdes" ? "refcol" : ""}`;
+    if (col.kind === "refdes") {
+      const dup = count[x.refDes] > 1;
+      return html`<td rowspan=${span} data-col=${col.key} class=${tdc}><span class="field ${dup ? "bad" : ""}" data-term="part.refDes" data-key=${k}>
+        <input class="refdes" type="text" value=${x.refDes} aria-label="RefDes" disabled=${locked} style=${{ width: col.width }}
+          onChange=${e => { const v = e.currentTarget.value.trim(); if (v && v !== x.refDes) c.editFn(`RefDes ${x.refDes} to ${v}`, q => renameRefDes(q, x.refDes, v)); else e.currentTarget.value = x.refDes; }} />
+        ${dup && html`<span class="err">used twice</span>`}</span></td>`;
+    }
+    if (col.kind === "select") {
+      const method = CLASS_METHOD[x.class];
+      const blankText = col.key === "class" ? "" : method ? `(class: ${method})` : "(class default)";
+      return html`<td rowspan=${span} data-col=${col.key} class=${tdc} style=${{ minWidth: col.width }}><${Select} term=${col.term} tkey=${tkey} value=${value} options=${col.options} label=${label} blankText=${blankText} disabled=${locked} onCommit=${commit} /></td>`;
+    }
+    if (col.kind === "num") {
+      let cls = "";
+      if (!onPart) {
+        const lr = reg.loads[l.id] || {};
+        const needs = METHOD_NEEDS[lr.method];
+        const missing = !isNum(lr.pdW);
+        const f = col.field;
+        cls = !needs || f === "pdMeasuredW" ? (missing && needs?.need.includes(f) ? "need" : "")
+          : missing && needs.need.includes(f) && !isNum(l[f]) ? "need" : needs.used.includes(f) ? "" : "unused";
+      }
+      return html`<td rowspan=${span} data-col=${col.key} class=${tdc}><${NumField} term=${col.term} tkey=${tkey} value=${value} unit=${col.unit} label=${label} width=${col.width} cls=${cls}
+        disabled=${locked} rule=${col.rule} placeholder=${col.key === "rjbCW" || col.key === "taOverrideC" ? "optional" : undefined} onCommit=${commit} /></td>`;
+    }
+    return html`<td rowspan=${span} data-col=${col.key} class=${tdc}><${TextField} term=${col.term} tkey=${tkey} value=${value} label=${label} width=${col.width} disabled=${locked}
+      placeholder=${col.key === "notes" ? "datasheet page, load case" : undefined} onCommit=${commit} /></td>`;
+  };
+
+  const partCols = SHEET_COLS.filter(x => x.where === "part" && x.key !== "notes");
+  const loadCols = SHEET_COLS.filter(x => x.where === "load");
+  const notesCol = SHEET_COLS.find(x => x.key === "notes");
+  const head = col => html`<th class=${col.kind === "num" ? "num" : col.kind === "refdes" ? "refcol" : ""}><${L} t=${col.term}>${col.short || TERMS[col.term]?.label}</${L}>${col.unit ? html`<span class="unit">${unitText(col.unit)}</span>` : ""}</th>`;
+  const m = menu && p.parts[menu.i];
+
   return html`
     <div class="toolbar">
-      <button disabled=${locked} onClick=${() => c.editFn("Add part", addPart)}>Add part</button>
+      <button disabled=${locked} onClick=${() => insertAt(p.parts.length)}>Add part</button>
       <${PasteList} c=${c} />
+      <button class=${`small ${more ? "on" : ""}`} aria-pressed=${more} onClick=${() => setMore(!more)}>More columns</button>
       <span class="hint"><${V} t="triage.parts" /> parts, <${L} t="board.totalPd" /> <${V} t="board.totalPd" d=${2} u /></span>
     </div>
-    ${p.parts.map((x, i) => {
-      const r = reg.parts[x.refDes] || {};
-      const k = x.refDes;
-      const dup = count[x.refDes] > 1;
-      const method = CLASS_METHOD[x.class];
-      return html`<section class="card part" key=${x.id}>
-        <div class="part-head">
-          <span class="field ${dup ? "bad" : ""}" data-term="part.refDes" data-key=${k}>
-            <input class="refdes" type="text" value=${x.refDes} aria-label="RefDes" disabled=${locked}
-              onChange=${e => { const v = e.currentTarget.value.trim(); if (v && v !== x.refDes) c.editFn(`RefDes ${x.refDes} to ${v}`, q => renameRefDes(q, x.refDes, v)); else e.currentTarget.value = x.refDes; }} />
-            ${dup && html`<span class="err">used twice</span>`}
-          </span>
-          <${TextField} term="part.partNumber" tkey=${k} value=${x.partNumber} label="Part number" placeholder="part number" disabled=${locked} onCommit=${v => setPart(i, "partNumber", "Part number", v)} />
-          <${Select} term="part.class" tkey=${k} value=${x.class} options=${CLASSES} label="Class" blankText="(pick class)" disabled=${locked} onCommit=${v => setPart(i, "class", "Class", v)} />
-          <span class="result"><${L} t="part.pd" k=${k}>Pd</${L}> <b><${V} t="part.pd" k=${k} d=${3} u /></b> · <${L} t="part.tjEst" k=${k}>Tj est</${L}> <b><${V} t="part.tjEst" k=${k} d=${1} u /></b> · <${L} t="part.margin" k=${k}>margin</${L}> <b><${V} t="part.margin" k=${k} d=${1} u /></b> <${V} t="part.flag" k=${k} /></span>
-          <span class="actions">
-            <button disabled=${locked} onClick=${() => c.editFn(`Duplicate ${x.refDes}`, q => duplicatePart(q, x.id))}>Duplicate</button>
-            <button disabled=${locked} class="danger" onClick=${() => c.editFn(`Delete ${x.refDes}`, q => deletePart(q, x.id))}>Delete</button>
-          </span>
-        </div>
-        <div class="form row">
-          <label><${L} t="part.package" k=${k} /> <${TextField} term="part.package" tkey=${k} value=${x.package} label="Package" width="8em" disabled=${locked} onCommit=${v => setPart(i, "package", "Package", v)} /></label>
-          <label><${L} t="part.tjMax" k=${k}>Tj max</${L}> <${NumField} term="part.tjMax" tkey=${k} value=${x.tjMaxC} unit="C" label="Tj max" disabled=${locked} rule=${{ min: -273.15 }} onCommit=${v => setPart(i, "tjMaxC", "Tj max", v)} /></label>
-          <label><${L} t="part.rja" k=${k}>Rja</${L}> <${NumField} term="part.rja" tkey=${k} value=${x.rjaCW} unit="CW" label="Rja" disabled=${locked} rule=${{ minEx: 0 }} onCommit=${v => setPart(i, "rjaCW", "Rja", v)} /></label>
-          <label><${L} t="part.rjc" k=${k}>Rjc</${L}> <${NumField} term="part.rjc" tkey=${k} value=${x.rjcCW} unit="CW" label="Rjc" disabled=${locked} rule=${{ minEx: 0 }} onCommit=${v => setPart(i, "rjcCW", "Rjc", v)} /></label>
-          <label><${L} t="part.rjb" k=${k}>Rjb</${L}> <${NumField} term="part.rjb" tkey=${k} value=${x.rjbCW} unit="CW" label="Rjb" disabled=${locked} rule=${{ minEx: 0 }} placeholder="optional" onCommit=${v => setPart(i, "rjbCW", "Rjb", v)} /></label>
-          <label><${L} t="part.taOverride" k=${k} /> <${NumField} term="part.taOverride" tkey=${k} value=${x.taOverrideC} unit="C" label="Ta override" disabled=${locked} rule=${{ min: -273.15 }} placeholder="optional" onCommit=${v => setPart(i, "taOverrideC", "Ta override", v)} /></label>
-          <span class="calcs"><${L} t="part.ta" k=${k}>Ta</${L}> <${V} t="part.ta" k=${k} d=${1} u /> · <${L} t="part.area" k=${k}>A</${L}> <${V} t="part.area" k=${k} d=${1} u /> · <${L} t="part.density" k=${k}>density</${L}> <${V} t="part.density" k=${k} d=${2} u /> · <${L} t="part.share" k=${k}>share</${L}> <${V} t="part.share" k=${k} d=${3} /></span>
-          <label class="grow"><${L} t="part.notes" k=${k} /> <${TextField} term="part.notes" tkey=${k} value=${x.notes} label="Part notes" width="100%" placeholder="datasheet page, load case" disabled=${locked} onCommit=${v => setPart(i, "notes", "Part notes", v)} /></label>
-        </div>
-        ${r.flag && r.flag !== "Minor" && html`<p class="why"><${L} t="part.why" k=${k} />: <${V} t="part.why" k=${k} /></p>`}
-        <${Scroll}><table class="grid loads">
-          <thead><tr>${["load.label", "load.rail", "load.method", ...LOAD_FIELDS.map(f => f[0]), "load.pd"].map(t => html`<th><${L} t=${t} /></th>`)}<th></th></tr></thead>
-          <tbody>${x.loads.map((l, j) => {
-            const lr = reg.loads[l.id] || {};
-            const lk = l.id;
-            const needs = METHOD_NEEDS[lr.method];
-            const missing = !isNum(lr.pdW);
-            const cls = f => (!needs || f === "pdMeasuredW" ? (missing && needs?.need.includes(f) ? "need" : "")
-              : missing && needs.need.includes(f) && !isNum(l[f]) ? "need" : needs.used.includes(f) ? "" : "unused");
-            return html`<tr key=${l.id}>
-              <td><${TextField} term="load.label" tkey=${lk} value=${l.label} label="Load label" width="10em" disabled=${locked} onCommit=${v => setLoad(i, j, "label", "Load label", v)} /></td>
-              <td><${TextField} term="load.rail" tkey=${lk} value=${l.rail} label="Rail" width="6em" disabled=${locked} onCommit=${v => setLoad(i, j, "rail", "Rail", v)} /></td>
-              <td><${Select} term="load.method" tkey=${lk} value=${l.method} options=${METHODS} label="Method" blankText=${method ? `(class: ${method})` : "(class default)"} disabled=${locked} onCommit=${v => setLoad(i, j, "method", "Method", v)} /></td>
-              ${LOAD_FIELDS.map(([t, f, unit, label, rule]) => html`<td><${NumField} term=${t} tkey=${lk} value=${l[f]} unit=${unit} label=${label} width=${f === "efficiency" ? "4em" : "4.5em"} cls=${cls(f)} disabled=${locked} rule=${rule}
-                onCommit=${v => setLoad(i, j, f, label, v)} /></td>`)}
-              <td class="num">${isNum(lr.pdW) ? html`<${V} t="load.pd" k=${lk} d=${3} />` : html`<span class="warn"><${V} t="load.problem" k=${lk} /></span>${needs ? html`<span class="needs">needs ${marked(needs.text)}</span>` : ""}`}</td>
-              <td>${x.loads.length > 1 && html`<button class="small" disabled=${locked} title="Delete this load" onClick=${() => c.editFn("Delete load", q => ({ ...q, parts: q.parts.map(y => (y.id === x.id ? { ...y, loads: y.loads.filter(z => z.id !== l.id) } : y)) }))}>x</button>`}</td>
-            </tr>`;
-          })}</tbody>
-        </table><//>
-        <button class="small" disabled=${locked} onClick=${() => c.editFn(`Add load to ${x.refDes}`, q => ({ ...q, parts: q.parts.map(y => (y.id === x.id ? { ...y, loads: [...y.loads, { id: nextLoadId(y) }] } : y)) }))}>Add load</button>
-        <span class="hint"> One load per heat source in the part, for example each buck of a ${marked("PMIC")}.</span>
-      </section>`;
-    })}
-    ${!p.parts.length && html`<p class="hint">No parts yet. Press Add part, then type the ${marked("RefDes")} from the schematic. Or paste the whole list from Excel.</p>`}`;
+    <p class="hint">Click a cell and type. Enter or the arrow keys move between cells. Drag the grip at the left of a row to move it. Right-click a row (or click its number) to insert, duplicate, move or delete. A block copied from Excel pastes from the cell you paste into; extra lines become new parts.</p>
+    ${note && html`<div class="hint sheet-note">${note.text} ${note.problems.length ? html`<span class="warn">${note.problems.length} cells not taken:</span><ul class="warn">${note.problems.slice(0, 8).map(x => html`<li>${x}</li>`)}</ul>` : ""}
+      <button class="small" onClick=${() => setNote(null)}>OK</button></div>`}
+    <div class="sheet-wrap">
+      <table class=${`sheet ${drag ? "dragging" : ""}`} onKeyDown=${onKeyDown} onPaste=${onPaste} onDragEnd=${endDrag}>
+        <thead>
+          <tr class="groups"><th rowspan="2" class="rownum-h"></th><th colspan=${4}>Part</th><th colspan=${5}>Datasheet</th><th class="grip-h" rowspan="2"></th>
+            <th colspan=${loadCols.length}>Loads: one row per heat source</th><th colspan=${5 + (more ? MORE.length + 1 : 0)} class="calc">Results</th><th>Notes</th></tr>
+          <tr>${partCols.map(head)}${loadCols.map(head)}
+            <th class="num calc"><${L} t="load.pd" /><span class="unit">W</span></th>
+            <th class="num calc"><${L} t="part.pd">Part Pd</${L}><span class="unit">W</span></th>
+            <th class="num calc"><${L} t="part.tjEst">Tj est</${L}><span class="unit">C</span></th>
+            <th class="num calc"><${L} t="part.margin" /><span class="unit">C</span></th>
+            <th class="calc"><${L} t="part.flag" /></th>
+            ${more && MORE.map(([t]) => html`<th class="num calc"><${L} t=${t} /></th>`)}
+            ${more && html`<th class="calc"><${L} t="part.why" /></th>`}
+            ${head(notesCol)}</tr>
+        </thead>
+        ${p.parts.map((x, i) => {
+          const k = x.refDes;
+          const n0 = firstRow[i];
+          const span = x.loads.length;
+          const r = reg.parts[k] || {};
+          const dropCls = drag?.kind === "part" && over?.i === i && over.j === undefined ? (over.after ? "drop-after" : "drop-before") : "";
+          return html`<tbody key=${x.id} data-id=${x.id} class=${`${dropCls} ${drag?.kind === "part" && drag.i === i ? "dragged" : ""} ${i % 2 ? "odd" : ""}`}
+            onDragOver=${e => partOver(e, i)} onDrop=${drop}>
+            ${x.loads.map((l, j) => {
+              const lr = reg.loads[l.id] || {};
+              const needs = METHOD_NEEDS[lr.method];
+              const lk = l.id;
+              const ldrop = drag?.kind === "load" && over?.i === i && over?.j === j ? (over.after ? "drop-after" : "drop-before") : "";
+              return html`<tr key=${l.id} data-row=${n0 + j} class=${ldrop} onContextMenu=${e => { if (locked) return; e.preventDefault(); setMenu({ i, j, x: e.clientX, y: e.clientY }); }}
+                onDragOver=${e => loadOver(e, i, j)}>
+                ${j === 0 && html`<td rowspan=${span} class="rownum hint">
+                  <span class="grip" draggable=${!locked} title="Drag to move this part" onDragStart=${e => startDrag(e, { kind: "part", i })}>⠿</span>
+                  <button class="rowbtn" title="Row menu" disabled=${locked} onClick=${e => { const b = e.currentTarget.getBoundingClientRect(); setMenu({ i, j: 0, x: b.right, y: b.top }); }}>${i + 1}</button></td>`}
+                ${j === 0 && partCols.map(col => cell(col, x, l, i, j))}
+                <td class="grip-c hint">${span > 1 && html`<span class="grip" draggable=${!locked} title="Drag to move this load" onDragStart=${e => { e.stopPropagation(); startDrag(e, { kind: "load", i, j }); }}>⠿</span>`}</td>
+                ${loadCols.map(col => cell(col, x, l, i, j))}
+                <td class="num calc">${isNum(lr.pdW) ? html`<${V} t="load.pd" k=${lk} d=${3} />` : html`<span class="warn"><${V} t="load.problem" k=${lk} /></span>${needs ? html`<span class="needs">needs ${marked(needs.text)}</span>` : ""}`}</td>
+                ${j === 0 && html`
+                  <td rowspan=${span} class="num calc"><b><${V} t="part.pd" k=${k} d=${3} /></b></td>
+                  <td rowspan=${span} class="num calc"><${V} t="part.tjEst" k=${k} d=${1} /></td>
+                  <td rowspan=${span} class="num calc"><${V} t="part.margin" k=${k} d=${1} /></td>
+                  <td rowspan=${span} class="calc"><${V} t="part.flag" k=${k} /></td>
+                  ${more && MORE.map(([t, d]) => html`<td rowspan=${span} class="num calc"><${V} t=${t} k=${k} d=${d} /></td>`)}
+                  ${more && html`<td rowspan=${span} class="calc why-c">${r.flag && r.flag !== "Minor" ? html`<${V} t="part.why" k=${k} />` : ""}</td>`}
+                  ${cell(notesCol, x, l, i, j)}`}
+              </tr>`;
+            })}
+          </tbody>`;
+        })}
+      </table>
+      ${!locked && html`<button class="addrow" onClick=${() => insertAt(p.parts.length)}>+ Add part</button>`}
+    </div>
+    ${!p.parts.length && html`<p class="hint">No parts yet. Press Add part, then type the ${marked("RefDes")} from the schematic. Or paste the whole list from Excel.</p>`}
+    ${m && html`<div class="sheet-menu" role="menu" style=${{ left: Math.min(menu.x, innerWidth - 230) + "px", top: Math.min(menu.y, innerHeight - 330) + "px" }}>
+      <div class="menu-h">${m.refDes}${m.loads.length > 1 ? `, load ${menu.j + 1}` : ""}</div>
+      <button role="menuitem" onClick=${() => { setMenu(null); insertAt(menu.i); }}>Insert part above</button>
+      <button role="menuitem" onClick=${() => { setMenu(null); insertAt(menu.i + 1); }}>Insert part below</button>
+      <button role="menuitem" onClick=${() => act(`Duplicate ${m.refDes}`, q => duplicatePart(q, m.id))}>Duplicate part</button>
+      <button role="menuitem" disabled=${menu.i === 0} onClick=${() => act(`Move ${m.refDes} up`, q => movePart(q, menu.i, menu.i - 1))}>Move part up</button>
+      <button role="menuitem" disabled=${menu.i === p.parts.length - 1} onClick=${() => act(`Move ${m.refDes} down`, q => movePart(q, menu.i, menu.i + 1))}>Move part down</button>
+      <hr />
+      <button role="menuitem" onClick=${() => act(`Add load to ${m.refDes}`, q => addLoad(q, m.id, menu.j + 1))}>Add load below</button>
+      ${m.loads.length > 1 && html`
+        <button role="menuitem" disabled=${menu.j === 0} onClick=${() => act(`Move a load of ${m.refDes}`, q => moveLoad(q, m.id, menu.j, menu.j - 1))}>Move load up</button>
+        <button role="menuitem" disabled=${menu.j === m.loads.length - 1} onClick=${() => act(`Move a load of ${m.refDes}`, q => moveLoad(q, m.id, menu.j, menu.j + 1))}>Move load down</button>
+        <button role="menuitem" class="danger" onClick=${() => act(`Delete a load of ${m.refDes}`, q => deleteLoad(q, m.id, m.loads[menu.j].id))}>Delete this load</button>`}
+      <hr />
+      <button role="menuitem" class="danger" onClick=${() => act(`Delete ${m.refDes}`, q => deletePart(q, m.id))}>Delete part</button>
+    </div>`}`;
 }
 
 // Paste a parts list (from Excel, tab separated, or a CSV text). One line per load; lines with the same RefDes

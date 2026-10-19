@@ -5,6 +5,7 @@
 // 2. The parts list reader: units, percent, class names, separators, problems.
 // 3. Body suggestions, bodies typed in by hand, the PCB stack and the air defaults of a new project.
 // 4. Learn mode texts for every step tab, and the readings and the network drawing on tabs 4 and 5.
+// 5. The parts sheet of tab 1: rows, insert, move, loads, and a block of cells pasted from Excel.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -17,6 +18,8 @@ import { calcProject } from "../src/calc/index.js";
 import { valueOf } from "../src/calc/formulas.js";
 import { newProject, setIn, projectForSave, addManualBody, withSimSetup } from "../src/page/model.js";
 import { readPartsList, applyPartsList, partsListText, suggestLinks } from "../src/page/lists.js";
+import { CLASSES } from "../src/calc/constants.js";
+import { SHEET_COLS, sheetRows, insertPart, movePart, addLoad, moveLoad, deleteLoad, pasteCells, isBlock } from "../src/page/sheet.js";
 import { tabStates, blockingProblems, TABS } from "../src/page/tabs.js";
 import { Explain } from "../src/page/explain.js";
 import * as Views from "../src/page/views.js";
@@ -171,6 +174,36 @@ const close = (a, b) => (a === undefined && b === undefined) || (typeof a === "n
   const nctx = { project: noVin, cad: C, results: R, calc: calcProject(noVin, C, R) };
   const np = render(h(Explain.Provider, { value: { ctx: nctx, open() {}, showFx: false } }, h(() => Views.PartsTab({ ...c, ...nctx, value: (t, k) => valueOf(nctx, t, k) }))));
   check(np.includes("needs Vin and Iin") && /class="field\s+need"/.test(np), "a load without Vin says what it needs and marks the field");
+}
+
+// ---------- 5. the parts sheet ----------
+{
+  const rows = sheetRows(P);
+  check(rows.length === P.parts.reduce((a, x) => a + x.loads.length, 0) && rows[0].j === 0, "one sheet row per load");
+  const ins = insertPart(P, 1);
+  check(ins.project.parts[1].id === ins.id && ins.project.parts.length === P.parts.length + 1 && !P.parts.some(x => x.refDes === ins.project.parts[1].refDes), "insert a part between rows with a free RefDes");
+  const mv = movePart(P, 0, 2);
+  check(mv.parts[2].id === P.parts[0].id && mv.parts[0].id === P.parts[1].id && mv.parts.length === P.parts.length, "move a part down two rows");
+  check(movePart(mv, 2, 0).parts.map(x => x.id).join() === P.parts.map(x => x.id).join(), "and back");
+  const multi = P.parts.find(x => x.loads.length > 1);
+  const ml = moveLoad(P, multi.id, 0, multi.loads.length - 1).parts.find(x => x.id === multi.id);
+  check(ml.loads[multi.loads.length - 1].id === multi.loads[0].id, "move a load to the end of its part");
+  const al = addLoad(P, multi.id, 1).parts.find(x => x.id === multi.id);
+  check(al.loads.length === multi.loads.length + 1 && !multi.loads.some(l => l.id === al.loads[1].id), "add a load in the middle with a new id");
+  const one = P.parts.find(x => x.loads.length === 1);
+  check(deleteLoad(P, one.id, one.loads[0].id).parts.find(x => x.id === one.id).loads.length === 1, "the last load of a part is kept");
+  check(isBlock("1\t2") && isBlock("a\nb") && !isBlock("1.5") && !isBlock("1.5\r\n"), "a block is told from a single cell");
+  // Paste RefDes, part number, class into the last row, with one line more than the sheet has.
+  const last = sheetRows(P).length;
+  const pc = pasteCells(P, last - 1, "refDes", "Q7\tBSS138\t" + CLASSES[0].toLowerCase() + "\nQ8\tBSS84\tnot a class\n");
+  const q7 = pc.project.parts.find(x => x.refDes === "Q7"), q8 = pc.project.parts.find(x => x.refDes === "Q8");
+  check(q7 && q7.partNumber === "BSS138" && q7.class === CLASSES[0] && q8 && q8.partNumber === "BSS84" && pc.added === 1, "pasted block renames the last part and adds one", pc);
+  check(pc.problems.length === 1 && /not on the list/.test(pc.problems[0]), "a wrong class is reported, not written", pc.problems);
+  const lc = SHEET_COLS.findIndex(x => x.key === "vinV");
+  const pv = pasteCells(P, 0, "vinV", "5 V\t300 mA\nabc");
+  const r0 = sheetRows(pv.project)[0];
+  check(r0.load.vinV === 5 && r0.load.iinA === 0.3 && pv.problems.length === 1 && lc > 0, "numbers pasted with units, a bad number reported", pv.problems);
+  check(ajv.validate("project.schema.json", projectForSave(pc.project, C, R, NOW)), "the project after a paste saves valid", ajv.errors);
 }
 
 // ---------- the example inside the page ----------

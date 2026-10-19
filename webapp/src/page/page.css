@@ -174,3 +174,59 @@ svg.net .flow { fill: var(--watch); }
 svg.net .nv { fill: var(--accent); cursor: help; font-weight: 600; }
 svg.net .nv:hover, svg.net .nv:focus { text-decoration: underline; outline: none; }
 @media (max-width: 900px) { .cols.net { grid-template-columns: 1fr; } }
+/* Tab 1 register as a sheet: grid lines, cells without borders, sticky header and RefDes, grey calculated cells */
+.sheet-wrap { overflow: auto; max-height: calc(100vh - 230px); border: 1px solid var(--line); border-radius: 6px; background: var(--panel); margin-bottom: 12px; }
+table.sheet { border-collapse: separate; border-spacing: 0; font-size: 13px; min-width: 100%; }
+.sheet th, .sheet td { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 0; vertical-align: middle; white-space: nowrap; background: var(--panel); }
+.sheet thead th { position: sticky; z-index: 2; background: var(--panel2); color: var(--muted); font-weight: 600; text-align: left; padding: 3px 6px; }
+.sheet thead tr:first-child th { top: 0; height: 22px; text-align: center; font-size: 12px; letter-spacing: .02em; }
+.sheet thead tr:nth-child(2) th { top: 29px; }
+.sheet thead th.rownum-h { top: 0; }
+.sheet th .unit { display: block; font-weight: 400; font-size: 11px; }
+.sheet th.num { text-align: right; }
+.sheet tbody.odd td { background: color-mix(in srgb, var(--panel) 92%, var(--text) 8%); }
+.sheet tbody tr:last-child td, .sheet td[rowspan] { border-bottom-color: color-mix(in srgb, var(--line) 50%, var(--text) 50%); }
+.sheet td.calc, .sheet tbody.odd td.calc { background: var(--panel2); padding: 3px 6px; color: var(--text); }
+.sheet th.calc { background: color-mix(in srgb, var(--panel2) 80%, var(--bg) 20%); }
+.sheet td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.sheet .field { display: flex; width: 100%; font-size: 13px; }
+.sheet .field input, .sheet select { border: 0; border-radius: 0; background: transparent; padding: 4px 6px; height: 26px; box-sizing: border-box; min-width: 3em; outline: none; }
+.sheet td.num .field input { text-align: right; }
+.sheet select { width: 100%; cursor: pointer; }
+.sheet select option { background: var(--panel); color: var(--text); }
+.sheet td:focus-within { box-shadow: inset 0 0 0 2px var(--accent); }
+.sheet td:focus-within .field input, .sheet td:focus-within select { background: var(--input); }
+.sheet .field .unit { display: none; }
+.sheet .field .err, .sheet .field .oddtext { position: absolute; left: 0; top: 100%; z-index: 5; white-space: nowrap; background: var(--panel); border: 1px solid currentColor; border-radius: 4px; padding: 1px 6px; display: none; }
+.sheet td:focus-within .err, .sheet td:focus-within .oddtext, .sheet td:hover .err { display: block; }
+.sheet .field.bad input, .sheet .field.bad textarea { box-shadow: inset 0 0 0 1px var(--crit); background: var(--crit-bg); }
+.sheet .field.odd input { box-shadow: inset 0 0 0 1px var(--watch); }
+.sheet .field.need input { box-shadow: inset 0 0 0 1px var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.sheet .field.unused input { opacity: .35; }
+.sheet input.refdes { font-weight: 700; }
+.sheet td.rownum, .sheet thead th.rownum-h { position: sticky; left: 0; z-index: 1; min-width: 46px; text-align: center; padding: 0 2px; background: var(--panel2); }
+.sheet thead th.rownum-h { z-index: 3; }
+.sheet td.refcol { position: sticky; left: 46px; z-index: 1; }
+.sheet .rowbtn { border: 0; background: none; padding: 0 4px; color: var(--muted); font-size: 12px; min-width: 22px; }
+.sheet .rowbtn:hover:not(:disabled) { color: var(--accent); }
+.sheet .grip { cursor: grab; color: var(--muted); padding: 0 2px; user-select: none; font-size: 13px; }
+.sheet .grip:hover { color: var(--accent); }
+.sheet td.grip-c, .sheet th.grip-h { width: 14px; text-align: center; padding: 0 1px; }
+.sheet .needs { padding-top: 1px; }
+.sheet td.why-c { white-space: normal; min-width: 16em; font-size: 12px; }
+.sheet.dragging, .sheet.dragging * { cursor: grabbing; }
+.sheet tbody.dragged td { opacity: .45; }
+.sheet tbody.drop-before tr:first-child td { box-shadow: inset 0 3px 0 var(--accent); }
+.sheet tbody.drop-after tr:last-child td, .sheet tbody.drop-after td[rowspan] { box-shadow: inset 0 -3px 0 var(--accent); }
+.sheet tr.drop-before td:not([rowspan]) { box-shadow: inset 0 3px 0 var(--watch); }
+.sheet tr.drop-after td:not([rowspan]) { box-shadow: inset 0 -3px 0 var(--watch); }
+.addrow { display: block; width: 100%; border: 0; border-top: 1px dashed var(--line); border-radius: 0; background: none; color: var(--muted); text-align: left; padding: 6px 12px; position: sticky; left: 0; }
+.addrow:hover { color: var(--accent); background: var(--panel2); }
+.sheet-menu { position: fixed; z-index: 20; min-width: 210px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.4); display: flex; flex-direction: column; }
+.sheet-menu button { border: 0; background: none; text-align: left; padding: 5px 10px; border-radius: 4px; }
+.sheet-menu button:hover:not(:disabled) { background: var(--panel2); }
+.sheet-menu button:disabled { opacity: .4; }
+.sheet-menu hr { border: 0; border-top: 1px solid var(--line); margin: 3px 0; width: 100%; }
+.sheet-menu .menu-h { font-size: 12px; color: var(--muted); padding: 3px 10px; font-weight: 600; }
+.sheet-note { background: var(--panel2); border-radius: 6px; padding: 6px 10px; margin-bottom: 8px; }
+.sheet thead th.refcol { left: 46px; z-index: 3; }

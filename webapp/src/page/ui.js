@@ -45,7 +45,7 @@ export function NumField({ value, unit, label, onCommit, rule = {}, disabled, ti
   </span>`;
 }
 const UNIT = { copperMm: "mm", dC: "C", CW: "C/W", W: "W", C: "C", mm: "mm", V: "V", A: "A", ohm: "ohm", WmK: "W/(m K)", frac: "" };
-const unitText = u => UNIT[u] ?? u;
+export const unitText = u => UNIT[u] ?? u;
 
 export function TextField({ value, label, onCommit, disabled, required, width = "12em", multiline, title, term, tkey = "", placeholder }) {
   const [text, setText] = useState(value ?? "");
