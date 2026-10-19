@@ -19,9 +19,18 @@ Option Explicit
 '        Thermal solution    column AF (Sim Tj) = peak per RefDes
 '   5. writes a report CAD\<prefix>RunFlow_<run>.txt
 '
-' Goal names: a temperature goal whose name contains a RefDes is that chip's goal.
+' Goal names: a temperature goal whose first word is a RefDes (and no other word is one) is that chip's goal.
 ' Add "max", "min" or "avg" to the name (no word means max). A goal whose name contains
 ' "spreader" or "pcb" is read as that part's max or min.
+'
+' Flow plan (docs/FLOW_PLAN.md), project folder mode:
+'   F1 reads the Flow project folder (<n>.info.json, calculation_warnings.txt): finished, cells, travels, goal
+'      convergence, unresolved parts, and the energy balance from Serv Heatf + Radiation Energy Delta.
+'   F2 global mesh level and a local mesh per part with heat, TIM and spreader; mesh check = two solves (N, N+1).
+'   F3 finish conditions: goals converged and at least minTravels travels.
+'   F4 chip materials from forSolidWorks.flow (calibrated block or two-resistor layers); tjBasis per part.
+'   F5 PCB, TIM, spreader materials, radiative surfaces and contacts from the page.
+'   F6 gravity, pressure, air velocity and domain margins from forSolidWorks.flow.environment.
 '
 ' Project folder (page, W7): pick <prefix>_project.json at the start. Heat per RefDes and the ambient come from
 ' forSolidWorks, the study type from simSetup (must be Flow); the run (FL_date_time) with a copy of the inputs goes to
