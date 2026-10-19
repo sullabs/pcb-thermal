@@ -113,6 +113,14 @@ const show = (tab, c) => render(h(Explain.Provider, { value: { ctx: { project: c
   const ch = inputChanges(fs0, fsNow, P.simSetup, setIn(P, ["simSetup", "meshGlobalMm"], 2).simSetup);
   check(ch.some(x => /ambient 40 C, now 45 C/.test(x)) && ch.some(x => /mesh/.test(x)), "what changed since a run is named", ch);
   check(inputChanges(fs0, fs0, P.simSetup, P.simSetup).length === 0, "nothing changed: empty list");
+  // A run's inputs come back from the macro with 15 digits: that is not a change.
+  const chip = { refDes: "U1", key: "k", timTMm: 0.2, pedestalMm: 0, timMode: "Body", timK: 3 };
+  const plate = chips => ({ faceZMm: 4.1, thicknessMm: 1.5, k: 167, chips });
+  const withPlate = (fs, chips) => ({ ...fs, plates: { top: plate(chips) } });
+  check(inputChanges(withPlate(fs0, [{ ...chip, timRCW: 0.296296296296296 }]), withPlate(fs0, [{ ...chip, timRCW: 0.2962962962962959 }])).length === 0,
+    "plate chips written back with 15 digits: no change");
+  check(inputChanges(withPlate(fs0, [{ ...chip, timRCW: 0.3 }]), withPlate(fs0, [{ ...chip, timRCW: 0.6, timTMm: 0.4 }])).some(x => /chips, TIMs/.test(x)),
+    "a thicker TIM is a change");
 }
 
 // ---------- 4. files the macros write ----------

@@ -300,7 +300,7 @@ def("sim.check", "Check", "", "", "calculated", "OK, or why the chip model canno
 // ---------- results ----------
 def("run.name", "Run", "", "", "run", "Name of the simulation run.");
 def("run.date", "Run date", "", "", "run", "When the run was made.");
-def("run.studyType", "Study", "", "", "run", "Thermal (SolidWorks Simulation, conduction with h on the surfaces) or Flow (Flow Simulation, air modelled).");
+def("run.studyType", "Study type", "", "", "run", "Thermal (SolidWorks Simulation, conduction with h on the surfaces) or Flow (Flow Simulation, air modelled).");
 def("run.status", "Run status", "", "", "run", "Where the run is: set up, solved, read.");
 def("run.energyBalance", "Energy balance error", "", "%", "run", "Heat in minus heat out, as a share. Above 1 % the mesh or the set up is suspect.");
 def("run.pcbMin", "PCB coolest", "", "C", "run", "Lowest temperature on the PCB.");
@@ -414,7 +414,7 @@ def("simset.layerFrac", "Layer thickness", "", "", "input", "Two-resistor chips:
 def("simset.kCore", "Core k", "", "W/(m K)", "input", "Two-resistor chips: k of the junction core between the two layers. High, so the core is one temperature. Blank = 100.", undefined, { range: [10, 1000] });
 
 // ---------- W7: runs ----------
-def("run.study", "Study", "", "", "run", "Name of the study (or Flow project) in SolidWorks.");
+def("run.study", "Study name", "", "", "run", "Name of the study (or Flow project) in SolidWorks.");
 def("run.meshGlobal", "Mesh size", "", "mm", "run", "Global mesh size used by the run.");
 def("run.meshFine", "Fine mesh", "", "mm", "run", "Mesh size on the chips and TIMs used by the run.");
 def("run.nodes", "Nodes", "", "", "run", "Nodes in the mesh.");

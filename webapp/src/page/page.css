@@ -1,11 +1,13 @@
 /* Colours are tokens. Dark is the default theme; [data-theme="light"] on <html> switches. Print is always light. */
 :root, :root[data-theme="dark"] {
+  color-scheme: dark;   /* scrollbars, selects and checkboxes follow the theme */
   --bg: #15181d; --panel: #1d2128; --panel2: #252a33; --line: #343b47; --text: #e4e7ec; --muted: #9aa3b2;
   --accent: #5aa9ff; --accent-text: #0b1420; --input: #11141a; --focus: #8cc4ff;
   --crit: #ff6b6b; --crit-bg: #3a1f22; --watch: #f2b84b; --watch-bg: #3a3020; --minor: #7cc0ff; --minor-bg: #1f2c3a;
   --ok: #5fd08a; --ok-bg: #1d3326; --locked: #7b8494;
 }
 :root[data-theme="light"] {
+  color-scheme: light;
   --bg: #f4f6f9; --panel: #ffffff; --panel2: #eef1f5; --line: #d3d9e2; --text: #1a1f27; --muted: #5d6675;
   --accent: #1f6fd1; --accent-text: #ffffff; --input: #ffffff; --focus: #1f6fd1;
   --crit: #c62828; --crit-bg: #fde8e8; --watch: #a15c00; --watch-bg: #fff3dc; --minor: #1d5fa8; --minor-bg: #e5f0fc;

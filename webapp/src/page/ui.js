@@ -13,7 +13,8 @@ export const html = htm.bind(h);
 export function fmt(x, d = 2) {
   if (!isNum(x)) return "";
   const a = Math.abs(x);
-  if (a !== 0 && (a < 10 ** -d || a >= 1e7)) return x.toExponential(2);
+  if (a < 1e-9) return (0).toFixed(d);   // rounding noise of a difference (8.9e-16), not a value
+  if (a < 10 ** -d || a >= 1e7) return x.toExponential(2);
   return x.toFixed(d);
 }
 export const pct = x => (isNum(x) ? (x * 100).toFixed(1) + " %" : "");

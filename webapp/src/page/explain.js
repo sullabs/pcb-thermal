@@ -19,8 +19,8 @@ export const KIND = { input: "you type this", calculated: "calculated", cad: "fr
 
 export function sig(x, n = 4) {
   if (!isNum(x)) return "?";
-  if (x === 0) return "0";
   const a = Math.abs(x);
+  if (a < 1e-9) return "0";
   if (a >= 1e6 || a < 1e-3) return x.toExponential(n - 1).replace(/\.?0+e/, "e").replace("e", " × 10^");
   return String(+x.toPrecision(n));
 }
@@ -30,7 +30,8 @@ export function fmtValue(v, d) {
   if (!isNum(v)) return v ?? "";
   if (d === undefined) return sig(v, 4);
   const a = Math.abs(v);
-  if (a !== 0 && (a < 10 ** -d || a >= 1e7)) return v.toExponential(2);
+  if (a < 1e-9) return (0).toFixed(d);   // rounding noise of a difference, not a value
+  if (a < 10 ** -d || a >= 1e7) return v.toExponential(2);
   return v.toFixed(d);
 }
 

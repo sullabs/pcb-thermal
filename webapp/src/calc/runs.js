@@ -60,6 +60,16 @@ export function inputsHash(fs) {
 const near = (a, b, tol = 1e-6) => isNum(a) && isNum(b) ? Math.abs(a - b) <= tol * Math.max(1, Math.abs(a), Math.abs(b)) : a === b;
 const num = x => (isNum(x) ? String(+x.toPrecision(4)) : "blank");
 
+// Plate chips as the run saved them and as they are now. The macros write numbers back with 15 digits, so numbers
+// compare with near(), not as text.
+function sameChips(a = [], b = []) {
+  if (a.length !== b.length) return false;
+  return a.every((c, i) => {
+    const d = b[i], keys = new Set([...Object.keys(c), ...Object.keys(d)]);
+    return [...keys].every(k => (isNum(c[k]) || isNum(d[k]) ? near(c[k], d[k]) : c[k] === d[k]));
+  });
+}
+
 export function inputChanges(then = {}, now = {}, simThen, simNow) {
   const out = [];
   if (!now) return ["the inputs cannot be worked out now (PCB size or k unknown)"];
@@ -84,7 +94,7 @@ export function inputChanges(then = {}, now = {}, simThen, simNow) {
     if (!a && !b) continue;
     if (!a || !b) { out.push(`${s} plate ${a ? "removed" : "added"}`); continue; }
     if (!near(a.faceZMm, b.faceZMm) || !near(a.thicknessMm, b.thicknessMm) || !near(a.k, b.k)) out.push(`${s} plate height, thickness or k changed`);
-    if (JSON.stringify(a.chips) !== JSON.stringify(b.chips)) out.push(`${s} plate chips, TIMs or pedestals changed`);
+    if (!sameChips(a.chips, b.chips)) out.push(`${s} plate chips, TIMs or pedestals changed`);
   }
   if (simThen && simNow) {
     for (const [g, name] of [["spreaderTop", "spreader top"], ["spreaderOther", "spreader other faces"], ["pcbTop", "PCB top"], ["pcbBottom", "PCB bottom"], ["parts", "parts"]]) {
