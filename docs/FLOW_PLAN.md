@@ -214,6 +214,8 @@ orientation or air speed does not match the h it assumes (the page's h values ar
 
 ## F7. Compare and validate (hand, Thermal, Flow, measured)
 
+**Status: done 2026-10-20 (project.json measurements; tab 9 compare table of hand, newest healthy Thermal and Flow runs and newest measurement, with gaps and an option to include Check runs; Add a measurement form with Learn text; ranked likely causes when Flow and a measurement differ by more than 5 C; report section and a Compare tab in the workbook export). RPi4_manual_test.xlsx holds no measured temperatures, so the acceptance needs real readings typed on tab 9.**
+
 **Problem.** No single view of all estimates, and no place for a real measurement.
 
 **project.json** (page owned, new top-level `measurements` array):
@@ -258,6 +260,6 @@ orientation or air speed does not match the h it assumes (the page's h values ar
 | F5 materials | S4 to S6 | medium | | done 2026-10-19 |
 | F8 fixes | none | small | can go any time, good first warm-up | done 2026-10-19 |
 | F6 environment | S7 | medium | | done 2026-10-19 |
-| F7 compare | F1, F4 | medium | page only | open |
+| F7 compare | F1, F4 | medium | page only | done 2026-10-20 |
 
 Not in this plan: transient runs and power profiles, enclosures and fans built by the macro, the add-in port.

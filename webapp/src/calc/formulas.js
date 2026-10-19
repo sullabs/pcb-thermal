@@ -42,6 +42,7 @@ const solIn = (c, side) => c.project.handCheck?.[side === "bottom" ? "solutionBo
 const solOut = (c, side) => c.calc.solution?.[side];
 const solp = (c, key) => { const [side, ref] = key.split("|"); return { side, ref, inp: solIn(c, side)?.parts?.[ref] || {}, r: solOut(c, side)?.parts?.[ref], s: solIn(c, side) }; };
 const runCalc = (c, name) => c.calc.runs?.[name];
+const cmpRow = (c, key) => { const [ref, mode] = key.split("|"); return c.calc.compare?.[mode === "any" ? "any" : "ok"]?.rows?.[ref]; };
 const runpCalc = (c, key) => { const [run, ref] = key.split("|"); return c.calc.runs?.[run]?.parts?.[ref]; };
 const sprb = (c, side) => c.cad?.spreaderBuild?.[side];
 const asbp = (c, side) => c.cad?.asBuilt?.plates?.[side];
@@ -431,6 +432,22 @@ export const VALUES = {
   "env.airDirection": c => c.project.simSetup?.flow?.environment?.airDirection,
   "env.pressureUsed": c => c.calc.flow?.env.pressureKPa,
   "env.up": c => c.calc.flow?.env.up,
+  "cmp.includeCheck": () => undefined,
+  "cmp.hand": (c, k) => cmpRow(c, k)?.handC,
+  "cmp.thermal": (c, k) => cmpRow(c, k)?.thermalC,
+  "cmp.flow": (c, k) => cmpRow(c, k)?.flowC,
+  "cmp.meas": (c, k) => cmpRow(c, k)?.measC,
+  "cmp.gapHand": (c, k) => cmpRow(c, k)?.gapHand,
+  "cmp.gapThermal": (c, k) => cmpRow(c, k)?.gapThermal,
+  "cmp.gapFlow": (c, k) => cmpRow(c, k)?.gapFlow,
+  "cmp.flowVsThermal": (c, k) => cmpRow(c, k)?.flowVsThermal,
+  "meas.name": (c, k) => c.project.measurements?.[+k]?.name,
+  "meas.date": (c, k) => c.project.measurements?.[+k]?.date,
+  "meas.ambient": (c, k) => c.project.measurements?.[+k]?.ambientC,
+  "meas.note": (c, k) => c.project.measurements?.[+k]?.note,
+  "meas.t": (c, k) => { const [i, r] = k.split("|"); return c.project.measurements?.[+i]?.parts?.[r]?.tC; },
+  "meas.method": (c, k) => { const [i, r] = k.split("|"); return c.project.measurements?.[+i]?.parts?.[r]?.method; },
+  "meas.where": (c, k) => { const [i, r] = k.split("|"); return c.project.measurements?.[+i]?.parts?.[r]?.where; },
   "flow.minTravels": c => c.calc.flow?.settings.minTravels,
   "flow.goalCriteria": c => c.calc.flow?.settings.goalCriteriaC,
   "run.goalsLoose": (c, k) => { const r = runOf(c, k), lim = c.calc.flow?.settings.goalCriteriaC; if (!r?.goalsHealth || !isNum(lim)) return undefined; const l = Object.entries(r.goalsHealth).filter(([, g]) => g.deltaC > lim).map(([n]) => n); return l.length ? l.join(", ") : "none"; },
@@ -819,6 +836,14 @@ F["env.pressureUsed"] = c => { const e = c.project.simSetup?.flow?.environment |
   if (isNum(e.altitudeM)) return { text: "p = 101.325 × (1 - 2.25577e-5 × altitude)^5.25588 (standard atmosphere)", inputs: [["altitude", "env.altitude", ""]], fn: v => 101.325 * (1 - 2.25577e-5 * v.altitude) ** 5.25588 };
   return { text: "p = 101.325 kPa (sea level)", inputs: [], fn: () => 101.325 }; };
 F["env.up"] = () => ({ text: "Against gravity: +Z flat parts up, -Z flat parts down, along the short board size for long side up, along the long size for short side up", inputs: [["orientation", "env.orientation", ""]] });
+F["cmp.hand"] = (c, k) => ({ text: "Tj of the hand check: with the plate (tab 7) when the part is under it, else the bare board (tab 5)", inputs: [] });
+F["cmp.thermal"] = (c, k) => ({ text: "Peak of the part in the newest Thermal run whose health is OK" + (k.endsWith("|any") ? " or Check" : ""), inputs: [] });
+F["cmp.flow"] = (c, k) => ({ text: "Peak of the part in the newest Flow run whose health is OK" + (k.endsWith("|any") ? " or Check" : ""), inputs: [] });
+F["cmp.meas"] = () => ({ text: "Temperature of the part in the newest measurement", inputs: [] });
+F["cmp.gapHand"] = (c, k) => (isNum(cmpRow(c, k)?.gapHand) ? { text: "Gap = Tj hand - measured", inputs: [["Tj hand", "cmp.hand", k], ["measured", "cmp.meas", k]], fn: v => v["Tj hand"] - v.measured } : null);
+F["cmp.gapThermal"] = (c, k) => (isNum(cmpRow(c, k)?.gapThermal) ? { text: "Gap = Thermal - measured", inputs: [["Thermal", "cmp.thermal", k], ["measured", "cmp.meas", k]], fn: v => v.Thermal - v.measured } : null);
+F["cmp.gapFlow"] = (c, k) => (isNum(cmpRow(c, k)?.gapFlow) ? { text: "Gap = Flow - measured", inputs: [["Flow", "cmp.flow", k], ["measured", "cmp.meas", k]], fn: v => v.Flow - v.measured } : null);
+F["cmp.flowVsThermal"] = (c, k) => (isNum(cmpRow(c, k)?.flowVsThermal) ? { text: "Flow - Thermal", inputs: [["Flow", "cmp.flow", k], ["Thermal", "cmp.thermal", k]], fn: v => v.Flow - v.Thermal } : null);
 F["run.healthReasons"] = (c, k) => ({ text: "Each reason behind the health of the run, in plain words", inputs: [["health", "run.health", k]] });
 F["run.changes"] = () => ({ text: "Inputs of the run (a copy kept in the results file) compared with the inputs now: ambient, PCB, Pd per part, bodies, chip models, plates, surfaces, contacts, mesh", inputs: [] });
 F["runp.margin"] = (c, k) => { const ref = k.split("|")[1]; return isNum(runpCalc(c, k)?.marginC) ? { text: "Margin = Tj max - peak", inputs: [["Tj max", "part.tjMax", ref], ["peak", "runp.peak", k]], fn: v => v["Tj max"] - v.peak } : null; };

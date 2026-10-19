@@ -8,6 +8,7 @@
 // F4. Tj basis: k steps and material names, forSolidWorks.flow per chip, two-resistor layers, tjBasis on tab 9.
 // F5. PCB, TIM, spreader materials, radiative surfaces and contacts from the page, with the simplifications noted.
 // F6. Environment: gravity from the orientation, pressure from altitude, forced air, domain margins, hand check note.
+// F7. Compare: hand, newest healthy Thermal and Flow runs, newest measurement, gaps, causes; report and workbook.
 // F8. Heat with no body: listed on tab 6, accepted with a tick, open ones in forSolidWorks.openChecks (macros refuse).
 import fs from "node:fs";
 import path from "node:path";
@@ -21,6 +22,10 @@ import { runHealth } from "../src/calc/runs.js";
 import { flowSettings, kStep, flowMaterial, tjBasisOf, flowEmissivity, flowEnvironment, flowDomainMm } from "../src/calc/flow.js";
 import { tabStates, blockingProblems } from "../src/page/tabs.js";
 import { macroChecks } from "../src/page/swcard.js";
+import { addMeasurement, removeMeasurement } from "../src/page/model.js";
+import { Report } from "../src/page/report.js";
+import { exportWorkbook } from "../src/io/export_xlsx.js";
+import * as XLSX from "xlsx";
 import { openIssues } from "../src/page/report.js";
 import { Explain } from "../src/page/explain.js";
 import * as Views from "../src/page/views.js";
@@ -263,6 +268,33 @@ const flowRun = (over = {}) => ({
   check(t8.includes("Flow environment") && t8.includes('data-term="env.orientation"') && t8.includes("svg") && t8.includes("assumes a flat board in still air"), "tab 8 shows the environment, the drawing and the hand check note");
   check(show("BareTab", cv).includes("are not the same case"), "tab 5 notes that the hand check is a different case");
   check(!show("BareTab", ctxOf(withEnv({}))).includes("are not the same case"), "no note for a flat board in still air");
+}
+
+// ---------- F7 ----------
+{
+  const base = { unresolved: [], warnings: [], heatAppliedW: 6.67, energyBalancePct: 0.1, solver: { finished: true, travels: 2.1 }, goalsHealth: {} };
+  const fl = flowRun({ name: "FL_20261020_0100", date: "2026-10-20T01:00:00", ...base, parts: { U1: { peakC: 80, tjBasis: "calibrated block" }, U3: { peakC: 95, tjBasis: "calibrated block" } } });
+  const th = { name: "PT_20261020_0050", date: "2026-10-20T00:50:00", studyType: "Thermal", status: "read", energyBalancePct: 0.2, inputs: { forSolidWorks: P.forSolidWorks, simSetup: P.simSetup }, parts: { U1: { peakC: 82 }, U3: { peakC: 97 } } };
+  const badFlow = flowRun({ name: "FL_20261020_0200", date: "2026-10-20T02:00:00", parts: { U1: { peakC: 50 } } });
+  const res = { ...R, runs: [...R.runs, th, fl, badFlow] };
+  let p = addMeasurement(P, ctxOf(P).calc, "2026-10-20");
+  p = { ...p, measurements: [{ ...p.measurements[0], ambientC: 40, parts: { ...p.measurements[0].parts, U1: { tC: 81, method: "thermocouple", where: "package top centre" }, U3: { tC: 104, method: "IR" } } }] };
+  valid("project.schema.json", p, "project.json with a measurement");
+  const c = ctxOf(p, C, res);
+  const t = c.calc.compare.ok;
+  check(t.thermal === th.name && t.flow === fl.name && t.meas === "Test 1", "newest healthy runs and the newest measurement (the bad Flow run is skipped)", [t.thermal, t.flow, t.meas]);
+  const u1 = t.rows.U1;
+  check([u1.handC, u1.thermalC, u1.flowC, u1.measC].every(Number.isFinite) && Math.abs(u1.gapFlow + 1) < 1e-9 && Math.abs(u1.gapThermal - 1) < 1e-9, "U1: all four columns filled, gaps against the measurement", u1);
+  check(!u1.causes && t.rows.U3.causes?.length > 0 && /contact resistance is 0/.test(t.rows.U3.causes.join()), "U3 Flow 9 C below measured: causes listed, contacts 0 among them", t.rows.U3.causes);
+  check(c.calc.compare.any.flow === badFlow.name || c.calc.compare.any.flow === fl.name, "with Check runs included the newer Flow run may be used");
+  const t9 = show("ResultsTab", c);
+  check(t9.includes("Compare: hand, Thermal, Flow, measured") && t9.includes('data-term="cmp.gapFlow"') && t9.includes("What usually explains it") && t9.includes("Add a measurement") && t9.includes('data-term="meas.method"'), "tab 9 shows the compare table, the causes and the measurement form");
+  const rep = render(h(Report, { ctx: { project: p, cad: C, results: res, calc: c.calc }, runs: [fl.name], images: {}, now: NOW }));
+  check(rep.includes("Compare: hand, Thermal, Flow, measured"), "the report has the compare table");
+  const wb = exportWorkbook(XLSX, { project: p, cad: C, results: res, calc: c.calc }, []);
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets.Compare, { header: 1 });
+  check(rows[0].includes("Measured (C)") && rows.some(r => r[0] === "U1" && r.includes(81)), "the workbook has a Compare tab", rows.slice(0, 3));
+  check(!removeMeasurement(p, 0).measurements, "removing the last measurement leaves no empty list");
 }
 
 console.log(`Flow plan: ${n - fails} of ${n} checks passed.`);

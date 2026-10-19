@@ -204,6 +204,34 @@
 
     "forSolidWorks": { "$ref": "#/$defs/forSolidWorks" },
 
+    "measurements": {
+      "type": "array",
+      "description": "Temperatures measured on the real board (tab 9, Flow plan F7). Oldest first.",
+      "items": {
+        "type": "object",
+        "required": ["name", "date", "parts"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "date": { "type": "string", "description": "Day of the test, YYYY-MM-DD." },
+          "ambientC": { "$ref": "common.schema.json#/$defs/degC" },
+          "note": { "type": "string" },
+          "parts": {
+            "type": "object",
+            "description": "Per RefDes: the temperature read, how and where.",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "tC": { "$ref": "common.schema.json#/$defs/degC" },
+                "method": { "enum": ["thermocouple", "IR", "internal sensor"] },
+                "where": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
     "checks": {
       "type": "object",
       "description": "Change records the user has checked, by change id (cad.json changes[]), and page checks the user has accepted (heat-no-body/<RefDes>: a part with heat and no body, on purpose).",

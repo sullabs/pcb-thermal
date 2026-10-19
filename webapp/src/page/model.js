@@ -7,6 +7,7 @@
 //   history: historyInit, commit, undo, redo
 
 import { calcProject, forSolidWorks } from "../calc/index.js";
+import { isNum } from "../calc/util.js";
 
 export const PAGE_VERSION = "0.1.0";
 
@@ -65,6 +66,22 @@ export function removeSolution(project, side) {
   return { ...project, handCheck: rest };
 }
 // Sim chips: every part with Pd and a body gets a block model; chips already listed keep their settings.
+// ---------- Flow plan F7: measurements ----------
+export function addMeasurement(project, calc, day) {
+  const n = (project.measurements || []).length + 1;
+  const parts = {};
+  for (const x of project.parts) if (calc.register.parts[x.refDes]?.pdW > 0) parts[x.refDes] = {};
+  const m = { name: `Test ${n}`, date: day, parts };
+  if (isNum(project.board?.ambientC)) m.ambientC = project.board.ambientC;
+  return { ...project, measurements: [...(project.measurements || []), m] };
+}
+export function removeMeasurement(project, i) {
+  const list = (project.measurements || []).filter((_, j) => j !== i);
+  const out = { ...project, measurements: list };
+  if (!list.length) delete out.measurements;
+  return out;
+}
+
 export function addSimChips(project, calc) {
   const p = withSimSetup(project);
   const have = new Set((p.simSetup.chips || []).map(x => x.refDes));

@@ -122,6 +122,13 @@ export function Report({ ctx, runs: runNames = [], images = {}, now }) {
     <table class="rep"><thead><tr><th>RefDes</th><th class="num">Tj max (C)</th><th class="num">Temperature (C)</th><th class="num">Margin (C)</th><th>Status</th><th>From</th></tr></thead>
       <tbody>${ver.map(v => html`<tr class=${v.status === "FAIL" ? "fail" : ""}><td>${v.ref}</td><td class="num">${fx(p.parts.find(x => x.refDes === v.ref)?.tjMaxC, 0)}</td><td class="num">${fx(v.t, 1)}</td><td class="num">${fx(v.margin, 1)}</td><td>${v.status}</td><td>${v.from}</td></tr>`)}</tbody></table>
 
+    ${(() => { const t = calc.compare?.ok; if (!t || !(t.thermal || t.flow || t.meas)) return null;
+      const cols = [["Hand (C)", "handC"], ["Thermal (C)", "thermalC"], ["Flow (C)", "flowC"], ["Measured (C)", "measC"], ["Hand - measured", "gapHand"], ["Thermal - measured", "gapThermal"], ["Flow - measured", "gapFlow"]];
+      return html`<h2>Compare: hand, Thermal, Flow, measured</h2>
+      <p>Thermal run ${t.thermal || "none"}, Flow run ${t.flow || "none"} (newest with health OK), measurement ${t.meas || "none"}.</p>
+      <table class="rep"><thead><tr><th>RefDes</th>${cols.map(([h]) => html`<th class="num">${h}</th>`)}</tr></thead>
+      <tbody>${t.refs.map(r => html`<tr><td>${r}</td>${cols.map(([, f]) => html`<td class="num">${fx(t.rows[r][f], 1)}</td>`)}</tr>`)}</tbody></table>`; })()}
+
     <h2>7 Open issues</h2>
     ${issues.length ? html`<ul>${issues.map(x => html`<li>${x}</li>`)}</ul>` : html`<p>None.</p>`}
     <p class="foot">Made by PCB Thermal page ${PAGE_VERSION}. Values in mm, C, W, W/(m K) and C/W. Every formula is listed in the workbook export (Method tab) and on the page (Show formulas).</p>

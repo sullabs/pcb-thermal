@@ -9,7 +9,7 @@ import { valueOf, FORMULAS, formulaOf, instances } from "../calc/formulas.js";
 import { TERMS } from "../terms/catalogue.js";
 import { isNum } from "../calc/util.js";
 
-export const SHEETS = ["Summary", "Parts", "Bodies", "Triage", "Rail budget", "Bare board network", "Spreader", "Sim setup", "Results", "Changes", "Method"];
+export const SHEETS = ["Summary", "Parts", "Bodies", "Triage", "Rail budget", "Bare board network", "Spreader", "Sim setup", "Results", "Compare", "Changes", "Method"];
 
 // One column: [term, key function (row) -> key, header text (default: label), value function (row) -> value (default: valueOf)]
 function table(XLSX, ctx, cols, rows) {
@@ -113,6 +113,11 @@ export function exportWorkbook(XLSX, ctx, runNames = []) {
   XLSX.utils.sheet_add_aoa(res, [[], ["Runs", "Date", "Study", "Status", "Result", "Hottest part", "Peak (C)", "Energy balance error (%)", "PCB max (C)", "Spreader max (C)", "Inputs changed since"],
     ...runs.map(r => [r.name, r.date, r.studyType, r.status, ...["run.pass", "run.worst", "run.worstC", "run.energyBalance", "run.pcbMax", "run.spreaderMax", "run.changes"].map(t => cell(valueOf(ctx, t, r.name)))])], { origin: -1 });
   add("Results", res);
+
+  const cmp = calc.compare?.ok;
+  const cws = table(XLSX, ctx, [["part.refDes", r => r, "RefDes", r => r], ["cmp.hand", r => r], ["cmp.thermal", r => r], ["cmp.flow", r => r], ["cmp.meas", r => r], ["cmp.gapHand", r => r], ["cmp.gapThermal", r => r], ["cmp.gapFlow", r => r], ["cmp.flowVsThermal", r => r]], cmp?.refs || []);
+  XLSX.utils.sheet_add_aoa(cws, [[], ["Thermal run", cmp?.thermal || "none"], ["Flow run", cmp?.flow || "none"], ["Measurement", cmp?.meas || "none"], ["Runs are the newest with health OK."]], { origin: -1 });
+  add("Compare", cws);
 
   add("Changes", table(XLSX, ctx, [["change.date", x => x.id], ["change.macro", x => x.id], ["change.body", x => x.id], ["change.change", x => x.id], ["change.field", x => x.id],
     ["change.old", x => x.id], ["change.new", x => x.id], ["change.checked", x => x.id]], cad?.changes || []));

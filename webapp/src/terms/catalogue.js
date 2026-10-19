@@ -480,6 +480,23 @@ def("env.airSpeed", "Air speed", "", "m/s", "input", "Forced air speed (fan or w
 def("env.airDirection", "Air direction", "", "", "input", "Board axis the air blows along: X along the length, Y along the width, Z out of the top face. Blank = +X.");
 def("env.pressureUsed", "Pressure used", "p", "kPa", "calculated", "Pressure Run Flow sets: typed, from the altitude, or sea level.");
 def("env.up", "Warm air goes", "", "", "calculated", "Board axis the warm air rises along (against gravity). The domain is longer on that side.");
+def("cmp.includeCheck", "Include Check runs", "", "", "input", "Also take runs whose health is Check (not only OK) for the Thermal and Flow columns. Not saved.");
+def("cmp.hand", "Hand check", "Tj hand", "C", "calculated", "Tj of the hand check: with the plate when the part is under the plate hand check, else the bare board.");
+def("cmp.thermal", "Thermal", "", "C", "calculated", "Peak of the part in the newest Thermal run whose health is OK.");
+def("cmp.flow", "Flow", "", "C", "calculated", "Peak of the part in the newest Flow run whose health is OK.");
+def("cmp.meas", "Measured", "", "C", "calculated", "Temperature of the part in the newest measurement.");
+def("cmp.gapHand", "Hand - measured", "", "C", "calculated", "Hand check minus the measurement. Positive: the hand check is on the safe side.");
+def("cmp.gapThermal", "Thermal - measured", "", "C", "calculated", "Thermal run minus the measurement.");
+def("cmp.gapFlow", "Flow - measured", "", "C", "calculated", "Flow run minus the measurement. Beyond 5 C the page lists what usually explains it.");
+def("cmp.flowVsThermal", "Flow - Thermal", "", "C", "calculated", "Flow run minus Thermal run for the same part.");
+def("meas.name", "Measurement", "", "", "input", "Name of the test, for example 'bench, case closed, full load'.");
+def("meas.date", "Test day", "", "", "input", "Day of the test (YYYY-MM-DD).");
+def("meas.ambient", "Test ambient", "", "C", "input", "Air temperature around the board during the test. Compare it with the study ambient (tab 0).", undefined, { range: [-40, 85] });
+def("meas.note", "Test note", "", "", "input", "Load case, enclosure, airflow, time to steady state.");
+def("meas.t", "Measured", "", "C", "input", "Temperature read on the part at steady state.", undefined, { range: [-40, 200] });
+def("meas.method", "Method", "", "", "input", "Thermocouple, IR camera or the chip's internal sensor.",
+  "A thermocouple glued to the centre of the package top with thermal epoxy reads the case, a little below Tj; keep the bead small and run the wire along the board. An IR camera reads low on glossy chips unless you set the emissivity or put a dab of matt paint or tape on the chip. An internal sensor reads the junction itself.");
+def("meas.where", "Where", "", "", "input", "Where the reading was taken, for example 'package top centre'.");
 def("flow.minTravels", "Minimum travels", "", "", "input", "The solve stops only after this many travels, and only when the goals have converged. Blank = 2.",
   "Flow's own criteria are often met after about one travel; on the RPi4 the chip goals then still had criteria of about 2.3 K. Two travels let the air settle so runs can be compared within 1 to 2 C. The API cannot set the criterion of a goal, so a goal still moving more than the goal criterion is flagged on tab 9.", { range: [1, 10] });
 def("flow.goalCriteria", "Goal criterion", "", "C", "input", "A goal whose last change is above this is shown as not converged on tab 9. Blank = 0.2 C.", undefined, { range: [0.05, 2] });

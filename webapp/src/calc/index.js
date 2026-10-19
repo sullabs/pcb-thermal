@@ -17,6 +17,7 @@ import { thermalSolution } from "./solution.js";
 import { simChips } from "./sim.js";
 import { runResults, inputsHash } from "./runs.js";
 import { flowCheck, flowForSw } from "./flow.js";
+import { compareTable } from "./compare.js";
 import { isNum, put } from "./util.js";
 
 export const CALC_VERSION = "0.1.0";
@@ -51,6 +52,7 @@ export function calcProject(project, cad = {}, results = {}) {
   out.fsNow = forSolidWorks(project, out, "");
   out.flow = flowCheck(project, out);
   out.runs = runResults(project, results, out, out.fsNow);
+  out.compare = { ok: compareTable(project, results, out, false), any: compareTable(project, results, out, true) };
   const built = cad?.build?.inputsHash;
   out.build = { hashNow: out.fsNow?.inputsHash, hashBuilt: built };
   if (cad?.build && built && out.fsNow) out.build.outOfDate = built !== out.fsNow.inputsHash;

@@ -6,6 +6,8 @@ import { html, NumField, TextField, Select, Check, Card } from "./ui.js";
 import { V, L, marked } from "./explain.js";
 import { Scroll, Facts, date, shortName, pctV, plural } from "./bits.js";
 import { SwCard } from "./swcard.js";
+import { addMeasurement, removeMeasurement } from "./model.js";
+import { MEAS_METHODS, MEAS_GAP_LIMIT_C } from "../calc/compare.js";
 import { setIn, withSimSetup, addPlate, removePlate, newPlateChip, addSolution, removeSolution, addSimChips, takeAsBuilt, heatedOnSide } from "./model.js";
 import { swFiles, withFound } from "./swfiles.js";
 import { unticked } from "./tabs.js";
@@ -414,6 +416,8 @@ function ResultsView({ c }) {
           <td class="num"><${V} t="runp.hand" k=${key} d=${1} />${r.handFrom === "thermal solution" ? html` <span class="hint">plate</span>` : ""}</td><td class="num"><${V} t="runp.gap" k=${key} d=${1} /></td></tr>`; })}</tbody></table><//>`}
       <${Plot} c=${c} run=${run} />
     <//>
+    <${CompareCard} c=${c} />
+    <${MeasurementsCard} c=${c} />
     <${Card} title="All runs">
       <${Scroll}><table class="grid runs"><thead><tr><th><${L} t="run.name" /></th><th><${L} t="run.date" /></th><th><${L} t="run.studyType" /></th><th><${L} t="run.status" /></th><th><${L} t="run.worst" /></th><th class="num"><${L} t="run.worstC" /></th><th class="num"><${L} t="run.energyBalance" /></th><th><${L} t="run.health" /></th><th><${L} t="run.pass" /></th><th></th></tr></thead>
       <tbody>${[...runs].reverse().map(r => html`<tr class=${r.name === run.name ? "sel" : ""}><td><${V} t="run.name" k=${r.name} /></td><td><${V} t="run.date" k=${r.name} v=${date(r.date)} /></td><td><${V} t="run.studyType" k=${r.name} /></td><td><${V} t="run.status" k=${r.name} /></td>
@@ -431,6 +435,48 @@ function Health({ c, run, rc }) {
   return html`<div class="health"><p><span class=${`status ${HEALTH_CLS[h.level]}`}><${V} t="run.health" k=${run.name} /></span>
     ${h.level === "ok" ? " Finished, every part meshed, energy balance within limits: read the temperatures." : h.level === "bad" ? " Do not trust the temperatures of this run yet. PASS or FAIL is greyed out." : " Look at these before you trust the temperatures."}</p>
     ${h.reasons.length > 0 && html`<ul class="reasons">${h.reasons.map(x => html`<li>${marked(x.charAt(0).toUpperCase() + x.slice(1) + ".")}</li>`)}</ul>`}</div>`;
+}
+
+// Compare and validate (F7): hand check, newest healthy Thermal and Flow runs, newest measurement, and the gaps.
+function CompareCard({ c }) {
+  const [any, setAny] = useState(false);
+  const t = c.calc.compare?.[any ? "any" : "ok"];
+  if (!t || !t.refs.length) return null;
+  const sfx = any ? "|any" : "";
+  const cols = [["cmp.hand", 1], ["cmp.thermal", 1], ["cmp.flow", 1], ["cmp.meas", 1], ["cmp.gapHand", 1], ["cmp.gapThermal", 1], ["cmp.gapFlow", 1], ["cmp.flowVsThermal", 1]];
+  const causes = t.refs.filter(r => t.rows[r].causes?.length);
+  return html`<${Card} title="Compare: hand, Thermal, Flow, measured">
+    <p class="hint">Thermal: ${t.thermal || "no run with health OK"}. Flow: ${t.flow || "no run with health OK"}. Measurement: ${t.meas || "none yet (add one below)"}.
+      <span class="field"><${Check} term="cmp.includeCheck" value=${any} label="Include runs with health Check" onCommit=${v => setAny(!!v)} /> include runs with health Check</span></p>
+    <${Scroll}><table class="grid"><thead><tr><th><${L} t="part.refDes" /></th>${cols.map(([tm]) => html`<th class="num"><${L} t=${tm} /></th>`)}</tr></thead>
+    <tbody>${t.refs.map(r => html`<tr><td><${V} t="part.refDes" k=${r} v=${r} /></td>${cols.map(([tm, d]) => html`<td class=${`num ${tm === "cmp.gapFlow" && Math.abs(t.rows[r].gapFlow) > MEAS_GAP_LIMIT_C ? "warn" : ""}`}><${V} t=${tm} k=${r + sfx} d=${d} /></td>`)}</tr>`)}</tbody></table><//>
+    ${causes.map(r => html`<div class="causes"><p class="warn">${marked(`${r}: Flow and the measurement differ by ${t.rows[r].gapFlow.toFixed(1)} C. What usually explains it, most likely first:`)}</p>
+      <ol>${t.rows[r].causes.map(x => html`<li>${marked(x.charAt(0).toUpperCase() + x.slice(1) + ".")}</li>`)}</ol></div>`)}
+  <//>`;
+}
+
+// Measurements on the real board (F7): name, day, ambient, and per part the temperature, method and place.
+function MeasurementsCard({ c }) {
+  const { project: p, locked } = c;
+  const list = p.measurements || [];
+  const set = (path, label, v) => c.editFn(label, q => setIn(q, ["measurements", ...path], v));
+  const day = (c.now ? c.now() : new Date().toISOString()).slice(0, 10);
+  return html`<${Card} title="Measurements">
+    ${list.map((m, i) => html`<div class="meas"><div class="form">
+      <label><${L} t="meas.name" /> <${TextField} term="meas.name" tkey=${String(i)} value=${m.name} label="Measurement name" required disabled=${locked} onCommit=${v => v && set([i, "name"], "Measurement name", v)} /></label>
+      <label><${L} t="meas.date" /> <${TextField} term="meas.date" tkey=${String(i)} value=${m.date} width="8em" label="Test day" required disabled=${locked} onCommit=${v => v && set([i, "date"], "Test day", v)} /></label>
+      <label><${L} t="meas.ambient" /> <${NumField} term="meas.ambient" tkey=${String(i)} value=${m.ambientC} unit="C" width="4em" label="Test ambient" disabled=${locked} onCommit=${v => set([i, "ambientC"], "Test ambient", v)} /></label>
+      <label><${L} t="meas.note" /> <${TextField} term="meas.note" tkey=${String(i)} value=${m.note} width="20em" label="Test note" disabled=${locked} onCommit=${v => set([i, "note"], "Test note", v || undefined)} /></label>
+    </div>
+    <${Scroll}><table class="grid"><thead><tr><th><${L} t="part.refDes" /></th><th class="num"><${L} t="meas.t" /></th><th><${L} t="meas.method" /></th><th><${L} t="meas.where" /></th></tr></thead>
+    <tbody>${Object.keys(m.parts).map(r => { const k = `${i}|${r}`; return html`<tr><td><${V} t="part.refDes" k=${r} v=${r} /></td>
+      <td class="num"><${NumField} term="meas.t" tkey=${k} value=${m.parts[r].tC} unit="C" width="4.5em" label=${"Measured " + r} disabled=${locked} onCommit=${v => set([i, "parts", r, "tC"], `Measured ${r}`, v)} /></td>
+      <td><${Select} term="meas.method" tkey=${k} value=${m.parts[r].method} options=${MEAS_METHODS} label=${"Method " + r} disabled=${locked} onCommit=${v => set([i, "parts", r, "method"], `Method ${r}`, v || undefined)} /></td>
+      <td><${TextField} term="meas.where" tkey=${k} value=${m.parts[r].where} width="12em" label=${"Where " + r} disabled=${locked} onCommit=${v => set([i, "parts", r, "where"], `Where ${r}`, v || undefined)} /></td></tr>`; })}</tbody></table><//>
+    <p><button class="small danger" disabled=${locked} onClick=${() => c.editFn(`Remove measurement ${m.name}`, q => removeMeasurement(q, i))}>Remove this measurement</button></p></div>`)}
+    <p><button disabled=${locked} onClick=${() => c.editFn("Add a measurement", q => addMeasurement(q, c.calc, day))}>Add a measurement</button> <span class="hint">One row per part with heat. The newest measurement fills the Measured column above.</span></p>
+    ${c.learn && html`<p class="hint">Let the board reach steady state (temperatures move less than 0.5 C in 5 minutes). A thermocouple glued to the package top centre with thermal epoxy reads the case, a little below Tj; keep the bead small. An IR camera reads low on a glossy chip: set its emissivity, or put matt paint or tape on the chip. Write down the ambient next to the board, not the room.</p>`}
+  <//>`;
 }
 
 // Plain reading of a run (Learn mode): the hottest part, how it compares with the hand check, and what to trust.
