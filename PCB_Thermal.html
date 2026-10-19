@@ -48,7 +48,7 @@ code { font-family: var(--mono); font-size: .9em; background: var(--panel2); pad
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }
 
 /* Top bar: board name first, tools on the right in two quiet groups */
-.top { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 6px; padding: 8px 16px; background: var(--bg); flex-wrap: wrap; }
+.top { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; gap: 6px; padding: 8px 16px; background: var(--bg); flex-wrap: wrap; }
 .brand { font: 600 13px/1 var(--display); color: var(--muted); letter-spacing: .02em; padding-right: 10px; margin-right: 4px; border-right: 1px solid var(--line); }
 .brand::before { content: ""; display: inline-block; width: 22px; height: 8px; margin-right: 8px; border-radius: 1px; background: var(--heat); vertical-align: 1px; }
 .name { font: 600 17px/1.2 var(--display); }
@@ -93,6 +93,8 @@ fieldset.content > * { grid-column: 1 / -1; min-width: 0; margin: 0; }
 fieldset.content > .cols:not(.net) { display: contents; }
 fieldset.content > .card, fieldset.content > .cols:not(.net) > .card { grid-column: auto; margin: 0; }
 @media (min-width: 760px) { fieldset.content > .card:has(table, .form, .steps, textarea) { grid-column: span 2; } }
+/* With Show formulas on, a card of values needs room for the formula under each value */
+@media (min-width: 1100px) { fieldset.content > .card:has(.kv .fx) { grid-column: span 2; } }
 fieldset.content > .card:is(:has(.sheet-wrap, .boards, svg, .cols, .body-edit, table th:nth-child(6)), .sw) { grid-column: 1 / -1; }
 .locked-banner { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--locked); border-radius: 0 4px 4px 0; padding: 10px 14px; margin-bottom: 16px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; margin-bottom: 16px; }
@@ -175,6 +177,9 @@ footer { position: fixed; bottom: 0; left: 0; right: 0; padding: 4px 24px; font:
 .v:hover, .v:focus-visible { background: var(--panel2); outline: none; box-shadow: 0 0 0 1px var(--accent); }
 .v.calculated { }
 .fx { display: block; font: 11px/1.35 var(--mono); color: var(--muted); white-space: normal; text-align: left; margin-top: 1px; }
+/* In a table a formula stays on one line under its value, so a row grows by one line and the table scrolls sideways */
+:is(.sheet, .grid) .fx { white-space: nowrap; font-size: 10.5px; line-height: 1.3; }
+:is(.sheet, .grid) td.num .fx { text-align: right; }
 .lbl { display: inline-flex; align-items: center; gap: 3px; cursor: help; }
 button.info { padding: 0 4px; font: italic 600 10px/14px Georgia, serif; border-radius: 50%; width: 15px; height: 15px; display: inline-flex; justify-content: center; color: var(--muted); background: transparent; }
 button.info:hover { color: var(--accent); }
@@ -335,6 +340,41 @@ table.sheet thead tr.groups th:not(.rownum-h) { color: color-mix(in srgb, var(--
   .sheet td[data-col=method] select { width: 7em; }
   .sheet td[data-col=notes] input { min-width: 5em; }
 }
+/* Sheet, both themes: lines that carry meaning. Each part (one tbody) is closed by a full line; load rows inside a
+   part are split by a faint one; columns get a hairline. A bar on the row number shows the part's flag on the heat
+   scale, so the hot parts read down the left edge. Placeholders stay quiet; numbers are set in Bahnschrift. */
+.sheet th, .sheet td { border-right-color: color-mix(in srgb, var(--line) 55%, transparent); border-bottom-color: color-mix(in srgb, var(--line) 50%, transparent); }
+.sheet tbody tr:last-child td, .sheet td[rowspan] { border-bottom: 1px solid var(--line); }
+.sheet td.num, .sheet td.num .field input { font-family: var(--display); font-variant-numeric: tabular-nums; }
+.sheet .field input::placeholder { color: color-mix(in srgb, var(--muted) 45%, transparent); }
+.sheet tbody:has(.status.crit) td.rownum { box-shadow: inset 3px 0 0 var(--crit); }
+.sheet tbody:has(.status.watch) td.rownum { box-shadow: inset 3px 0 0 var(--watch); }
+.sheet tbody:has(.status.minor) td.rownum { box-shadow: inset 3px 0 0 var(--minor); }
+.sheet tbody:has(.status.crit) input.refdes { color: var(--crit); }
+.sheet .status { min-width: 4.6em; text-align: center; }
+.sheet thead tr.groups th { font: 600 11.5px/1.2 var(--display); letter-spacing: .02em; }
+.sheet thead tr:nth-child(2) th { font-family: var(--display); font-weight: 500; }
+/* Section dividers take the colour of the section they open */
+.sheet :is(td[data-col=tjMaxC], td.grip-c, td[data-col=pdMeasuredW] + td.calc, td[data-col=notes]),
+.sheet thead :is(th.g-ds, th.grip-h, th.g-res, th.g-notes):not(.g-ds ~ .g-ds, .g-res ~ .g-res) { border-left: 1px solid color-mix(in srgb, var(--tint, var(--line)) 55%, var(--line)); }
+@media (min-width: 1500px) {
+  .sheet .field input, .sheet select { height: 27px; }
+  .sheet td.calc, .sheet tbody.odd td.calc { padding: 4px 6px; }
+  table.sheet, .sheet .field { font-size: 12.5px; }
+}
+
+/* Sheet, dark theme: no colour wash over the columns. Cells you type in are dark wells; calculated cells sit
+   one step lighter, like the grey calculated cells of the workbook. Group colour stays in the header. */
+:root:not([data-theme="light"]) table.sheet { --mix-head: 9%; }
+:root:not([data-theme="light"]) table.sheet tbody td:not(.rownum),
+:root:not([data-theme="light"]) table.sheet tbody.odd td:not(.rownum) { background: var(--input); }
+:root:not([data-theme="light"]) table.sheet tbody td.calc,
+:root:not([data-theme="light"]) table.sheet tbody.odd td.calc { background: var(--panel2); }
+:root:not([data-theme="light"]) table.sheet tbody td:is(.grip-c, [data-col=notes]) { background: color-mix(in srgb, var(--input) 60%, var(--panel)); }
+:root:not([data-theme="light"]) table.sheet tbody:hover td:not(.rownum) { background-image: linear-gradient(color-mix(in srgb, var(--accent) 6%, transparent), color-mix(in srgb, var(--accent) 6%, transparent)); }
+:root:not([data-theme="light"]) .sheet td.rownum { background: var(--panel); }
+:root:not([data-theme="light"]) .sheet td:focus-within .field input,
+:root:not([data-theme="light"]) .sheet td:focus-within select { background: color-mix(in srgb, var(--accent) 10%, var(--input)); }
 .addrow { display: block; width: 100%; border: 0; border-top: 1px dashed var(--line); border-radius: 0; background: none; color: var(--muted); text-align: left; padding: 6px 12px; position: sticky; left: 0; }
 .addrow:hover { color: var(--accent); background: var(--panel2); }
 .sheet-menu { position: fixed; z-index: 20; min-width: 210px; background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; padding: 4px; box-shadow: 0 10px 30px -8px rgb(5 3 15 / .6); display: flex; flex-direction: column; }
