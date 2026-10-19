@@ -14,6 +14,7 @@ studies). Nothing to install besides the toolbar step below.
 | `macros\PCBThermal.swp` | The SolidWorks macros: Import STEP, Build Board, Build Spreader, Sync CAD, Run Thermal Study, Run Flow Simulation, Read Results, Update Macros. |
 | `macros\SetupToolbar.cmd` | Makes the **PCB Thermal** tab in SolidWorks with one button per macro. |
 | `macros\*.bas`, `macros\icons\` | The macro source and the button icons (used by the two files above). |
+| `macros\PCBThermal_Flow.fwp` | The Flow Simulation template Run Flow Simulation builds its project from. |
 
 ## Install (once)
 
@@ -49,7 +50,7 @@ Press **I pressed it** on the card and the page waits until the macro has writte
 | Build Spreader | 7 | Builds the spreader plate, pedestals and TIM parts. |
 | Sync CAD | 7, 10 | Reads the assembly back; tab 10 offers sizes you changed in SolidWorks. |
 | Run Thermal Study | 8 | Makes and solves a new thermal study; the run goes to `AB_results.json`. |
-| Run Flow Simulation | 8 | Sets heat and ambient on your Flow project, solves it, reads its goals. |
+| Run Flow Simulation | 8 | Builds the Flow project from `PCBThermal_Flow.fwp` (air, radiation, materials, a source and goals per chip), solves it, reads its goals. |
 | Read Results | 9 | Reads the solved study: temperatures per part, energy balance, plot picture. |
 
 Each macro asks which project the first time (pick `AB_project.json`), then offers the last one. The macros write
