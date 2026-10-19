@@ -26,6 +26,13 @@ Read `PLAN.md` first. It is the spec. This file is the short list of rules that 
   commit the rebuilt file with every page change. `npm run serve` serves the repo on localhost for browser checks.
 - Node tools in `webapp/` (`npm test`, converter, validator) are for development here only. The user's PC never needs
   Node, npm or Python: only the built HTML file ships.
+- **Branch `webpage` is the user package** (what users download): `PCB_Thermal.html` at the top, `macros\` with
+  `PCBThermal.swp`, the `.bas` files it holds (PTCommon, PTJson, ImportStep, BuildBoard, UpdateMacros), the toolbar
+  setup (3 buttons) and icons, and a user `README.md`. **Every change to the page or to one of those macros must also
+  be brought to `webpage` in the same session**: copy the rebuilt `webapp/dist/PCB_Thermal.html` and the changed
+  `.bas` files there, rebuild `PCBThermal.swp` in SolidWorks (Update Macros; ask before driving SolidWorks), commit
+  and push. A macro that moves to project files joins the package (`.bas`, button in `SetupToolbar.ps1`, icons,
+  README). Its `README.md` "For developers" section repeats this.
 
 ## Web app rules
 
