@@ -168,8 +168,8 @@ End Sub
 ' the assembly, and writes cad.json build (what was built, failures, overlaps) and changes.
 Sub RunProject()
     Dim cad As Object, cadPath As String, impDate As String, fsDate As String
-    cadPath = PJ_Dir & "\cad.json"
-    Set cad = PJ_ReadOwn("cad.json", "pcb-thermal/cad")
+    cadPath = PJ_Dir & "\" & PJ_File("cad")
+    Set cad = PJ_ReadOwn(PJ_File("cad"), "pcb-thermal/cad")
     If cad Is Nothing Then
         PT_Msg "BuildBoard did not run. Nothing was changed." & vbCrLf & vbCrLf & cadPath & " could not be read:" & vbCrLf & PT_LastErr, _
                vbExclamation, MACRO_NAME
@@ -239,7 +239,7 @@ Sub RunProject()
     Dim nLog As Long
     PJ_Put cad, "build", BuildRecord(asmPath)
     nLog = PJ_FlushChanges(cad)
-    If Not PJ_SaveOwn(cad, "cad.json", MACRO_NAME) Then
+    If Not PJ_SaveOwn(cad, PJ_File("cad"), MACRO_NAME) Then
         PT_Msg "The assembly was saved to " & asmPath & ", but " & cadPath & " could not be written:" & vbCrLf & PT_LastErr & vbCrLf & vbCrLf & _
                "The changes are listed in " & mRpt & ". Run Build Board again to write cad.json.", vbExclamation, MACRO_NAME
         Exit Sub

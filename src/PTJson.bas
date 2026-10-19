@@ -3,8 +3,9 @@ Option Explicit
 ' =====================================================================================
 ' PTJson  -  project folder and JSON files for the PCB thermal macros (SolidWorks 2023 VBA)
 '
-' The page (webapp/dist/PCB_Thermal.html) writes project.json in the board's project folder.
-' The macros read it and write cad.json (and later results.json) next to it. Schemas: webapp/schema/.
+' The page (webapp/dist/PCB_Thermal.html) writes <prefix>_project.json in the board's project folder.
+' The macros read it and write <prefix>_cad.json (and later <prefix>_results.json) next to it, with the same
+' prefix (the user's initials, so file names stay unique). No prefix (project.json) works too. Schemas: webapp/schema/.
 ' Units in the files: mm, C, W, W/(m K), C/W.
 '
 ' Import this module next to PTCommon in each macro that can work on a project folder:
@@ -19,20 +20,21 @@ Option Explicit
 Public PJ_Dir As String           ' project folder of this run, no "\" at the end ("" in workbook mode)
 Public PJ_Project As Object       ' project.json as read at the start of the run
 Public PJ_WbPath As String        ' the workbook picked instead (workbook mode)
+Public PJ_Pre As String           ' file prefix of this project, e.g. "AB_" for AB_project.json ("" for project.json)
 
 Private pjS As String, pjP As Long, pjN As Long, pjDec As String      ' parser state
 Private wBuf() As String, wN As Long                                  ' writer buffer
 
 ' ---------------------------------------------------------------- which project
 ' Asks which project this run works on, with the last one as the default:
-'   project.json in a board folder (made by the page) -> "json", PJ_Dir and PJ_Project are set
+'   <prefix>_project.json in a board folder (made by the page) -> "json", PJ_Dir, PJ_Pre and PJ_Project are set
 '   an old workbook (.xlsx, .xlsm)                    -> "xlsx", PJ_WbPath is set
 ' Returns "" when the user cancels or the file cannot be used (the user has been told why).
 Public Function PJ_PickSource(ByVal macroName As String) As String
     Dim lastF As String, f As String, ans As VbMsgBoxResult, opt As Long, cfg As String, disp As String
     Dim fso As Object, ext As String
     Set fso = CreateObject("Scripting.FileSystemObject")
-    PJ_Dir = "": PJ_WbPath = ""
+    PJ_Dir = "": PJ_WbPath = "": PJ_Pre = ""
     Set PJ_Project = Nothing
     lastF = GetSetting(PT_APP, "Common", "Source", "")
     If lastF = "" Then lastF = GetSetting(PT_APP, "Common", "Workbook", "")
@@ -41,14 +43,14 @@ Public Function PJ_PickSource(ByVal macroName As String) As String
     End If
     If lastF <> "" Then
         ans = PT_Msg("Work on this project?" & vbCrLf & lastF & vbCrLf & vbCrLf & _
-                     "Yes = use it." & vbCrLf & "No = pick another one (project.json in the board folder, or an old workbook).", _
+                     "Yes = use it." & vbCrLf & "No = pick another one (<prefix>_project.json in the board folder, or an old workbook).", _
                      vbYesNoCancel + vbQuestion, macroName)
         If ans = vbCancel Then Exit Function
         If ans = vbYes Then f = lastF
     End If
     If f = "" Then
-        f = swApp.GetOpenFileName("Pick project.json in the board folder (or an old workbook)", lastF, _
-                                  "Project (project.json)|project.json|Old workbook (*.xlsx;*.xlsm)|*.xlsx;*.xlsm|All files (*.*)|*.*||", _
+        f = swApp.GetOpenFileName("Pick <prefix>_project.json in the board folder (or an old workbook)", lastF, _
+                                  "Project (*project.json)|*project.json|Old workbook (*.xlsx;*.xlsm)|*.xlsx;*.xlsm|All files (*.*)|*.*||", _
                                   opt, cfg, disp)
         If f = "" Then Exit Function
     End If
@@ -59,21 +61,42 @@ Public Function PJ_PickSource(ByVal macroName As String) As String
         PJ_PickSource = "xlsx"
         Exit Function
     End If
-    If LCase$(fso.GetFileName(f)) <> "project.json" Then
-        PT_Msg macroName & " did not run. Pick the file named project.json in the board folder (the page saves it there), " & _
+    If PJ_PreOf(fso.GetFileName(f)) = "?" Then
+        PT_Msg macroName & " did not run. Pick the file named <prefix>_project.json in the board folder (the page saves it there), " & _
                "or an old workbook." & vbCrLf & vbCrLf & "You picked: " & f, vbExclamation, macroName
         Exit Function
     End If
-    If Not PJ_LoadProject(fso.GetParentFolderName(f), macroName) Then Exit Function
+    If Not PJ_LoadProject(f, macroName) Then Exit Function
     SaveSetting PT_APP, "Common", "Source", f
     PJ_PickSource = "json"
 End Function
 
-' Reads <folderS>\project.json into PJ_Project and sets PJ_Dir. False if it cannot be read (the user has been told).
-Public Function PJ_LoadProject(ByVal folderS As String, ByVal macroName As String) As Boolean
-    Dim f As String, d As Object
-    If Right$(folderS, 1) = "\" Then folderS = Left$(folderS, Len(folderS) - 1)
-    f = folderS & "\project.json"
+' Prefix of a project file name: "AB_project.json" -> "AB_", "project.json" -> "", anything else -> "?".
+Public Function PJ_PreOf(ByVal fileName As String) As String
+    Dim n As Long
+    PJ_PreOf = "?"
+    n = Len(fileName)
+    If n < 12 Then Exit Function
+    If LCase$(Right$(fileName, 12)) <> "project.json" Then Exit Function
+    If n = 12 Then
+        PJ_PreOf = ""
+        Exit Function
+    End If
+    If Mid$(fileName, n - 12, 1) <> "_" Then Exit Function
+    PJ_PreOf = Left$(fileName, n - 12)
+End Function
+
+' A file of this project: PJ_File("cad") -> "AB_cad.json" (name only, in PJ_Dir).
+Public Function PJ_File(ByVal kindS As String) As String
+    PJ_File = PJ_Pre & kindS & ".json"
+End Function
+
+' Reads the project file f (<folder>\<prefix>_project.json) into PJ_Project and sets PJ_Dir and PJ_Pre.
+' False if it cannot be read (the user has been told).
+Public Function PJ_LoadProject(ByVal f As String, ByVal macroName As String) As Boolean
+    Dim d As Object, fso As Object, folderS As String
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    folderS = fso.GetParentFolderName(f)
     On Error GoTo bad
     Set d = PJ_Parse(PJ_ReadFile(f))
     On Error GoTo 0
@@ -82,18 +105,20 @@ Public Function PJ_LoadProject(ByVal folderS As String, ByVal macroName As Strin
         Exit Function
     End If
     PJ_Dir = folderS
+    PJ_Pre = PJ_PreOf(fso.GetFileName(f))
+    If PJ_Pre = "?" Then PJ_Pre = ""
     Set PJ_Project = d
     PT_Trace macroName & ": project folder " & folderS & " (board " & PJ_Str(d, "board/name", "?") & _
-             ", project.json saved " & PJ_Str(d, "savedAt", "?") & ")"
+             ", " & fso.GetFileName(f) & " saved " & PJ_Str(d, "savedAt", "?") & ")"
     PJ_LoadProject = True
     Exit Function
 bad:
-    PT_Msg macroName & " did not run. project.json could not be read:" & vbCrLf & f & vbCrLf & vbCrLf & Err.Description, _
+    PT_Msg macroName & " did not run. The project file could not be read:" & vbCrLf & f & vbCrLf & vbCrLf & Err.Description, _
            vbExclamation, macroName
 End Function
 
 ' ---------------------------------------------------------------- the macros' own files
-' cad.json or results.json of the project folder. A file that is not there yet gives a new one with only its header.
+' The project's cad or results file (fileName from PJ_File). A file that is not there yet gives a new one with only its header.
 ' Nothing when the file is there but cannot be read (reason in PT_LastErr): never overwrite it then.
 Public Function PJ_ReadOwn(ByVal fileName As String, ByVal schemaS As String) As Object
     Dim f As String, d As Object

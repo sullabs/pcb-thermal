@@ -526,8 +526,8 @@ End Function
 Sub RunProject()
     Dim cad As Object, cadPath As String, pcbKey As String, minSize As Double, perBody As Boolean
     Dim tolPos As Double, tolSize As Double, stepF As String, doc As Object, srcName As String
-    cadPath = PJ_Dir & "\cad.json"
-    Set cad = PJ_ReadOwn("cad.json", "pcb-thermal/cad")
+    cadPath = PJ_Dir & "\" & PJ_File("cad")
+    Set cad = PJ_ReadOwn(PJ_File("cad"), "pcb-thermal/cad")
     If cad Is Nothing Then
         PT_Msg "ImportStep did not run. Nothing was changed." & vbCrLf & vbCrLf & cadPath & " could not be read:" & vbCrLf & PT_LastErr & vbCrLf & vbCrLf & _
                "Move that file out of the folder (a copy of each day is in backup\) and run again.", vbExclamation, MACRO_NAME
@@ -636,7 +636,7 @@ Sub RunProject()
 
     Dim nLog As Long
     nLog = PJ_FlushChanges(cad)
-    If Not PJ_SaveOwn(cad, "cad.json", MACRO_NAME) Then
+    If Not PJ_SaveOwn(cad, PJ_File("cad"), MACRO_NAME) Then
         PT_Msg "ImportStep read the model but could not write" & vbCrLf & cadPath & vbCrLf & PT_LastErr & vbCrLf & vbCrLf & _
                "Nothing else was changed. Close any program that has the file open and run again.", vbExclamation, MACRO_NAME
         Exit Sub

@@ -1,6 +1,6 @@
 // Page state helpers. Pure functions, no browser access, so tools/test_w3.mjs can run them in Node.
 //
-//   newProject(name, now)                 -> a valid empty project.json
+//   newProject(name, now, filePrefix)     -> a valid empty project file; emptyCad, emptyResults: the other two
 //   setIn(obj, path, value)               -> copy of obj with path set; a blank value removes the key
 //   projectForSave(project, cad, res, now) -> what Save writes: blanks removed, savedBy, savedAt, forSolidWorks
 //   parseNumber(text, unit)               -> { value } or { error }, with the input helpers of section 13.4
@@ -37,8 +37,13 @@ export function addManualBody(project, pcbH) {
   return { project: { ...project, bodies: { ...project.bodies, ["m_" + n]: { include: true, manual: { name: "New body " + n, box, side: "Top" } } } }, key: "m_" + n };
 }
 
-export function newProject(name, now) {
-  return {
+// The cad and results files of a new project: only their header, ready for the macros.
+export const emptyCad = now => ({ schema: "pcb-thermal/cad", schemaVersion: 1, savedBy: "page " + PAGE_VERSION, savedAt: now });
+export const emptyResults = now => ({ schema: "pcb-thermal/results", schemaVersion: 1, savedBy: "page " + PAGE_VERSION, savedAt: now, runs: [] });
+
+// filePrefix (optional, with its "_") also names the CAD files the macros write.
+export function newProject(name, now, filePrefix) {
+  const p = {
     schema: "pcb-thermal/project", schemaVersion: 1, savedBy: "page " + PAGE_VERSION, savedAt: now,
     board: { name: name || "Board", ambientC: 40 },
     parts: [],
@@ -55,6 +60,8 @@ export function newProject(name, now) {
       },
     },
   };
+  if (filePrefix) p.settings.filePrefix = filePrefix;
+  return p;
 }
 
 export const blank = v => v === undefined || v === null || v === "" || (typeof v === "number" && !Number.isFinite(v));

@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "preact/hooks"
 import * as XLSX from "xlsx";
 import { html, Card } from "./ui.js";
 import { TABS, tabStates, blockingProblems } from "./tabs.js";
-import { PAGE_VERSION, isoLocal, newProject, setIn, projectForSave, historyInit, commit, undo, redo } from "./model.js";
+import { PAGE_VERSION, isoLocal, newProject, emptyCad, emptyResults, setIn, projectForSave, historyInit, commit, undo, redo } from "./model.js";
 import * as F from "./files.js";
 import * as V from "./views.js";
 import { calcProject } from "../calc/index.js";
@@ -33,7 +33,11 @@ function App() {
   const [cad, setCad] = useState({});
   const [results, setResults] = useState({ runs: [] });
   const [dir, setDir] = useState(null);           // folder handle
-  const [mode, setMode] = useState("none");       // none, folder, manual (opened by hand), empty (folder without project.json)
+  const [mode, setMode] = useState("none");       // none, folder, manual (opened by hand), empty (folder without a project file), choose (several)
+  const [pre, setPre] = useState("");             // file prefix of the open project with its "_" ("AB_"), "" for project.json
+  const [found, setFound] = useState([]);         // prefixes of the project files in the folder (choose mode)
+  const [newPre, setNewPre] = useState(store.get("initials") || "");   // new project form
+  const [newName, setNewName] = useState("");
   const [savedRef, setSavedRef] = useState(null); // the project object as last saved or loaded
   const [savedAt, setSavedAt] = useState(null);
   const [tab, setTab] = useState(Number(store.get("tab")) || 0);
@@ -67,6 +71,8 @@ function App() {
   }, [project, cad, results]);
   const calcOk = calc && !calc.error ? calc : null;
   const canSave = mode === "folder" || mode === "manual";
+  const files = F.names(pre);
+  const newPrefixOk = F.PREFIX_RE.test(newPre.trim());
   const example = mode === "example";
   const fctx = useMemo(() => (calcOk ? { project, cad, results, calc: calcOk } : null), [project, cad, results, calcOk]);
   const openExplain = useCallback((t, k = "") => setExplain(s => [...s.slice(-30), { t, k }]), []);
@@ -80,11 +86,11 @@ function App() {
   const doRedo = () => setHist(h => { const n = redo(h); if (n.did) say(n.did); return n; });
 
   // ---------- open ----------
-  const loadFiles = (pj, cj, rj, origin) => {
+  const loadFiles = (pj, cj, rj, origin, n = F.names("")) => {
     const probs = [
-      ...(pj ? schemaProblems(validateProject, "project.json", pj) : []),
-      ...(cj ? schemaProblems(validateCad, "cad.json", cj) : []),
-      ...(rj ? schemaProblems(validateResults, "results.json", rj) : []),
+      ...(pj ? schemaProblems(validateProject, n.project, pj) : []),
+      ...(cj ? schemaProblems(validateCad, n.cad, cj) : []),
+      ...(rj ? schemaProblems(validateResults, n.results, rj) : []),
     ];
     setProblems(probs);
     setHist(historyInit(pj));
@@ -92,27 +98,39 @@ function App() {
     setSavedAt(pj?.savedAt || null);
     setCad(cj || {});
     setResults(rj || { runs: [] });
-    if (pj) say(`Opened ${pj.board?.name || "project"} from ${origin}: ${pj.parts?.length ?? 0} parts${cj?.import ? `, ${cj.import.bodies?.length ?? 0} bodies` : ""}${rj?.runs?.length ? `, ${rj.runs.length} runs` : ""}.`);
+    if (pj && origin) say(`Opened ${pj.board?.name || "project"} from ${origin}: ${pj.parts?.length ?? 0} parts${cj?.import ? `, ${cj.import.bodies?.length ?? 0} bodies` : ""}${rj?.runs?.length ? `, ${rj.runs.length} runs` : ""}.`);
     if (probs.length) say("Some files do not match the format. See tab 0.", "error");
   };
 
-  const openFolder = async (handle, ask = true) => {
-    if (dirty && !confirm("You have unsaved changes. Open another folder anyway?")) return;
+  // which: the prefix to open when the folder has several projects (else the one there, or the last one used).
+  const openFolder = async (handle, ask = true, which) => {
+    if (live.current.dirty && !confirm("You have unsaved changes. Open another folder anyway?")) return;
     try {
       if (!(await F.allowed(handle, ask))) { say("The browser did not allow access to the folder.", "error"); return; }
-      const [pj, cj, rj] = await Promise.all(["project.json", "cad.json", "results.json"].map(n => F.readJson(handle, n)));
-      stamps.current = { project: pj?.stamp || 0, cad: cj?.stamp || 0, results: rj?.stamp || 0 };
+      const list = await F.listProjects(handle);
+      const remembered = store.get("pre." + handle.name);
+      const p0 = which ?? (list.length === 1 ? list[0] : list.includes(remembered) ? remembered : null);
       setDir(handle);
       setLast(handle);
-      setBackups(await F.listBackups(handle));
-      if (!pj) {
-        setMode("empty");
-        loadFiles(null, cj?.data, rj?.data, handle.name);
-        say(`${handle.name} has no project.json yet. Start a new project or make one from an old workbook.`);
+      setFound(list);
+      if (!list.length || p0 === null) {
+        stamps.current = {};
+        setPre("");
+        setBackups([]);
+        setMode(list.length ? "choose" : "empty");
+        loadFiles(null, null, null, handle.name);
+        if (!list.length) setNewName(handle.name);
+        say(list.length ? `${handle.name} has ${list.length} projects. Pick one on tab 0.` : `${handle.name} has no project yet. Type your prefix on tab 0 to start one.`);
         return;
       }
+      const n = F.names(p0);
+      const [pj, cj, rj] = await Promise.all([n.project, n.cad, n.results].map(x => F.readJson(handle, x)));
+      stamps.current = { project: pj?.stamp || 0, cad: cj?.stamp || 0, results: rj?.stamp || 0 };
+      store.set("pre." + handle.name, p0);
+      setPre(p0);
+      setBackups(await F.listBackups(handle, p0));
       setMode("folder");
-      loadFiles(pj.data, cj?.data, rj?.data, "folder " + handle.name);
+      loadFiles(pj.data, cj?.data, rj?.data, `${handle.name}\\${n.project}`, n);
     } catch (e) { say(e.message, "error"); }
   };
   const pick = async () => {
@@ -122,41 +140,77 @@ function App() {
   const openByHand = async e => {
     const files = [...e.currentTarget.files];
     const got = {};
+    let p0 = "";
     try {
       for (const f of files) {
-        const k = f.name.replace(/\.json$/i, "").replace(/ \(\d+\)$/, "");
-        if (["project", "cad", "results"].includes(k)) got[k] = JSON.parse(await f.text());
+        const n = F.nameParts(f.name.replace(/ \(\d+\)(\.json)$/i, "$1"));   // "AB_project (1).json" from a download
+        if (!n) continue;
+        got[n.kind] = JSON.parse(await f.text());
+        if (n.kind === "project") p0 = n.pre;
       }
     } catch (err) { say("A file is not valid JSON: " + err.message, "error"); return; }
-    if (!got.project) { say("Pick project.json (and cad.json and results.json if the folder has them).", "error"); return; }
+    if (!got.project) { say("Pick the project file (AB_project.json), with its cad and results files if the folder has them.", "error"); return; }
     setDir(null);
+    setPre(p0);
     setMode("manual");
-    loadFiles(got.project, got.cad, got.results, "files opened by hand");
+    loadFiles(got.project, got.cad, got.results, "files opened by hand", F.names(p0));
   };
 
   // The Raspberry Pi 4 study, built into the page, read only (design 5.3).
   const openExample = () => {
     if (dirty && !confirm("You have unsaved changes. Open the example anyway?")) return;
     setDir(null);
+    setPre("");
     setMode("example");
     loadFiles(EXAMPLE.project, EXAMPLE.cad, EXAMPLE.results, "the built-in example");
     say("This is the example study, read only. Look around; to work on your own board, choose its folder on tab 0.");
   };
 
+  // The prefix typed in the new project form, with its "_", or null (the user has been told why).
+  const newPrefix = async () => {
+    const typed = newPre.trim();
+    if (!F.PREFIX_RE.test(typed)) { say("Type a prefix first: your initials, letters, digits and - only (for example AB).", "error"); return null; }
+    const p0 = typed + "_";
+    if ((await F.listProjects(dir)).some(x => x.toLowerCase() === p0.toLowerCase())) { say(`${F.names(p0).project} is already in ${dir.name}. Use another prefix.`, "error"); return null; }
+    store.set("initials", typed);
+    return p0;
+  };
+
+  // A new project: the project file, empty cad and results files and the CAD folder, all with the prefix.
   const startNew = async () => {
-    const p = newProject(dir.name, now());
-    const steps = [];
-    for await (const [name, h] of dir.entries()) if (h.kind === "file" && /\.(step|stp)$/i.test(name)) steps.push(name);
-    if (steps.length === 1) p.board.stepFile = steps[0];
-    setMode("folder");
-    setHist(historyInit(p));
-    setSavedRef(null);
-    await save(false, p);
+    const p0 = await newPrefix();
+    if (p0 === null) return;
+    const n = F.names(p0), t = now();
+    try {
+      const p = newProject(newName.trim() || dir.name, t, p0);
+      const steps = [];
+      for await (const [name, h] of dir.entries()) if (h.kind === "file" && /\.(step|stp)$/i.test(name)) steps.push(name);
+      if (steps.length === 1) p.board.stepFile = steps[0];
+      const wrote = [];
+      if (await F.writeIfMissing(dir, n.cad, emptyCad(t))) wrote.push(n.cad);
+      if (await F.writeIfMissing(dir, n.results, emptyResults(t))) wrote.push(n.results);
+      await F.makeFolder(dir, "CAD");
+      const [cj, rj] = await Promise.all([n.cad, n.results].map(x => F.readJson(dir, x)));
+      stamps.current = { project: 0, cad: cj?.stamp || 0, results: rj?.stamp || 0 };
+      store.set("pre." + dir.name, p0);
+      setPre(p0);
+      setFound(f => [...f, p0].sort());
+      setBackups([]);
+      setMode("folder");
+      loadFiles(p, cj?.data, rj?.data, null, n);
+      setSavedRef(null);
+      if (!(await save(false, p, cj?.data, rj?.data, p0))) return;
+      say(`New project ready in ${dir.name}: ${[n.project, ...wrote].join(", ")} and the CAD folder.${steps.length === 1 ? " STEP file: " + steps[0] + "." : ""}`);
+    } catch (err) { console.error(err); say("Could not make the project: " + err.message, "error"); }
   };
 
   const fromWorkbook = async e => {
     const f = e.currentTarget.files[0];
+    e.currentTarget.value = "";
     if (!f) return;
+    const p0 = await newPrefix();
+    if (p0 === null) return;
+    const n = F.names(p0);
     try {
       const wb = XLSX.read(await f.arrayBuffer(), { type: "array", cellFormula: false, cellNF: false, cellDates: false });
       const base = f.name.replace(/\.xlsx$/i, "");
@@ -165,55 +219,63 @@ function App() {
         reports: { buildBoard: await F.readText(dir, `CAD/${base}_BuildBoard_report.txt`), buildSpreader: await F.readText(dir, `CAD/${base}_BuildSpreader_report.txt`) },
       });
       const wrote = [];
-      if (await F.writeIfMissing(dir, "cad.json", out.cad)) wrote.push("cad.json");
-      if (await F.writeIfMissing(dir, "results.json", out.results)) wrote.push("results.json");
-      const [cj, rj] = await Promise.all(["cad.json", "results.json"].map(n => F.readJson(dir, n)));
-      stamps.current = { ...stamps.current, cad: cj?.stamp || 0, results: rj?.stamp || 0 };
+      if (await F.writeIfMissing(dir, n.cad, out.cad)) wrote.push(n.cad);
+      if (await F.writeIfMissing(dir, n.results, out.results)) wrote.push(n.results);
+      await F.makeFolder(dir, "CAD");
+      const [cj, rj] = await Promise.all([n.cad, n.results].map(x => F.readJson(dir, x)));
+      stamps.current = { project: 0, cad: cj?.stamp || 0, results: rj?.stamp || 0 };
+      store.set("pre." + dir.name, p0);
+      setPre(p0);
+      setFound(x => [...x, p0].sort());
+      setBackups([]);
       setMode("folder");
-      loadFiles(out.project, cj?.data, rj?.data, f.name);
+      loadFiles(out.project, cj?.data, rj?.data, f.name, n);
       setSavedRef(null);
-      await save(false, out.project, cj?.data, rj?.data);
-      say(`Made the project from ${f.name}. Wrote ${["project.json", ...wrote].join(", ")}.${out.notes.length ? " Notes: " + out.notes.join(" ") : ""}`);
+      if (!(await save(false, out.project, cj?.data, rj?.data, p0))) return;
+      say(`Made the project from ${f.name}. Wrote ${[n.project, ...wrote].join(", ")}.${out.notes.length ? " Notes: " + out.notes.join(" ") : ""}`);
     } catch (err) { console.error(err); say("Could not read the workbook: " + err.message, "error"); }
   };
 
   // ---------- save ----------
   const live = useRef({});
-  live.current = { project, cad, results, dir, mode, dirty };
-  const save = async (auto, pIn, cIn, rIn) => {
+  live.current = { project, cad, results, dir, mode, dirty, pre };
+  // True when saved. pIn (with cIn, rIn, preIn) saves a project just made, before the page state has caught up.
+  const save = async (auto, pIn, cIn, rIn, preIn) => {
     const L = live.current;
     const p = pIn || L.project, d = L.dir;
-    if (!p) return;
+    if (!p) return false;
+    const pr = preIn ?? L.pre, fname = F.names(pr).project;
     const t = now();
     const out = projectForSave(p, cIn || L.cad, rIn || L.results, t);
-    const probs = schemaProblems(validateProject, "project.json", out);
+    const probs = schemaProblems(validateProject, fname, out);
     const refs = out.parts.map(x => x.refDes);
     const dup = [...new Set(refs.filter((x, i) => refs.indexOf(x) !== i))];
     if (dup.length) probs.push(`RefDes used by two parts: ${dup.join(", ")}. Give each part its own RefDes.`);
     if (probs.length) {
       setProblems(probs);
       if (!auto) say("Not saved: " + probs[0], "error");
-      return;
+      return false;
     }
     setProblems([]);
     try {
       if ((pIn ? "folder" : L.mode) === "folder" && d) {
-        const disk = await F.stamp(d, "project.json");
+        const disk = await F.stamp(d, fname);
         if (disk && stamps.current.project && disk !== stamps.current.project) {
-          if (auto) { say("Not saved on its own: project.json was changed outside this page. Press Save to replace it.", "error"); return; }
-          if (!confirm("project.json was changed outside this page since it was opened. Replace it with this page's version?")) return;
+          if (auto) { say(`Not saved on its own: ${fname} was changed outside this page. Press Save to replace it.`, "error"); return false; }
+          if (!confirm(`${fname} was changed outside this page since it was opened. Replace it with this page's version?`)) return false;
         }
-        const r = await F.saveProject(d, out, today());
+        const r = await F.saveProject(d, out, today(), pr);
         stamps.current.project = r.stamp;
-        if (r.backup) { say(`Backup of the old file: ${r.backup}`); setBackups(await F.listBackups(d)); }
-        if (!auto) say(`Saved project.json in ${d.name}.`);
+        if (r.backup) { say(`Backup of the old file: ${r.backup}`); setBackups(await F.listBackups(d, pr)); }
+        if (!auto) say(`Saved ${fname} in ${d.name}.`);
       } else {
-        F.download("project.json", JSON.stringify(out, null, 2) + "\n");
-        say("project.json downloaded. Put it in the project folder, over the old one.");
+        F.download(fname, JSON.stringify(out, null, 2) + "\n");
+        say(`${fname} downloaded. Put it in the project folder, over the old one.`);
       }
       setSavedRef(p);
       setSavedAt(t);
-    } catch (e) { say("Not saved: " + e.message, "error"); }
+      return true;
+    } catch (e) { say("Not saved: " + e.message, "error"); return false; }
   };
 
   // Save on its own every 30 s while there are unsaved edits (folder mode only).
@@ -222,11 +284,12 @@ function App() {
     return () => clearInterval(id);
   }, []);
 
-  // Reload cad.json and results.json when a macro has written them.
+  // Reload the cad and results files when a macro has written them.
   useEffect(() => {
     if (mode !== "folder" || !dir) return;
+    const n = F.names(pre);
     const id = setInterval(async () => {
-      for (const [name, key, set] of [["cad.json", "cad", setCad], ["results.json", "results", setResults]]) {
+      for (const [name, key, set] of [[n.cad, "cad", setCad], [n.results, "results", setResults]]) {
         try {
           const st = await F.stamp(dir, name);
           if (st === stamps.current[key]) continue;
@@ -234,20 +297,20 @@ function App() {
           stamps.current[key] = st;
           if (!r) continue;
           set(r.data);
-          say(key === "cad" ? `cad.json reloaded (${r.data.savedBy || "macro"}): ${r.data.import?.bodies?.length ?? 0} bodies${r.data.build ? ", build " + (r.data.build.date || "") : ""}.`
-            : `results.json reloaded: ${r.data.runs?.length ?? 0} runs.`);
+          say(key === "cad" ? `${name} reloaded (${r.data.savedBy || "macro"}): ${r.data.import?.bodies?.length ?? 0} bodies${r.data.build ? ", build " + (r.data.build.date || "") : ""}.`
+            : `${name} reloaded: ${r.data.runs?.length ?? 0} runs.`);
         } catch { /* half written or locked: try again in 2 s */ }
       }
       try {
-        const st = await F.stamp(dir, "project.json");
+        const st = await F.stamp(dir, n.project);
         if (st && stamps.current.project && st !== stamps.current.project && !stamps.current.warned) {
           stamps.current.warned = true;
-          say("project.json was changed outside this page. Saving here will ask before replacing it.", "error");
+          say(`${n.project} was changed outside this page. Saving here will ask before replacing it.`, "error");
         }
       } catch { /* ignore */ }
     }, 2000);
     return () => clearInterval(id);
-  }, [mode, dir]);
+  }, [mode, dir, pre]);
 
   // Keys and leaving the page.
   useEffect(() => {
@@ -268,7 +331,7 @@ function App() {
     try {
       const r = await F.readBackup(dir, name);
       setHist(h => commit(h, r.data, "Open backup " + name));
-      say(`Opened ${name}. Press Save to keep it as project.json (Ctrl+Z goes back).`);
+      say(`Opened ${name}. Press Save to keep it as ${files.project} (Ctrl+Z goes back).`);
     } catch (e) { say(e.message, "error"); }
   };
 
@@ -282,21 +345,35 @@ function App() {
       <button class="primary" onClick=${pick}>${dir ? "Choose another folder" : "Choose the project folder"}</button>
       ${last && (!dir || last.name !== dir.name) && html` <button onClick=${() => openFolder(last)}>Open ${last.name} again</button>`}
       ${dir && html`<p>Folder: <b>${dir.name}</b></p>`}
-      ${mode === "empty" && html`<div class="empty-folder">
-        <p>This folder has no <code>project.json</code> yet.</p>
-        <button class="primary" onClick=${startNew}>Start a new project here</button>
-        <label class="button">Make it from an old workbook (.xlsx)<input type="file" accept=".xlsx" hidden onChange=${fromWorkbook} /></label>
+      ${mode === "choose" && html`<div class="empty-folder">
+        <p>This folder has ${found.length} projects. Open one:</p>
+        ${found.map(x => html`<button onClick=${() => openFolder(dir, false, x)}>${F.names(x).project}</button>`)}
+      </div>`}
+      ${mode === "empty" && html`<div class="new-project">
+        <p>This folder has no project yet. Start one here. The page writes all its files, empty and ready to use.</p>
+        <div class="form">
+          <label>Prefix (your initials) <input type="text" value=${newPre} maxlength="16" placeholder="AB" style="width:7em" aria-invalid=${!!newPre.trim() && !newPrefixOk}
+            onInput=${e => setNewPre(e.currentTarget.value)} onKeyDown=${e => e.key === "Enter" && startNew()} /></label>
+          <label>Board name <input type="text" value=${newName} style="width:18em" onInput=${e => setNewName(e.currentTarget.value)} onKeyDown=${e => e.key === "Enter" && startNew()} /></label>
+        </div>
+        <p class="hint">${newPrefixOk
+          ? html`Files: ${["project", "cad", "results"].map(k => html`<code>${F.names(newPre.trim() + "_")[k]}</code>, `)}and the <code>CAD</code> folder. The prefix keeps the names unique in your file system.`
+          : "Letters, digits and - only. The prefix goes in front of every file name, so names stay unique in your file system."}</p>
+        <div class="empty-folder">
+          <button class="primary" onClick=${startNew} disabled=${!newPrefixOk}>Start a new project here</button>
+          <label class=${`button ${newPrefixOk ? "" : "disabled"}`}>Make it from an old workbook (.xlsx)<input type="file" accept=".xlsx" hidden disabled=${!newPrefixOk} onChange=${fromWorkbook} /></label>
+        </div>
       </div>`}`
-    : html`<p class="warn">This browser cannot save into a folder. Use Chrome or Edge for that. Here you can open the files by hand, and Save downloads <code>project.json</code>.</p>`}
-    <p class="hint">${F.folderSupported ? "Or open the files by hand:" : ""} <label class="button small">Open project.json, cad.json, results.json<input type="file" accept=".json" multiple hidden onChange=${openByHand} /></label></p>
+    : html`<p class="warn">This browser cannot save into a folder. Use Chrome or Edge for that. Here you can open the files by hand, and Save downloads <code>${files.project}</code>.</p>`}
+    <p class="hint">${F.folderSupported ? "Or open the files by hand:" : ""} <label class="button small">Open the project, cad and results files (.json)<input type="file" accept=".json" multiple hidden onChange=${openByHand} /></label></p>
     <p class="hint">New to this? <button class="small" onClick=${openExample}>Open the example study (Raspberry Pi 4, read only)</button></p>
     ${problems.length > 0 && html`<div class="problems"><p class="warn">Format problems (Save is refused until they are fixed):</p><ul>${problems.map(x => html`<li>${x}</li>`)}</ul></div>`}
     ${calc?.error && html`<p class="warn">The calculation stopped: ${calc.error}</p>`}
   </div>`;
-  const backupCard = mode === "folder" && backups.length > 0 && html`<p>Open a backup: ${backups.slice(0, 7).map(b => html` <button class="small" onClick=${() => openBackup(b)}>${b.slice(8, 16)}</button>`)}</p>`;
+  const backupCard = mode === "folder" && backups.length > 0 && html`<p>Open a backup: ${backups.slice(0, 7).map(b => html` <button class="small" onClick=${() => openBackup(b)}>${b.slice(-13, -5)}</button>`)}</p>`;
 
   const ctx = { project, cad, results, calc: calcOk, states, value: (t, k) => (fctx ? valueOf(fctx, t, k) : undefined), folder: example ? "built-in example (read only)" : dir?.name, edit, editFn, go: setTab, locked: st.locked || example, now, learn, openExample,
-    blocking: calcOk ? blockingProblems(project, calcOk) : [], folderCard, backupCard };
+    blocking: calcOk ? blockingProblems(project, calcOk) : [], folderCard, backupCard, files };
   const View = { project: V.ProjectTab, parts: V.PartsTab, import: V.ImportTab, link: V.LinkTab, triage: V.TriageTab, bare: V.BareTab,
     build: V.BuildTab, spreader: V.SpreaderTab, sim: V.SimTab, results: V.ResultsTab, changes: V.ChangesTab, help: V.HelpTab }[st.id];
   const needsProject = !["project", "help"].includes(st.id);
@@ -307,7 +384,7 @@ function App() {
       <span class="name">${project?.board?.name || "No project open"}</span>
       <span class=${`save ${dirty ? "dirty" : ""}`}>${!project ? "" : dirty ? "Unsaved changes" : savedAt ? "Saved " + hhmm(savedAt) : ""}</span>
       <span class="spacer"></span>
-      <button onClick=${() => save(false)} disabled=${!project || !canSave} title="Save project.json (Ctrl+S)">Save</button>
+      <button onClick=${() => save(false)} disabled=${!project || !canSave} title=${`Save ${files.project} (Ctrl+S)`}>Save</button>
       <button onClick=${doUndo} disabled=${!hist.past.length} title=${hist.past.length ? "Undo: " + hist.past[hist.past.length - 1].label + " (Ctrl+Z)" : "Nothing to undo"}>Undo</button>
       <button onClick=${doRedo} disabled=${!hist.future.length} title=${hist.future.length ? "Redo: " + hist.future[0].label + " (Ctrl+Y)" : "Nothing to redo"}>Redo</button>
       <button aria-pressed=${learn} class=${learn ? "on" : ""} onClick=${() => setLearn(!learn)} title="Show what each step is for, what to look at, and a plain reading of the results">Learn</button>
@@ -339,7 +416,7 @@ function App() {
     <${Tip} />
     <//>
     <div class="msgs" aria-live="polite">${msgs.map(m => html`<div class=${`msg ${m.kind}`} key=${m.id}>${m.text}</div>`)}</div>
-    <footer>page ${PAGE_VERSION} · ${mode === "folder" ? "saves into the folder" : mode === "manual" ? "files opened by hand: Save downloads project.json" : example ? "example study, read only" : "no folder"}</footer>`;
+    <footer>page ${PAGE_VERSION} · ${mode === "folder" ? "saves into the folder" : mode === "manual" ? "files opened by hand: Save downloads " + files.project : example ? "example study, read only" : "no folder"}</footer>`;
 }
 
 export function start(el) {

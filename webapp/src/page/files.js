@@ -1,5 +1,7 @@
 // Project folder access in Chrome and Edge (File System Access), with open and download as the fallback for
-// other browsers. The page writes only project.json (and its daily backup). cad.json and results.json are read only.
+// other browsers. Each project's files carry the user's prefix: AB_project.json, AB_cad.json, AB_results.json
+// (pre = "AB_"; pre = "" for the old names). The page writes only the project file (and its daily backup), and the
+// empty cad and results files of a new project. After that the macros own those two.
 
 export const folderSupported = typeof window !== "undefined" && "showDirectoryPicker" in window;
 
@@ -39,6 +41,25 @@ export async function allowed(handle, ask) {
   const opts = { mode: "readwrite" };
   if ((await handle.queryPermission(opts)) === "granted") return true;
   return ask ? (await handle.requestPermission(opts)) === "granted" : false;
+}
+
+// ---------- names ----------
+// pre is "" or the prefix with its "_". The prefix the user types: letters, digits and "-", up to 16.
+export const PREFIX_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,15}$/;
+export const names = pre => ({ project: pre + "project.json", cad: pre + "cad.json", results: pre + "results.json" });
+// "AB_project.json" -> { pre: "AB_", kind: "project" }; null for other names.
+export function nameParts(fileName) {
+  const m = /^(?:(.+)_)?(project|cad|results)\.json$/i.exec(fileName);
+  return m ? { pre: m[1] ? m[1] + "_" : "", kind: m[2].toLowerCase() } : null;
+}
+// The prefixes of the project files in the folder, sorted ("" for project.json).
+export async function listProjects(dir) {
+  const out = [];
+  for await (const [name, h] of dir.entries()) {
+    const n = h.kind === "file" && nameParts(name);
+    if (n && n.kind === "project") out.push(n.pre);
+  }
+  return out.sort();
 }
 
 // ---------- files ----------
@@ -82,36 +103,40 @@ async function write(dir, name, text) {
   return (await h.getFile()).lastModified;
 }
 
-// Before the first save of the day: copy the project.json on disk to backup\project_yyyymmdd.json.
-async function backupOnce(dir, day) {
-  const cur = await fileIn(dir, "project.json");
+// Before the first save of the day: copy the project file on disk to backup\<pre>project_yyyymmdd.json.
+async function backupOnce(dir, day, pre) {
+  const cur = await fileIn(dir, names(pre).project);
   if (!cur) return null;
   const bdir = await dir.getDirectoryHandle("backup", { create: true });
-  const name = `project_${day}.json`;
+  const name = `${pre}project_${day}.json`;
   if (await fileIn(bdir, name)) return null;
   await write(bdir, name, await cur.text());
   return "backup\\" + name;
 }
 
-export async function saveProject(dir, project, day) {
-  const backup = await backupOnce(dir, day);
-  const st = await write(dir, "project.json", JSON.stringify(project, null, 2) + "\n");
+export async function saveProject(dir, project, day, pre) {
+  const backup = await backupOnce(dir, day, pre);
+  const st = await write(dir, names(pre).project,JSON.stringify(project, null, 2) + "\n");
   return { stamp: st, backup };
 }
 
-// Only for a new project made from an old workbook: cad.json and results.json are written once, never over a
-// file a macro wrote.
+// Only for a new project: the cad and results files are written once, never over a file a macro wrote.
 export async function writeIfMissing(dir, name, data) {
   if (await fileIn(dir, name)) return false;
   await write(dir, name, JSON.stringify(data, null, 2) + "\n");
   return true;
 }
 
-export async function listBackups(dir) {
+// The CAD folder of a new project (the macros' default output folder).
+export async function makeFolder(dir, name) {
+  await dir.getDirectoryHandle(name, { create: true });
+}
+
+export async function listBackups(dir, pre) {
   let bdir;
   try { bdir = await dir.getDirectoryHandle("backup"); } catch { return []; }
   const out = [];
-  for await (const [name, h] of bdir.entries()) if (h.kind === "file" && /^project_\d{8}\.json$/.test(name)) out.push(name);
+  for await (const [name, h] of bdir.entries()) if (h.kind === "file" && name.startsWith(pre) && /^project_\d{8}\.json$/.test(name.slice(pre.length))) out.push(name);
   return out.sort().reverse();
 }
 export async function readBackup(dir, name) {

@@ -52,6 +52,14 @@ Excel is no longer needed to run a study. It becomes an export format (section 9
 
 One writer per file. The page and a macro never save the same file, so neither can wipe the other's work.
 
+**File names carry a prefix** (added 2026-10-19). The user's file system does not allow two files with the same name,
+so each project's files start with a prefix the user types (their initials): `AB_project.json`, `AB_cad.json`,
+`AB_results.json`, backups `backup\AB_project_yyyymmdd.json`. Start a new project on tab 0 (folder, prefix, board
+name) and the page writes all three files (cad and results with only their header) and the `CAD` folder; it also
+sets `settings.filePrefix` to `AB_` so the SolidWorks files carry it too. That first write is the only time the page
+writes the cad and results files. The macros take the prefix from the project file the user picks and use it for the
+other two. Files without a prefix (`project.json`) still open. A folder with several project files asks which one.
+
 All lengths in **mm**, temperatures in **degrees C**, power in **W**, conductivity in **W/(m K)**, resistance in
 **C/W**. The macros convert to metres at the SolidWorks boundary, as today. Every file starts with:
 

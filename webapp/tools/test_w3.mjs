@@ -8,9 +8,10 @@ import { build } from "./build.mjs";
 import { calcProject } from "../src/calc/index.js";
 import { tabStates, nextStep } from "../src/page/tabs.js";
 import {
-  newProject, setIn, projectForSave, parseNumber, historyInit, commit, undo, redo,
+  newProject, emptyCad, emptyResults, setIn, projectForSave, parseNumber, historyInit, commit, undo, redo,
   addPart, duplicatePart, deletePart, renameRefDes,
 } from "../src/page/model.js";
+import { names, nameParts, PREFIX_RE } from "../src/page/files.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ex = path.join(here, "..", "..", "example", "RaspberryPi4");
@@ -58,6 +59,19 @@ const P = read("project.json"), C = read("cad.json"), R = read("results.json");
   const s5 = states(bad, C, R);
   check(s5.bare.locked && s5.bare.reason === "Fix the problems listed on tab 4 first: U1: missing input." && s5.bare.fixTab === 4, "U1 without Vin: bare board lists it", s5.bare.reason);
   check(s5.parts.status === "attention" && s5.triage.status === "attention", "and Parts and Triage need attention");
+}
+{
+  // A new project from the page: three files with the user's prefix, all valid, and the prefix names the CAD files.
+  const p = newProject("Test board", NOW, "AB_");
+  const files = { project: projectForSave(p, emptyCad(NOW), emptyResults(NOW), NOW), cad: emptyCad(NOW), results: emptyResults(NOW) };
+  check(validateFiles(files, ajv).length === 0, "new project: project, empty cad and empty results files are valid", validateFiles(files, ajv));
+  check(p.settings.filePrefix === "AB_", "new project: settings.filePrefix is the prefix");
+  check(JSON.stringify(names("AB_")) === JSON.stringify({ project: "AB_project.json", cad: "AB_cad.json", results: "AB_results.json" }), "file names with the prefix");
+  check(JSON.stringify(nameParts("AB_project.json")) === JSON.stringify({ pre: "AB_", kind: "project" }), "AB_project.json: prefix AB_");
+  check(JSON.stringify(nameParts("x_y_cad.json")) === JSON.stringify({ pre: "x_y_", kind: "cad" }), "x_y_cad.json: prefix x_y_");
+  check(JSON.stringify(nameParts("project.json")) === JSON.stringify({ pre: "", kind: "project" }), "project.json: no prefix (old folders)");
+  check(nameParts("myproject.json") === null && nameParts("AB_project.json.bak") === null, "other names are not project files");
+  check(PREFIX_RE.test("AB") && PREFIX_RE.test("sa-2") && !PREFIX_RE.test("") && !PREFIX_RE.test("A B") && !PREFIX_RE.test("AB_") && !PREFIX_RE.test("-AB"), "prefix rule: letters, digits and -");
 }
 {
   // A new project, step by step.

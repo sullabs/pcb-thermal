@@ -15,6 +15,7 @@ import { TERMS } from "../terms/catalogue.js";
 import { LEARN } from "../terms/learn.js";
 import { nextStep, unticked } from "./tabs.js";
 import { isNum } from "../calc/util.js";
+import { names } from "./files.js";
 
 const Scroll = ({ children }) => html`<div class="scroll">${children}</div>`;
 // A definition list of [label term, value term, key, decimals, value] rows; rows whose value is blank are left out.
@@ -27,6 +28,7 @@ const date = s => (s ? s.replace("T", " ") : s);
 // ---------- 0 Project ----------
 export function ProjectTab(c) {
   const { project: p, cad, results, states, folder } = c;
+  const files = c.files || names("");
   return html`
     <${Card} title="Project folder">${c.folderCard}<//>
     ${p && html`
@@ -46,9 +48,9 @@ export function ProjectTab(c) {
       <${Card} title="Files">
         <dl class="kv">
           <dt><${L} t="file.folder" /></dt><dd><${V} t="file.folder" v=${folder || "(files opened by hand)"} /></dd>
-          <dt><${L} t="file.project" /></dt><dd><${V} t="file.project" v=${p.savedAt ? `saved ${date(p.savedAt)} by ${p.savedBy}` : "not saved yet"} /></dd>
-          <dt><${L} t="file.cad" /></dt><dd><${V} t="file.cad" v=${cad?.import ? `import ${date(cad.import.date) ?? ""}, ${cad.import.bodies?.length ?? 0} bodies${cad.build ? `; build ${date(cad.build.date) ?? ""}` : ""}` : "no import yet"} /></dd>
-          <dt><${L} t="file.results" /></dt><dd><${V} t="file.results" v=${results?.runs?.length ? `${results.runs.length} runs, last ${results.runs[results.runs.length - 1].name}` : "no runs yet"} /></dd>
+          <dt><${L} t="file.project" /></dt><dd><${V} t="file.project" v=${`${files.project}: ` + (p.savedAt ? `saved ${date(p.savedAt)} by ${p.savedBy}` : "not saved yet")} /></dd>
+          <dt><${L} t="file.cad" /></dt><dd><${V} t="file.cad" v=${`${files.cad}: ` + (cad?.import ? `import ${date(cad.import.date) ?? ""}, ${cad.import.bodies?.length ?? 0} bodies${cad.build ? `; build ${date(cad.build.date) ?? ""}` : ""}` : "no import yet")} /></dd>
+          <dt><${L} t="file.results" /></dt><dd><${V} t="file.results" v=${`${files.results}: ` + (results?.runs?.length ? `${results.runs.length} runs, last ${results.runs[results.runs.length - 1].name}` : "no runs yet")} /></dd>
         </dl>
         ${c.backupCard}
       <//>`}`;
@@ -744,7 +746,7 @@ export function HelpTab(c = {}) {
   return html`<${Card} title="Start here">
     <p>This page takes a ${marked("PCB")} from ${marked("STEP")} file to a checked thermal result. You do the engineering (power numbers, datasheet values, judging the results); the SolidWorks macros build the model and run the study.</p>
     <ol>
-      <li>Tab 0: choose the board's project folder. One folder per board. The page saves <code>project.json</code> there.</li>
+      <li>Tab 0: choose the board's project folder. One folder per board. For a new project, type your prefix (your initials) and the board name. The page then writes <code>AB_project.json</code>, <code>AB_cad.json</code>, <code>AB_results.json</code> and the <code>CAD</code> folder there (AB is the prefix). The prefix keeps file names unique.</li>
       <li>Tab 1: add each part that makes heat, with its datasheet values and its power.</li>
       <li>Tabs 2 to 9: follow the tabs in order. A grey tab says what to do first and links to it.</li>
     </ol>
@@ -757,11 +759,11 @@ export function HelpTab(c = {}) {
     <h4>Every value explains itself</h4>
     <p>Hover over any value or label (or tab to it with the keyboard) to see what it is, its unit and whether you type it or the page works it out. Click a value, or the small i next to a label, to open the Explain panel: the longer text, the formula with your numbers, the inputs (click one to walk back to it) and what uses the value. Show formulas in the top bar writes the formula under every calculated value. Words with a dotted underline are abbreviations: hover for the meaning.</p>
     <h4>Saving</h4>
-    <p>Save (Ctrl+S) writes <code>project.json</code>. While there are unsaved edits the page also saves on its own every 30 s. Before the first save of each day it copies the old file to <code>backup\\project_yyyymmdd.json</code>.</p>
+    <p>Save (Ctrl+S) writes <code>AB_project.json</code>. While there are unsaved edits the page also saves on its own every 30 s. Before the first save of each day it copies the old file to <code>backup\\AB_project_yyyymmdd.json</code>.</p>
     <h4>Undo</h4>
     <p>Ctrl+Z undoes the last edit, Ctrl+Y (or Ctrl+Shift+Z) redoes it. Undo works for the whole session, including deleted parts.</p>
     <h4>Files the macros write</h4>
-    <p>The page never writes <code>cad.json</code> or <code>results.json</code>. It checks them every 2 s and reloads them when a macro has finished.</p>
+    <p>After making them empty for a new project, the page never writes <code>AB_cad.json</code> or <code>AB_results.json</code>. It checks them every 2 s and reloads them when a macro has finished. The macros find them from the project file you pick, by the same prefix.</p>
     <p class="hint">The full help, with the heat basics and the glossary, comes with W8.</p>
   <//>`;
 }

@@ -15,7 +15,7 @@ def("const.sigma", "Stefan-Boltzmann constant", "σ", "W/(m² K⁴)", "constant"
   "A black surface at absolute temperature T radiates σ T⁴ watts per square metre. Real surfaces radiate ε times that.");
 
 // ---------- board ----------
-def("board.name", "Board name", "", "", "input", "Name of the board. Used in reports and as the start of the SolidWorks file names.");
+def("board.name", "Board name", "", "", "input", "Name of the board. Used in reports. Also the start of the SolidWorks file names when the project has no prefix (a new project uses its prefix).");
 def("board.stepFile", "STEP file", "", "", "input", "The board's STEP file, in the project folder. Import STEP reads it.",
   "Export the board from the ECAD tool with its parts as separate bodies (one per component). The name is relative to the project folder.");
 def("board.ambient", "Ambient", "Ta", "C", "input", "Air temperature around the board inside its enclosure, at the worst case.",
@@ -321,10 +321,10 @@ def("change.old", "Old", "", "", "cad", "Value before.");
 def("change.new", "New", "", "", "cad", "Value after.");
 
 // ---------- files ----------
-def("file.folder", "Folder", "", "", "input", "The project folder. One folder per board; the page saves project.json there.");
-def("file.project", "project.json", "", "", "input", "Everything you decide. Only this page writes it.");
-def("file.cad", "cad.json", "", "", "cad", "What SolidWorks knows: the import, the build, the changes. Only the macros write it.");
-def("file.results", "results.json", "", "", "run", "The simulation runs. Only the macros write it.");
+def("file.folder", "Folder", "", "", "input", "The project folder. One folder per board; the page saves the project file (<prefix>_project.json) there.");
+def("file.project", "Project file", "", "", "input", "<prefix>_project.json: everything you decide. Only this page writes it.");
+def("file.cad", "CAD file", "", "", "cad", "<prefix>_cad.json: what SolidWorks knows (the import, the build, the changes). The page makes it empty for a new project; after that only the macros write it.");
+def("file.results", "Results file", "", "", "run", "<prefix>_results.json: the simulation runs. The page makes it empty for a new project; after that only the macros write it.");
 
 def("file.partsList", "Parts list", "", "", "input", "A table of parts pasted from Excel or a text file: one row per load, the first row names the columns.",
   "Columns it reads: RefDes, Part number, Class, Package, Tj max, Rja, Rjc, Rjb, Ta override, Label, Rail, Method, Vin, Iin, Vout, Iout, Efficiency, R, Pd. Other columns are left out. Rows with the same RefDes make one part with several loads. Copy the current list to get the layout.");
