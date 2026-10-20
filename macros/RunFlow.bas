@@ -327,6 +327,12 @@ Sub main()
     End If
     ' mesh check (F2): solve at the level of tab 8, then one level finer, and store both runs as a pair
     Dim passN As Long, nPass As Long, runBase As String
+    ' goal variables are declared here, before the loop, because the second pass resets them (VBA needs Dim before use)
+    Dim peak As Object, avg As Object, gres As Object, ge As Object, gl As Object
+    Dim gname As String, gv As Double, gk As String, gref As String, grp As String
+    Dim graw As Double, hasConv As Boolean, hasRad As Boolean, gup As String, unresQ As Double, uk As Variant
+    Dim sprMax As Double, sprMin As Double, pcbMax As Double, pcbMin As Double
+    Dim hSprMax As Boolean, hSprMin As Boolean, hPcbMax As Boolean, hPcbMin As Boolean, nGoals As Long
     nPass = 1
     runBase = runName
     If ans = vbYes And fMeshCheck And fMeshLevel >= 1 And fMeshLevel < 7 Then nPass = 2
@@ -374,11 +380,6 @@ Sub main()
     End If
 
     ' ---------- goals ----------
-    Dim peak As Object, avg As Object, gres As Object, ge As Object, gl As Object
-    Dim gname As String, gv As Double, gk As String, gref As String, grp As String
-    Dim graw As Double, hasConv As Boolean, hasRad As Boolean, gup As String, unresQ As Double, uk As Variant
-    Dim sprMax As Double, sprMin As Double, pcbMax As Double, pcbMin As Double
-    Dim hSprMax As Boolean, hSprMin As Boolean, hPcbMax As Boolean, hPcbMin As Boolean, nGoals As Long
     Set peak = CreateObject("Scripting.Dictionary")
     Set avg = CreateObject("Scripting.Dictionary")
     Set gres = rh.GetGoalsCalculationResults2
