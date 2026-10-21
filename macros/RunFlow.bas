@@ -686,6 +686,7 @@ Function BuildFlowProject(ByVal asm As Object, ByVal fda As Object, ByVal heat A
     Set refObj = CreateObject("Scripting.Dictionary")      ' RefDes -> first SolidWorks component (layer bodies)
     Set compRef = CreateObject("Scripting.Dictionary")     ' component name -> RefDes
     Dim timRef As Object, fl As Object, timRest As Collection, timOk As Boolean, pth As String, wantT As Object
+    Dim fbPath As String
     Set timRef = CreateObject("Scripting.Dictionary")      ' TIM component name -> chip RefDes
     If jsonMode Then Set fl = PJ_Obj(PJ_Project, "forSolidWorks/flow")
     Set partC = New Collection: Set pcbC = New Collection: Set sprC = New Collection: Set timC = New Collection
@@ -722,14 +723,13 @@ Function BuildFlowProject(ByVal asm As Object, ByVal fda As Object, ByVal heat A
     Else
         layersS = "4"
     End If
-    ' PCB, TIMs and spreader from the page (F5); Flow's library picks when a user material is missing
+    ' PCB, TIMs and spreader from the page (F5); Flow's library picks when a user material is missing. The library
+    ' pick goes into the same feature, so the anisotropy axis of the template's PCB material (Z) is kept.
     pth = ""
     If Not fl Is Nothing Then pth = PJ_Str(fl, "pcb", "")
-    If pth = "" Then
-        SetMaterial fda, "PCB material", "Pre-Defined\Non-isotropic\PCB " & layersS & "-layers", pcbC
-    ElseIf Not SetMaterial(fda, "PCB material", pth, pcbC) Then
-        SetMaterial fda, "PCB material", "Pre-Defined\Non-isotropic\PCB " & layersS & "-layers", pcbC
-    End If
+    fbPath = "Pre-Defined\Non-isotropic\PCB " & layersS & "-layers"
+    If pth = "" Then pth = fbPath
+    SetMaterial fda, "PCB material", pth, pcbC, False, fbPath
     ' chips (F4): a calibrated block or the three layer bodies of a two-resistor chip, as forSolidWorks.flow says;
     ' every other part keeps the generic package material, and its peak is the package temperature
     Set okChip = CreateObject("Scripting.Dictionary")
@@ -783,11 +783,8 @@ Function BuildFlowProject(ByVal asm As Object, ByVal fda As Object, ByVal heat A
         pth = PJ_Str(fl, "spreaders/top", "")
         If pth = "" Then pth = PJ_Str(fl, "spreaders/bottom", "")
     End If
-    If pth = "" Then
-        SetMaterial fda, "Spreader material", sprMat, sprC
-    ElseIf Not SetMaterial(fda, "Spreader material", pth, sprC) Then
-        SetMaterial fda, "Spreader material", sprMat, sprC
-    End If
+    If pth = "" Then pth = sprMat
+    SetMaterial fda, "Spreader material", pth, sprC, False, sprMat
     Set timRest = New Collection
     Set wantT = CreateObject("Scripting.Dictionary")
     For Each it In timC
@@ -869,13 +866,13 @@ Function BuildFlowProject(ByVal asm As Object, ByVal fda As Object, ByVal heat A
     BuildFlowProject = True
 End Function
 
-' Solid material feature of the macro: material path and components. A path the database does not have is noted.
-' Solid material feature of the macro: material path and components (or bodies, byBody). True when the material
-' was set. A path the database does not have is noted; the feature is then removed, so the components fall back to
-' the material of a wider feature (Parts material) or the project default.
+' Solid material feature of the macro: material path and components (or bodies, byBody). True when matPath was set.
+' A path the database does not have is noted. With fallbackPath, that path goes into the same feature instead, so the
+' feature keeps its anisotropy axis (the API cannot set it). Without one, or when it is missing too, the feature is
+' removed and the components fall back to the material of a wider feature (Parts material) or the project default.
 Function SetMaterial(ByVal fda As Object, ByVal featName As String, ByVal matPath As String, ByVal comps As Collection, _
-                     Optional ByVal byBody As Boolean = False) As Boolean
-    Dim ft As Object, isNew As Boolean, rc As Long
+                     Optional ByVal byBody As Boolean = False, Optional ByVal fallbackPath As String = "") As Boolean
+    Dim ft As Object, isNew As Boolean, rc As Long, usedPath As String
     If matPath = "" Then
         Set ft = FeatureNamed(fda, featName)
         If Not ft Is Nothing Then ft.Delete
@@ -883,10 +880,19 @@ Function SetMaterial(ByVal fda As Object, ByVal featName As String, ByVal matPat
     End If
     Set ft = OwnFeature(fda, nikSolidMaterial, featName, comps, isNew, byBody)
     If ft Is Nothing Then Exit Function
+    usedPath = matPath
     rc = SetParamString(ft, nikPathToSolidMaterial, matPath)
     If rc <> 0 Then
-        notes.Add featName & ": " & matPath & " is not in the Flow engineering database (code " & rc & "). " & _
-                  IIf(UCase(Left$(matPath, 13)) = "USER DEFINED\", "Make it once (tab 8 lists it). ", "") & "Generic material used."
+        If fallbackPath <> "" And fallbackPath <> matPath Then
+            notes.Add featName & ": " & matPath & " is not in the Flow engineering database (code " & rc & "). " & _
+                      IIf(UCase(Left$(matPath, 13)) = "USER DEFINED\", "Make it once (tab 8 lists it). ", "") & fallbackPath & " used instead."
+            usedPath = fallbackPath
+            rc = SetParamString(ft, nikPathToSolidMaterial, fallbackPath)
+        End If
+    End If
+    If rc <> 0 Then
+        notes.Add featName & ": " & usedPath & " is not in the Flow engineering database (code " & rc & "). " & _
+                  IIf(UCase(Left$(usedPath, 13)) = "USER DEFINED\", "Make it once (tab 8 lists it). ", "") & "Generic material used."
         If Not isNew Then
             ft.Delete
             lines.Add "removed " & featName & " (material missing)"
@@ -894,10 +900,11 @@ Function SetMaterial(ByVal fda As Object, ByVal featName As String, ByVal matPat
         Exit Function
     End If
     FinishFeature fda, ft, featName, isNew
-    If isNew And (featName = "PCB material" Or InStr(matPath, "\k ") > 0) Then
+    If usedPath <> matPath Then lines.Add featName & " = " & usedPath & " (fallback)" Else lines.Add featName & " = " & usedPath
+    If isNew And (featName = "PCB material" Or InStr(usedPath, "\k ") > 0) Then
         notes.Add featName & " was made new: if its material is anisotropic, set the anisotropy axis to Z (the board normal) once in SolidWorks."
     End If
-    SetMaterial = True
+    SetMaterial = (usedPath = matPath)
 End Function
 
 ' Temperature goal of the macro (volume goal, solid temperature, kind = min, max or avg) on the components.
