@@ -34,7 +34,7 @@ export function bareBoard(project, results, rows, board, reg) {
     const r = { pdW: N(reg.parts[p.refDes].pdW) };
     const body = bodyOf(rows, p.refDes);
     r.hasBody = !!body;
-    if (body) { r.lMm = body.box.l; r.wMm = body.box.w; r.hMm = N(body.box.h); }
+    if (body) { r.lMm = body.size.l; r.wMm = body.size.w; r.hMm = N(body.box.h); }
     const L = N(r.lMm), W = N(r.wMm), H = N(r.hMm);
     r.rjcUsedCW = N(p.rjcCW) > 0 ? p.rjcCW : H > 0 && L * W > 0 && N(kParts) > 0 ? (H * 1000) / (kParts * L * W) : 0;
     const twoR = N(p.rjbCW) > 0;

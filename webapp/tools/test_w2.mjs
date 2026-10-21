@@ -228,6 +228,29 @@ for (const [xlsx, expFile] of CASES) {
   probs.push(...diff("contact R", sp.chips[1], { gapMm: 1.4, timTMm: 0.2, pedestalMm: 1.2, check: "OK" }));
   probs.push(...diff("manual face", sp, { faceZMm: 4 }));
   report("power methods, Thick TIM, Contact R, manual plate height", probs);
+
+  // A body turned in the board plane keeps its own L x W: turning U1 by 45 deg and U2 by 30 deg about their
+  // centres (the import then gives the envelope box plus rotDeg, ownL, ownW) changes no area and no temperature.
+  const ex = f => JSON.parse(fs.readFileSync(path.join(exDir, f), "utf8"));
+  const [pj, cj, rj] = ["project.json", "cad.json", "results.json"].map(ex);
+  const turnedCad = structuredClone(cj);
+  for (const [ref, deg] of [["U1", 45], ["U2", 30]]) {
+    const key = Object.keys(pj.bodies).find(k => pj.bodies[k].refDes === ref);
+    const b = turnedCad.import.bodies.find(x => x.key === key), x = b.box;
+    const a = deg * Math.PI / 180, l = x.l * Math.cos(a) + x.w * Math.sin(a), w = x.l * Math.sin(a) + x.w * Math.cos(a);
+    Object.assign(b, { rotDeg: deg, ownL: x.l, ownW: x.w });
+    b.box = { ...x, xMin: x.xMin + (x.l - l) / 2, yMin: x.yMin + (x.w - w) / 2, l, w };
+  }
+  const flat = calcProject(pj, cj, rj), turned = calcProject(pj, turnedCad, rj);
+  const tp = [];
+  for (const ref of ["U1", "U2"]) {
+    const pick = c => { const b = c.bareBoard.parts[ref], g = c.geometry.bodies.find(x => x.key === c.bodies.find(r => r.refDes === ref).key);
+      return { footprintMm2: b.footprintMm2, exposedMm2: b.exposedMm2, rSpreadCW: b.rSpreadCW, tjC: b.tjC, densityWcm2: g.densityWcm2 }; };
+    tp.push(...diff(`turned ${ref}`, pick(turned), pick(flat)));
+  }
+  tp.push(...diff("turned U1 size", turned.bodies.find(r => r.refDes === "U1").size, { l: 15, w: 15, turned: true }));
+  tp.push(...diff("turned board", turned.bareBoard.board, { riseC: flat.bareBoard.board.riseC }));
+  report("turned bodies: own L x W for every area, same Tj as unturned", tp);
 }
 
 console.log(`\n${compared} values compared`);

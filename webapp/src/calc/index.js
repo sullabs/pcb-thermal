@@ -26,7 +26,7 @@ export function calcProject(project, cad = {}, results = {}) {
   const rows = bodyTable(project, cad);
   const board = pcb(project, cad);
   const areaOf = ref => {
-    const b = bodyOf(rows, ref)?.box;
+    const b = bodyOf(rows, ref)?.size;
     return b && isNum(b.l) && isNum(b.w) && b.l * b.w > 0 ? b.l * b.w : undefined;
   };
   const reg = register(project, areaOf);

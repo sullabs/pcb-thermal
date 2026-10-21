@@ -29,7 +29,7 @@ export function thermalSolution(project, sol, rows, reg) {
     const x = inp[p.refDes] || {};
     const r = {};
     const body = bodyOf(rows, p.refDes);
-    if (body && isNum(body.box.l) && isNum(body.box.w)) r.packageMm2 = body.box.l * body.box.w;
+    if (body && isNum(body.size.l) && isNum(body.size.w)) r.packageMm2 = body.size.l * body.size.w;
     if (active(p)) {
       const q = pd(p.refDes);
       r.footprintMm2 = isNum(x.localLMm) ? (isNum(x.localWMm) ? x.localLMm * x.localWMm : undefined) : r.packageMm2;

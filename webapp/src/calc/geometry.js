@@ -12,14 +12,29 @@ export function bodyTable(project, cad) {
     const row = { key: b.key, name: ch.nameOverride || b.name, importedName: b.name, side: b.side,
       refDes: ch.refDes, include: ch.include === true, box: usedBox(b.box, ch.override) };
     if (b.rotDeg) { row.rotDeg = b.rotDeg; row.ownL = b.ownL; row.ownW = b.ownW; }
+    row.size = ownSize(row);
     rows.push(row);
   }
   for (const [key, ch] of Object.entries(project.bodies)) {
     if (!ch.manual) continue;
-    rows.push({ key, name: ch.nameOverride || ch.manual.name, side: ch.manual.side, refDes: ch.refDes,
-      include: ch.include === true, manual: true, box: usedBox(ch.manual.box, ch.override) });
+    const row = { key, name: ch.nameOverride || ch.manual.name, side: ch.manual.side, refDes: ch.refDes,
+      include: ch.include === true, manual: true, box: usedBox(ch.manual.box, ch.override) };
+    row.size = ownSize(row);
+    rows.push(row);
   }
   return rows;
+}
+
+// Footprint L x W of a body. box.l and box.w are the axis-aligned envelope (position, edges, drawing); a body
+// turned in the board plane (rotDeg, ownL, ownW from the import) has its own L x W inside it, and every area
+// uses that. Same test as PT_ShapeIsRotated in the macros: the turned shape counts only while it still fits the
+// box used, so an L or W override makes it a plain box again.
+export function ownSize(b) {
+  const x = b.box || {};
+  const a = (b.rotDeg || 0) * Math.PI / 180, c = Math.abs(Math.cos(a)), s = Math.abs(Math.sin(a));
+  const turned = Math.abs(b.rotDeg || 0) >= 0.05 && b.ownL > 0 && b.ownW > 0 && isNum(x.l) && isNum(x.w)
+    && Math.abs(b.ownL * c + b.ownW * s - x.l) <= 0.02 && Math.abs(b.ownL * s + b.ownW * c - x.w) <= 0.02;
+  return turned ? { l: b.ownL, w: b.ownW, turned } : { l: x.l, w: x.w, turned };
 }
 
 function usedBox(imported = {}, override = {}) {
@@ -69,7 +84,8 @@ export function geometryChecks(project, rows, board, reg) {
     if (isNum(b.yMin) && isNum(b.w)) out.yCentre = b.yMin + b.w / 2;
     if (r.refDes) {
       out.pdW = N(reg.parts[r.refDes]?.pdW);
-      if (N(b.l) * N(b.w) > 0) out.densityWcm2 = out.pdW / ((b.l * b.w) / 100);
+      const s = r.size;
+      if (N(s.l) * N(s.w) > 0) out.densityWcm2 = out.pdW / ((s.l * s.w) / 100);
     }
     out.check = checkOf(r, rows, refs, board);
     return out;

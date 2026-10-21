@@ -3,7 +3,7 @@
 // Top plate: its face is the underside, above the parts. Bottom plate: its face is the top side, below the
 // bottom parts (negative Z).
 
-import { bodyOf } from "./geometry.js";
+import { bodyOf, ownSize } from "./geometry.js";
 import { isNum, N } from "./util.js";
 
 export function spreaderPlate(plate, side, rows) {
@@ -33,7 +33,9 @@ export function spreaderPlate(plate, side, rows) {
       r.gapMm = top ? faceZMm - r.faceZ : r.faceZ - faceZMm;
       r.timTMm = c.heightMode === "Thick TIM" ? r.gapMm : r.gapMm - N(c.timTMm) < plate.minPedestalMm ? r.gapMm : N(c.timTMm);
       r.pedestalMm = r.gapMm - r.timTMm;
-      if (N(c.timK) > 0 && N(r.l) * N(r.w) > 0) r.timRCW = (r.timTMm * 1000) / (c.timK * r.l * r.w);
+      // TIM area is the chip's own footprint; r.l and r.w stay the envelope the pedestal is built on.
+      const z = body ? ownSize(body) : {};
+      if (N(c.timK) > 0 && N(z.l) * N(z.w) > 0) r.timRCW = (r.timTMm * 1000) / (c.timK * z.l * z.w);
     }
     r.check = chipCheck(r, c, body, top);
   }

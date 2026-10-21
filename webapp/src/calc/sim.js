@@ -14,7 +14,7 @@ export function simChips(project, rows, reg) {
     const body = bodyOf(rows, c.refDes);
     if (body) {
       r.hMm = body.box.h;
-      if (isNum(body.box.l) && isNum(body.box.w)) r.areaMm2 = body.box.l * body.box.w;
+      if (isNum(body.size.l) && isNum(body.size.w)) r.areaMm2 = body.size.l * body.size.w;
     }
     if (N(r.rjcCW) > 0 && N(r.hMm) > 0 && N(r.areaMm2) > 0) r.kz = (r.hMm * 1000) / (r.rjcCW * r.areaMm2);
     r.kxy = isNum(c.kxy) ? c.kxy : r.kz;

@@ -12,6 +12,7 @@
 //   tjBasisOf(run, ref)              -> "calibrated block" | "two-resistor" | "package" for a run's part
 
 import { isNum } from "./util.js";
+import { ownSize } from "./geometry.js";
 
 export const FLOW_DEFAULTS = { meshLevel: 4, localMesh: true, solidRefine: 3, meshCheck: false, meshCheckLimitC: 1, minTravels: 2, goalCriteriaC: 0.2 };
 
@@ -155,7 +156,7 @@ export function flowForSw(project, calc, fs) {
   const contacts = {};
   if (ct.partToPcb > 0) {
     const onPcb = fs.bodies.filter(b => Math.abs(b.box.zMin - fs.pcb.h) < 0.05 || Math.abs(b.box.zMin + b.box.h) < 0.05);
-    const a = onPcb.reduce((s, b) => s + b.box.l * b.box.w, 0);
+    const a = onPcb.reduce((s, b) => { const z = ownSize(b); return s + z.l * z.w; }, 0);
     if (a > 0) contacts.partToPcb = { rKW: ct.partToPcb / (a * 1e-6), areaMm2: a, rSpecific: ct.partToPcb };
   }
   if (ct.timToSpreader > 0 && timArea > 0) contacts.timToSpreader = { rKW: ct.timToSpreader / (timArea * 1e-6), areaMm2: timArea, rSpecific: ct.timToSpreader };

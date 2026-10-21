@@ -16,6 +16,7 @@ import { TERMS } from "../terms/catalogue.js";
 import { LEARN } from "../terms/learn.js";
 import { nextStep, unticked } from "./tabs.js";
 import { isNum } from "../calc/util.js";
+import { ownSize } from "../calc/geometry.js";
 import { names } from "./files.js";
 import { Scroll, Facts, date, shortName, pctV } from "./bits.js";
 import { SwCard } from "./swcard.js";
@@ -449,13 +450,11 @@ export function BoardDrawing({ calc }) {
     </div>`;
 }
 
-// Same test as PT_ShapeIsRotated in the macros: draw the turned shape only when it still fits the box used.
+// The turned shape is drawn only when it still fits the box used (ownSize, same test as the macros).
 function footprint(b) {
   const x = b.box, cx = x.xMin + x.l / 2, cy = x.yMin + x.w / 2;
-  const a = (b.rotDeg || 0) * Math.PI / 180, c = Math.abs(Math.cos(a)), s = Math.abs(Math.sin(a));
-  const turned = Math.abs(b.rotDeg || 0) >= 0.05 && b.ownL > 0 && b.ownW > 0
-    && Math.abs(b.ownL * c + b.ownW * s - x.l) <= 0.02 && Math.abs(b.ownL * s + b.ownW * c - x.w) <= 0.02;
-  const hx = (turned ? b.ownL : x.l) / 2, hy = (turned ? b.ownW : x.w) / 2, an = turned ? a : 0;
+  const { l, w, turned } = ownSize(b);
+  const hx = l / 2, hy = w / 2, an = turned ? b.rotDeg * Math.PI / 180 : 0;
   const pts = [[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]]
     .map(([dx, dy]) => [cx + dx * Math.cos(an) - dy * Math.sin(an), cy + dx * Math.sin(an) + dy * Math.cos(an)]);
   return { cx, cy, pts, turned, short: Math.min(hx, hy) * 2 };

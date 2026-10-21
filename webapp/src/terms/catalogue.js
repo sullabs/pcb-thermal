@@ -152,8 +152,8 @@ def("body.include", "Include", "", "", "input", "Build this body in the thermal 
 def("body.name", "Body", "", "", "cad", "Name of the body in the STEP file.");
 def("body.side", "Side", "", "", "cad", "Which face of the PCB the body sits on: Top, Bottom, Board, or Through (passes through it).");
 def("body.refDes", "Part", "", "", "input", "The part this body belongs to. Its heat goes into this body.");
-def("body.l", "L", "L", "mm", "cad", "Body size along X (from Import STEP, or the override).");
-def("body.w", "W", "W", "mm", "cad", "Body size along Y.");
+def("body.l", "L", "L", "mm", "cad", "Body length (from Import STEP, or the override). Along X, or for a body turned in the board plane its own length, not the box around it.");
+def("body.w", "W", "W", "mm", "cad", "Body width. Along Y, or for a turned body its own width.");
 def("body.h", "H", "H", "mm", "cad", "Body height along Z.");
 def("body.xMin", "X min", "", "mm", "cad", "Lowest X of the body.");
 def("body.yMin", "Y min", "", "mm", "cad", "Lowest Y of the body.");
