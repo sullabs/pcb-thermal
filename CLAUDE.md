@@ -6,6 +6,11 @@ Read `PLAN.md` first. It is the spec. This file is the short list of rules that 
 
 - SolidWorks 2023 VBA macros, delivered as `.bas` files in `src/`. The user imports each into a `.swp`
   (Tools > Macro > New, then File > Import File in the VBA editor). A `.swp` is binary; never try to write one.
+  Each macro is `PTCommon.bas` + its own module; ImportStep and BuildBoard also need `PTJson.bas` (project folder,
+  JSON files). They ask at the start: `project.json` (page) or an old workbook.
+  Normal use: all modules in one `src/PCBThermal.swp`, filled by `UpdateMacros.bas`, run from the **PCB Thermal** tab
+  that `src/SetupToolbar.cmd` writes (docs/HOWTO_TOOLBAR.md). A new `.bas` in `src/` is picked up by Update Macros, so
+  no public name may be defined in two modules. A new button needs an entry in `SetupToolbar.ps1` and a bitmap.
 - Excel template `workbook/PCB_thermal_TEMPLATE.xlsx` (plain `.xlsx`, no macros inside it). One copy per board.
   Reference case: `example/RaspberryPi4/RaspberryPi4.xlsx`. Tabs are numbered ("7 Spreader"); macros find them with `PT_Sheet`
   by the words after the number, never by the full name.
@@ -13,6 +18,39 @@ Read `PLAN.md` first. It is the spec. This file is the short list of rules that 
   SolidWorks Flow Simulation and Excel.
 - Macros talk to Excel by COM late binding (`GetObject(, "Excel.Application")`, `As Object`). No project references
   beyond the SolidWorks defaults.
+- **Direction since 2026-10-18: a web page replaces the workbook as the user interface.** Spec: `docs/WEBAPP_DESIGN.md`
+  (milestones W1 to W9). The page is one HTML file, `webapp/dist/PCB_Thermal.html`, opened from disk in Chrome or Edge,
+  with every library inside it. It writes only `project.json`; the macros write only `cad.json` and `results.json`. Schemas:
+  `webapp/schema/`. Since W7 every macro works on a project folder too (it asks at the start); old workbooks still work.
+- Page source is `webapp/src/page/` (Preact and htm, no JSX). `npm run build` in `webapp/` makes `dist/PCB_Thermal.html`;
+  commit the rebuilt file with every page change. `npm run serve` serves the repo on localhost for browser checks.
+- Node tools in `webapp/` (`npm test`, converter, validator) are for development here only. The user's PC never needs
+  Node, npm or Python: only the built HTML file ships.
+- **Branch `webpage` is the user package** (what users download): `PCB_Thermal.html` at the top, `macros\` with
+  `PCBThermal.swp`, the `.bas` files it holds (PTCommon, PTJson, ImportStep, BuildBoard, BuildSpreader, SyncFromCAD, SetupSim,
+  RunFlow, ReadResults, UpdateMacros), the Flow template `PCBThermal_Flow.fwp` (copy of `src/PCBThermal_Flow.fwp`), the toolbar setup (8 buttons) and icons, and a user `README.md`. **Every change to the page or to one of those macros must also
+  be brought to `webpage` in the same session**: copy the rebuilt `webapp/dist/PCB_Thermal.html` and the changed
+  `.bas` files there, rebuild `PCBThermal.swp` in SolidWorks (Update Macros; ask before driving SolidWorks), commit
+  and push. A macro that moves to project files joins the package (`.bas`, button in `SetupToolbar.ps1`, icons,
+  README). Its `README.md` "For developers" section repeats this.
+
+## Web app rules
+
+- Every field in the three JSON files is in `webapp/schema/`. Change the schema first, then the code, then rerun
+  `npm test` in `webapp/` (it also checks that `example/RaspberryPi4/*.json` are up to date; `node tools/test_w1.mjs --write`
+  refreshes them).
+- Fixed units in the files: mm, C, W, W/(m K), C/W. Blank values are left out, never `null`.
+- The page reads the RPi4 example as its reference case. Keep board-specific data out of `webapp/src/`, as for `.bas` files.
+- Every formula lives once, in `webapp/src/calc/` (pure functions on the three files). Port a template formula exactly;
+  `npm test` compares it with `tests/webapp/expected_*.json` (Excel's saved values). After a workbook formula change, open
+  and save the example workbook in Excel, then `npm run expected`.
+- Dark theme by default, light on request. Every value has a hover explanation from the term catalogue
+  (`webapp/src/terms/catalogue.js`). A new value on the page needs: a catalogue term, a getter in `VALUES` and, if
+  calculated, a formula in `FORMULAS` (`webapp/src/calc/formulas.js`); show it with `<V>` and label it with `<L>`.
+  `npm test` (W4) fails on a number without a term or a formula that does not give the calculated value.
+- Learn mode texts live in `webapp/src/terms/learn.js` (one entry per step tab). Values inside a sentence use `<V nofx>`.
+- The example study inside the page comes from `example/RaspberryPi4/*.json` at build time (`virtual:example`), so
+  board data stays out of `webapp/src/`. Rebuild after those files change.
 
 ## VBA rules (each one cost a failed run already)
 

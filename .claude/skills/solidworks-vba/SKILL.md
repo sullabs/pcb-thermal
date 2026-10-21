@@ -112,3 +112,13 @@ Do not crawl the whole site; the method reference is already local.
   state the model in and out are equal, so the energy balance error is |model in - model out| / larger of the two.
 - Name clash: VBA is not case sensitive. A parameter `roles` and a local `roleS` is a compile error (duplicate declaration).
   `.claude/skills/solidworks-vba/lint_vba.py` finds these (reserved names, duplicate Dim, missing ByVal, non-ASCII, CRLF).
+- Toolbars and menus cannot be made from a macro (checked 2026-10-18): `AddToolbar5`, `AddToolbarCommand2`, `AddMenuItem5` and
+  `GetCommandManager` all take the add-in cookie from `ISwAddin::ConnectToSW`; `AddToolbar5` "only operates properly when the
+  application is implemented as a .dll"; callbacks are methods of the add-in object. No VBA examples exist. API toolbars also vanish
+  when SolidWorks closes. For macros use macro buttons: `src/SetupToolbar.ps1` writes them into the registry with
+  SolidWorks closed (format in docs/HOWTO_TOOLBAR.md, found 2026-10-19).
+- A macro can reach its own VBA project: `Application.VBE` (late bound through an `Object`) works in SolidWorks 2023,
+  `VBComponents.Import` and `.Remove` work while the macro runs (tested 2026-10-19, `tests/swp/VbeProbe.bas`).
+- `SketchManager.CreateCornerRectangle` returns Empty (no sketch) when one corner is on the sketch origin and a side is under
+  about 4 mm, with or without AddToDB or DisplayWhenAdded (tested 2026-10-18). Away from the origin it works. `PT_SketchRect`
+  now draws four `CreateLine` calls instead, which work at any size. Do not use CreateCornerRectangle for part footprints.

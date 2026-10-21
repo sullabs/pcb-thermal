@@ -23,13 +23,15 @@ Reference board: Raspberry Pi 4 Model B (`Raspberry Pi 4 Model B.STEP`).
 | M4 `BuildSpreader` (plate, cuts, pedestals, TIM parts) | written, not yet run |
 | M5 `SyncFromCAD` | written; two-plate version run on RPi4_fresh 2026-10-14, 0 failed checks |
 | M6 `SetupSim` + `ReadResults` (Simulation thermal) | written, not yet run |
-| M7 Flow Simulation spike + `RunFlow` | spike done (`docs/flow_api_notes.md`), `RunFlow.bas` written, run and fixed 2026-10-01 (API Boolean quirk, 0 K goals) |
+| M7 Flow Simulation spike + `RunFlow` | spike done (`docs/flow_api_notes.md`), `RunFlow.bas` written, run and fixed 2026-10-01 (API Boolean quirk, 0 K goals); builds the whole Flow project from `PCBThermal_Flow.fwp` 2026-10-19 |
 | M8 two-resistor chip model | written in SetupSim, not yet run (docs/HOWTO_M8.md) |
+| Flow plan F0 to F8 (trustworthy Flow runs) | `docs/FLOW_PLAN.md`; done 2026-10-20: F0, F1, F2, F3, F4, F5, F6, F7, F8 (live RPi4 acceptance runs still open) |
 | Test of M1 to M6 in one session | `docs/TEST_PLAN.md` |
 | Register rebuilt with Vin/Iin/Vout/Iout/Pin/Pout/Pd, Ta, Tj, Rja/Rjc/Rjb; L and W moved to CAD geometry | done 2026-10-01, RPi4 refilled: same results |
 | ImportStep: every solid body, rotation of the board and of each body, Include = No by default, tables grow on demand (decisions 29 to 31) | compiled and run 2026-10-14 on a fresh copy (`example/RaspberryPi4/RPi4_fresh.xlsx`): 108 bodies, re-import "none", BuildBoard "Nothing changed", 0 overlaps, parts coloured. Three bugs fixed (see section 9). Rotation checks R2, R4, R6 not done |
 | Bare board simulation compared with the hand calculation (tab 6) | done 2026-10-14 (study run, energy balance 0 %). The hand and sim gap is open and not judged. Then the spreader: user-drawn outline, BuildSpreader, SetupSim and ReadResults with the spreader all run end to end on RPi4_fresh (`docs/TEST_PLAN.md`). Next: a board with heat chips on both sides to test the bottom plate in SetupSim, ReadResults per plate. SyncFromCAD (as built per plate) and tab 8b (hand check, bottom plate) done 2026-10-14 |
 | Workbook template `PCB_thermal_TEMPLATE.xlsx` (numbered tabs in workflow order, notes on every header, new `6 Bare board network`, How to, Read me) | done 2026-10-01, RPi4 data refilled into `RaspberryPi4.xlsx`: 0 differences against the old workbook |
+| Web app (page as the calculator, three JSON files, macros on JSON; milestones W1 to W9) | W1 done 2026-10-18: schemas in `webapp/schema/`, RPi4 example converted (`example/RaspberryPi4/project.json`, `cad.json`, `results.json`), `npm test` in `webapp/`. W2 done 2026-10-18: calculation module `webapp/src/calc/`, matches every calculated value of `RaspberryPi4.xlsx` and `RPi4_fresh.xlsx` (`tests/webapp/expected_*.json`). W3 done 2026-10-18: page shell `webapp/dist/PCB_Thermal.html` (`npm run build`): folder picking, save with daily backup and autosave, reload of `cad.json` and `results.json`, tabs with unlock rules and reasons, undo. W4 done 2026-10-18: term catalogue `webapp/src/terms/catalogue.js`, formulas with numbers `webapp/src/calc/formulas.js` (each checked against the calculation), hover texts, Explain panel with trace, Show formulas. W5 done 2026-10-18: tabs 1 to 5 complete (paste a parts list, body suggestions, bodies by hand, size overrides, PCB size and stack, import settings, flag limits, air and surfaces, heat paths drawing per part), Learn mode with plain readings, the RPi4 example inside the page (read only). Next: W6 macros on JSON. The workbook and current macros stay in use until W7 |
 
 Files in this folder:
 
@@ -384,7 +386,7 @@ Acceptance: AF column fills, AG shows hand minus sim, results row appended.
 
 ### 6.7 Flow Simulation (M7), stage 2
 Start with a spike: what the SW 2023 Flow Simulation API can set (heat sources, materials, ambient, goals,
-run, read goals). Expected route: user builds one Flow project once from a template; macro updates heat source
+run, read goals). Route taken 2026-10-19: the macro builds the Flow project from `PCBThermal_Flow.fwp` itself (no clicks); first route was: user builds one Flow project once from a template; macro updates heat source
 values and materials by name, runs, reads goals into `Sim results`. Output of the spike: a short note in
 `docs/flow_api_notes.md` and a revised M7 spec.
 
@@ -421,6 +423,7 @@ board (e.g. thin top and bottom layers with calibrated k, heat applied to the co
 | M7 | Flow Simulation spike, then macros | M6 |
 | M8 | Two-resistor chip model | M6 |
 | - | Hand network changes (section 7) | M4 |
+| W1 to W9 | Web app replacing the workbook as the user interface (`docs/WEBAPP_DESIGN.md`, section 12) | M6 |
 
 Run order for a new board: M2 ImportStep, M3 BuildBoard, then the **bare board** part of M6 (SetupSim, ReadResults) and the
 comparison with `6 Bare board network`, and only then M4 BuildSpreader and a second M6 run with the spreader. The bare board

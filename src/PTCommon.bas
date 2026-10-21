@@ -46,19 +46,23 @@ End Function
 
 ' Asks which workbook to use (starts at the last one used), opens it if needed and
 ' checks the tabs in needSheets ("Tab one|Tab two"). Returns Nothing if the user cancels
-' or a check fails (the user has been told why).
-Public Function PT_PickWorkbook(ByVal xl As Object, ByVal macroName As String, ByVal needSheets As String) As Object
+' or a check fails (the user has been told why). givenPath (already picked, PJ_PickSource) skips the question.
+Public Function PT_PickWorkbook(ByVal xl As Object, ByVal macroName As String, ByVal needSheets As String, _
+                                Optional ByVal givenPath As String = "") As Object
     Dim f As String, opt As Long, cfg As String, disp As String, lastF As String
-    Dim wbk As Object, s As Variant, missing As String
+    Dim wbk As Object, s As Variant, missing As String, asked As Boolean
     lastF = GetSetting(PT_APP, "Common", "Workbook", "")
     If lastF = "" Then lastF = GetSetting(PT_APP, "ImportStep", "Workbook", "")
+    If givenPath <> "" Then lastF = givenPath
     ' the workbook used last time is still open in Excel: use it without asking (close it to pick another one)
     If lastF <> "" Then
         For Each wbk In xl.Workbooks
             If StrComp(wbk.FullName, lastF, vbTextCompare) = 0 Then Set PT_PickWorkbook = wbk: Exit For
         Next
     End If
+    If PT_PickWorkbook Is Nothing And givenPath <> "" Then Set PT_PickWorkbook = xl.Workbooks.Open(givenPath)
     If PT_PickWorkbook Is Nothing Then
+        asked = True
         f = swApp.GetOpenFileName("Pick the project workbook (a copy of PCB_thermal_TEMPLATE)", lastF, _
                                   "Excel workbook (*.xlsx;*.xlsm)|*.xlsx;*.xlsm||", opt, cfg, disp)
         If f = "" Then Exit Function
@@ -69,7 +73,7 @@ Public Function PT_PickWorkbook(ByVal xl As Object, ByVal macroName As String, B
     End If
     f = PT_PickWorkbook.FullName
     If PT_PickWorkbook.ReadOnly Then
-        MsgBox "That workbook is open read-only (maybe open on another PC or in another Excel window)." & vbCrLf & _
+        PT_Msg "That workbook is open read-only (maybe open on another PC or in another Excel window)." & vbCrLf & _
                "Close it there and run again.", vbExclamation, macroName
         Set PT_PickWorkbook = Nothing: Exit Function
     End If
@@ -78,12 +82,37 @@ Public Function PT_PickWorkbook(ByVal xl As Object, ByVal macroName As String, B
         If Not PT_HasSheet(PT_PickWorkbook, CStr(s)) Then missing = missing & vbCrLf & "  " & s
     Next
     If missing <> "" Then
-        MsgBox "That workbook is missing these tabs:" & missing & vbCrLf & vbCrLf & _
+        PT_Msg "That workbook is missing these tabs:" & missing & vbCrLf & vbCrLf & _
                "Tabs found in " & PT_PickWorkbook.Name & ":" & PT_TabList(PT_PickWorkbook) & vbCrLf & vbCrLf & _
                "Pick a copy of PCB_thermal_TEMPLATE.xlsx.", vbExclamation, macroName
         Set PT_PickWorkbook = Nothing: Exit Function
     End If
     SaveSetting PT_APP, "Common", "Workbook", f
+    PT_Trace macroName & ": workbook " & f & IIf(asked, " (picked now)", " (already open, used without asking)")
+End Function
+
+' ---------------------------------------------------------------- log file
+' One line per event in %APPDATA%\PCBThermal\log.txt (the same file the add-in writes). Watch it live from PowerShell:
+'   Get-Content "$env:APPDATA\PCBThermal\log.txt" -Wait -Tail 30
+' Never stops a macro: a failed write is ignored.
+Public Sub PT_Trace(ByVal textS As String)
+    Dim dirS As String, fnum As Integer
+    On Error Resume Next
+    dirS = Environ("APPDATA") & "\" & PT_APP
+    If Dir(dirS, vbDirectory) = "" Then MkDir dirS
+    fnum = FreeFile
+    Open dirS & "\log.txt" For Append As #fnum
+    Print #fnum, Format(Now, "yyyy-mm-dd hh:nn:ss") & "  " & Replace(Replace(textS, vbCrLf, " | "), vbLf, " | ")
+    Close #fnum
+End Sub
+
+' MsgBox that also writes the text and the answer to the log file. Same arguments as MsgBox.
+Public Function PT_Msg(ByVal promptS As String, Optional ByVal btns As Long = 0, Optional ByVal titleS As String = "") As VbMsgBoxResult
+    Dim ans As VbMsgBoxResult
+    PT_Trace titleS & ": " & promptS
+    If titleS = "" Then ans = VBA.MsgBox(promptS, btns) Else ans = VBA.MsgBox(promptS, btns, titleS)
+    If (btns And 7) <> 0 Then PT_Trace "  (answer: " & Choose(ans, "OK", "Cancel", "Abort", "Retry", "Ignore", "Yes", "No") & ")"
+    PT_Msg = ans
 End Function
 
 ' One copy of the workbook per day in the folder "backup" next to it (<name>_yyyymmdd.xlsx), made before the first macro of the
@@ -126,7 +155,7 @@ Public Function PT_NeedNames(ByVal wb As Object, ByVal needNames As String, ByVa
         If PT_Rng(wb, CStr(s)) Is Nothing Then missing = missing & " " & s
     Next
     If missing <> "" Then
-        MsgBox macroName & " did not run. Nothing was changed." & vbCrLf & vbCrLf & _
+        PT_Msg macroName & " did not run. Nothing was changed." & vbCrLf & vbCrLf & _
                "The workbook has no cells named:" & missing & vbCrLf & vbCrLf & _
                "Use a copy of PCB_thermal_TEMPLATE.xlsx. For an older workbook, run SetupWorkbook (Prepare Workbook) once, " & _
                "then run " & macroName & " again.", vbExclamation, macroName
@@ -347,6 +376,12 @@ Public Function PT_LogCount() As Long
     If Not logRows Is Nothing Then PT_LogCount = logRows.Count
 End Function
 
+' Row i (1-based) of the collected change rows: Array(date, macro, key, name, RefDes, change, field, old, new, delta, checked).
+' PTJson writes them to cad.json instead of the Change log tab.
+Public Function PT_LogItem(ByVal i As Long) As Variant
+    PT_LogItem = logRows(i)
+End Function
+
 ' Writes the collected rows to the top of the Change log tab (newest on top). Returns the count.
 Public Function PT_LogFlush(ByVal wb As Object) As Long
     Dim n As Long, ws As Object, hdr As Object, outv() As Variant, i As Long, k As Long, rw As Variant
@@ -392,7 +427,7 @@ Public Function PT_RefuseIfUnchecked(ByVal wb As Object, ByVal macroName As Stri
             If shown >= 8 Then s = s & "  ..." & vbCrLf: Exit For
         End If
     Next
-    MsgBox macroName & " did not run. Nothing was changed." & vbCrLf & vbCrLf & _
+    PT_Msg macroName & " did not run. Nothing was changed." & vbCrLf & vbCrLf & _
            n & " rows on the Change log tab are not checked:" & vbCrLf & s & vbCrLf & _
            "Look at each one, type Yes in its Checked cell, save, and run again.", vbExclamation, macroName
     PT_RefuseIfUnchecked = True
@@ -622,9 +657,11 @@ End Function
 
 ' Rectangle from (x0,y0) to (x1,y1), board frame mm, on plane pl whose height is zPlane (mm).
 ' Uses the sketch's own transform, so the plane orientation does not matter. Returns the sketch feature.
+' Drawn as four lines: CreateCornerRectangle returns nothing for a rectangle with a corner on the sketch origin and a
+' side under about 4 mm (tested 2026-10-18 on SolidWorks 2023), which made small parts fail.
 Public Function PT_SketchRect(ByVal md As Object, ByVal pl As Object, ByVal x0 As Double, ByVal y0 As Double, _
                               ByVal x1 As Double, ByVal y1 As Double, ByVal zPlane As Double) As Object
-    Dim sk As Object, xf As Object, a As Variant, b As Variant, skF As Object, tryN As Long, seg As Variant, nBefore As Long
+    Dim sk As Object, xf As Object, a As Variant, b As Variant, skF As Object, tryN As Long, nBefore As Long
     nBefore = PT_CountFeatures(md, "ProfileFeature")
     For tryN = 0 To 1
         md.ClearSelection2 True
@@ -636,7 +673,10 @@ Public Function PT_SketchRect(ByVal md As Object, ByVal pl As Object, ByVal x0 A
         a = PT_ToSketch(xf, x0, y0, zPlane)
         b = PT_ToSketch(xf, x1, y1, zPlane)
         md.SketchManager.AddToDB = (tryN = 0)          ' second try: normal sketch mode
-        seg = md.SketchManager.CreateCornerRectangle(a(0), a(1), 0, b(0), b(1), 0)
+        md.SketchManager.CreateLine a(0), a(1), 0, b(0), a(1), 0
+        md.SketchManager.CreateLine b(0), a(1), 0, b(0), b(1), 0
+        md.SketchManager.CreateLine b(0), b(1), 0, a(0), b(1), 0
+        md.SketchManager.CreateLine a(0), b(1), 0, a(0), a(1), 0
         md.SketchManager.AddToDB = False
         md.SketchManager.InsertSketch True
         md.ClearSelection2 True

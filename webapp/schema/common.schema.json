@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pcb-thermal/schema/common.schema.json",
+  "title": "Shared definitions for the three project files",
+  "description": "Units are fixed: mm, degrees C, W, W/(m K), C/W. A blank value is left out of the file; null is never used.",
+  "$defs": {
+    "header": {
+      "type": "object",
+      "required": ["schema", "schemaVersion", "savedBy", "savedAt"],
+      "properties": {
+        "schema": { "type": "string", "description": "Which file this is: pcb-thermal/project, pcb-thermal/cad or pcb-thermal/results." },
+        "schemaVersion": { "const": 1 },
+        "savedBy": { "type": "string", "description": "Program and version that wrote the file, e.g. 'page 0.1.0' or 'ImportStep (VBA)'." },
+        "savedAt": { "$ref": "#/$defs/dateTime" }
+      }
+    },
+    "dateTime": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2})?$",
+      "description": "Local time, ISO 8601 without zone, e.g. 2026-10-18T11:20:00."
+    },
+    "refDes": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40,
+      "description": "Reference designator from the schematic, e.g. U1. Links a part to its body."
+    },
+    "bodyKey": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$",
+      "description": "Stable id of a body. Import STEP makes it from the body name; it stays the same on re-import. Bodies typed in by the user start with m_."
+    },
+    "mm": { "type": "number", "description": "Length in mm." },
+    "mmPos": { "type": "number", "exclusiveMinimum": 0, "description": "Length in mm, above 0." },
+    "degC": { "type": "number", "minimum": -273.15, "description": "Temperature in degrees C." },
+    "watt": { "type": "number", "minimum": 0, "description": "Power in W." },
+    "kWmK": { "type": "number", "exclusiveMinimum": 0, "description": "Thermal conductivity in W/(m K)." },
+    "cPerW": { "type": "number", "exclusiveMinimum": 0, "description": "Thermal resistance in C/W (same as K/W)." },
+    "fraction": { "type": "number", "minimum": 0, "maximum": 1 },
+    "box": {
+      "type": "object",
+      "description": "Axis aligned box in board coordinates: X along the board length, Y along its width, Z up from the PCB bottom face.",
+      "required": ["xMin", "yMin", "zMin", "l", "w", "h"],
+      "additionalProperties": false,
+      "properties": {
+        "xMin": { "$ref": "#/$defs/mm" },
+        "yMin": { "$ref": "#/$defs/mm" },
+        "zMin": { "$ref": "#/$defs/mm" },
+        "l": { "$ref": "#/$defs/mmPos", "description": "Size along X (mm)." },
+        "w": { "$ref": "#/$defs/mmPos", "description": "Size along Y (mm)." },
+        "h": { "$ref": "#/$defs/mmPos", "description": "Size along Z (mm)." }
+      }
+    },
+    "partialBox": {
+      "type": "object",
+      "description": "Some or all of a box. Used for overrides: each value given replaces the imported one.",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "xMin": { "$ref": "#/$defs/mm" },
+        "yMin": { "$ref": "#/$defs/mm" },
+        "zMin": { "$ref": "#/$defs/mm" },
+        "l": { "$ref": "#/$defs/mmPos" },
+        "w": { "$ref": "#/$defs/mmPos" },
+        "h": { "$ref": "#/$defs/mmPos" }
+      }
+    },
+    "side": { "enum": ["Top", "Bottom", "Board", "Through"], "description": "Which face of the PCB the body sits on." },
+    "heightMode": { "enum": ["Pedestal", "Thick TIM"], "description": "How the gap between chip and plate is filled: a pedestal on the plate plus a thin TIM, or a TIM that fills the whole gap." },
+    "timMode": { "enum": ["Body", "Contact R"], "description": "Body = the TIM is a solid part in the model. Contact R = the TIM is a thermal contact resistance only." },
+    "plateHeightMode": { "enum": ["Auto", "Manual"], "description": "Auto = plate face set by the tallest covered chip plus its TIM. Manual = the height typed in." },
+    "chipModel": { "enum": ["Block", "Two-resistor"], "description": "How a chip is modelled in the study: one block with a calibrated k, or a two-resistor (Rjc, Rjb) model." },
+    "tjBasis": { "enum": ["calibrated block", "two-resistor", "package"], "description": "What a simulated chip peak means: calibrated block or two-resistor core = Tj; package = the package temperature (no Rjc, or a generic material)." },
+    "studyType": { "enum": ["Thermal", "Flow"], "description": "Thermal = SolidWorks Simulation steady state. Flow = SolidWorks Flow Simulation." },
+    "surface": {
+      "type": "object",
+      "required": ["h", "emissivity"],
+      "additionalProperties": false,
+      "properties": {
+        "h": { "type": "number", "minimum": 0, "description": "Convection coefficient, W/(m2 K)." },
+        "emissivity": { "$ref": "#/$defs/fraction" }
+      }
+    },
+    "message": {
+      "type": "object",
+      "required": ["level", "text"],
+      "additionalProperties": false,
+      "properties": {
+        "level": { "enum": ["info", "warning", "error"] },
+        "text": { "type": "string" },
+        "key": { "$ref": "#/$defs/bodyKey" }
+      }
+    }
+  }
+}

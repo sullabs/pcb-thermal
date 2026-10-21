@@ -26,7 +26,11 @@ Option Explicit
 ' Outline sketch are never touched. Every change goes to the Change log tab.
 '
 ' Refuses to run while the Change log has unchecked rows.
-' Needs module PTCommon in the same macro, and a copy of PCB_thermal_TEMPLATE.xlsx.
+' Project folder (page, W7): pick <prefix>_project.json at the start. The plates come from forSolidWorks plates
+' (face height, thickness, covered chips with TIM and pedestal, clearance cuts), worked out by the page on Save.
+' The outcome goes to <prefix>_cad.json spreaderBuild, the change records to its changes. Refuses while cad.json
+' has change records not ticked on the page.
+' Needs modules PTCommon and PTJson in the same macro. Old workbooks: a copy of PCB_thermal_TEMPLATE.xlsx.
 ' =====================================================================================
 
 Const MACRO_NAME As String = "BuildSpreader"
@@ -54,18 +58,33 @@ Dim wsSide As Object                                     ' Spreader bottom tab (
 Dim rptBody As String, resMsg As String
 Dim pOx As Double, pOy As Double, pOz As Double          ' spreader part origin in board coordinates, mm (0 when it sits at the assembly origin)
 Dim nFeatAdded As Long, nFeatChanged As Long, nFeatSupp As Long, nTimAdded As Long, nTimChanged As Long, nTimSupp As Long
+Dim jsonMode As Boolean                                  ' project folder mode: the plate of the side comes from jPlate
+Dim jPlate As Object                                     ' forSolidWorks plates top or bottom of the side being built
+Dim sideRec(0 To 1) As Object                            ' cad.json spreaderBuild top and bottom of this run
 
 Sub main()
     Set swApp = Application.SldWorks
+    PT_Trace MACRO_NAME & ": started (VBA macro)."
     PT_LogReset
     Set skipped = New Collection: Set failMsgs = New Collection: Set notes = New Collection
     nFeatAdded = 0: nFeatChanged = 0: nFeatSupp = 0: nTimAdded = 0: nTimChanged = 0: nTimSupp = 0
     nT = 0: rptBody = "": resMsg = ""
+    jsonMode = False: Set jPlate = Nothing: Set sideRec(0) = Nothing: Set sideRec(1) = Nothing
+
+    ' ---------- project folder (page) or workbook ----------
+    Select Case PJ_PickSource(MACRO_NAME)
+        Case "json"
+            RunProject
+            Exit Sub
+        Case "xlsx"
+        Case Else
+            Exit Sub
+    End Select
 
     ' ---------- workbook ----------
     Dim xl As Object, wb As Object
     Set xl = PT_GetExcel()
-    Set wb = PT_PickWorkbook(xl, MACRO_NAME, "Spreader|CAD geometry|Settings|Change log")
+    Set wb = PT_PickWorkbook(xl, MACRO_NAME, "Spreader|CAD geometry|Settings|Change log", PJ_WbPath)
     If wb Is Nothing Then Exit Sub
     If Not PT_NeedNames(wb, "Spr_Chips|Spr_Cuts|Spr_ZUnder|Spr_Thickness|Geo_PCB_Used|Log_Header|Log_Unchecked|" & _
                             "Set_Prefix|Set_TolPos|Set_TolSize|Set_PartTemplate|Set_OutputFolder|Set_AsmName", MACRO_NAME) Then Exit Sub
@@ -85,7 +104,7 @@ Sub main()
     prefix = PT_SafeFile(PT_Prefix(wb))
     partTmpl = PT_Template(wb, "Set_PartTemplate", swDefaultTemplatePart)
     If partTmpl = "" Then
-        MsgBox "BuildSpreader did not run. The part template was not found. Set its full path on the Settings tab.", vbExclamation, MACRO_NAME
+        PT_Msg "BuildSpreader did not run. The part template was not found. Set its full path on the Settings tab.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
     asmPath = PT_AsmPath(wb)
@@ -93,7 +112,7 @@ Sub main()
     Set asm = PT_OpenAsm(asmPath)
     If asm Is Nothing Then
         On Error GoTo 0
-        MsgBox "BuildSpreader did not run. The thermal assembly is not there yet:" & vbCrLf & asmPath & vbCrLf & _
+        PT_Msg "BuildSpreader did not run. The thermal assembly is not there yet:" & vbCrLf & asmPath & vbCrLf & _
                "Run BuildBoard first.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
@@ -115,7 +134,7 @@ Sub main()
         nBuilt = nBuilt + res
     Next
     If nBuilt = 0 Then
-        MsgBox "BuildSpreader did nothing: no spreader part and no covered chips." & vbCrLf & _
+        PT_Msg "BuildSpreader did nothing: no spreader part and no covered chips." & vbCrLf & _
                "Mark chips Covered = Yes on the Spreader tab (top) or the Spreader bottom tab, and draw the plate outline.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
@@ -149,23 +168,242 @@ Sub main()
     If notes.Count > 0 Then s = s & notes.Count & " notes (listed in the report)." & vbCrLf
     If failMsgs.Count > 0 Then s = s & failMsgs.Count & " problems (listed in the report)." & vbCrLf
     s = s & vbCrLf & "Report: " & rptPath
-    MsgBox s, IIf(failMsgs.Count > 0, vbExclamation, vbInformation), MACRO_NAME
+    PT_Msg s, IIf(failMsgs.Count > 0, vbExclamation, vbInformation), MACRO_NAME
     Exit Sub
 
 swFail:
     If Err.Number >= vbObjectError + 34 And Err.Number <= vbObjectError + 36 Then
-        MsgBox "BuildSpreader did not run (" & IIf(bottomSide, "bottom", "top") & " spreader): " & Err.Description, vbExclamation, MACRO_NAME
+        PT_Msg "BuildSpreader did not run (" & IIf(bottomSide, "bottom", "top") & " spreader): " & Err.Description, vbExclamation, MACRO_NAME
         Exit Sub
     End If
-    MsgBox "BuildSpreader stopped in SolidWorks (" & IIf(bottomSide, "bottom", "top") & " spreader): " & Err.Description & vbCrLf & _
+    PT_Msg "BuildSpreader stopped in SolidWorks (" & IIf(bottomSide, "bottom", "top") & " spreader): " & Err.Description & vbCrLf & _
            "Nothing was saved. Close the spreader part and the assembly without saving, send this message, and run again.", _
            vbExclamation, MACRO_NAME
     Exit Sub
 xlFail:
     xl.ScreenUpdating = True
-    MsgBox "The spreader was saved, but writing the Change log failed: " & Err.Description & vbCrLf & _
+    PT_Msg "The spreader was saved, but writing the Change log failed: " & Err.Description & vbCrLf & _
            "Close any cell you are editing in Excel. The changes are listed in " & rptPath, vbExclamation, MACRO_NAME
 End Sub
+
+' ================================================================= project folder (page) mode
+' Reads forSolidWorks plates (worked out by the page on every save), builds or updates the plates and TIM parts,
+' and writes cad.json spreaderBuild (per plate: file, pedestals, TIM parts, cuts, problems) and changes.
+Sub RunProject()
+    Dim cad As Object, cadPath As String, fsDate As String, bDate As String
+    jsonMode = True
+    cadPath = PJ_Dir & "\" & PJ_File("cad")
+    Set cad = PJ_ReadOwn(PJ_File("cad"), "pcb-thermal/cad")
+    If cad Is Nothing Then
+        PT_Msg "BuildSpreader did not run. Nothing was changed." & vbCrLf & vbCrLf & cadPath & " could not be read:" & vbCrLf & PT_LastErr, _
+               vbExclamation, MACRO_NAME
+        Exit Sub
+    End If
+    If PJ_Obj(cad, "build") Is Nothing Then
+        PT_Msg "BuildSpreader did not run. Nothing was changed." & vbCrLf & vbCrLf & "There is no build in " & cadPath & "." & vbCrLf & _
+               "Run Build Board first (button 3).", vbExclamation, MACRO_NAME
+        Exit Sub
+    End If
+    If PJ_Obj(PJ_Project, "forSolidWorks/plates") Is Nothing Then
+        PT_Msg "BuildSpreader did not run. Nothing was changed." & vbCrLf & vbCrLf & _
+               "The project has no enabled spreader plate. Add one on tab 7 of the page, cover the chips, save and run again.", _
+               vbExclamation, MACRO_NAME
+        Exit Sub
+    End If
+    fsDate = PJ_Str(PJ_Project, "forSolidWorks/computedAt", "")
+    bDate = PJ_Str(cad, "build/date", "")
+    If bDate <> "" And fsDate < bDate Then
+        If PT_Msg("The page has not saved since the last Build Board (" & Replace(bDate, "T", " ") & ")." & vbCrLf & _
+                  "The plate is built from what the page worked out on its last Save (" & Replace(fsDate, "T", " ") & ")." & vbCrLf & vbCrLf & _
+                  "Build it anyway?", vbYesNo + vbQuestion, MACRO_NAME) <> vbYes Then Exit Sub
+    End If
+    If PJ_RefuseIfUnchecked(cad, MACRO_NAME) Then Exit Sub
+
+    Dim pcbL As Double, pcbW As Double, tolPos As Double, tolSize As Double
+    pcbL = PJ_Num(PJ_Project, "forSolidWorks/pcb/l", 0)
+    pcbW = PJ_Num(PJ_Project, "forSolidWorks/pcb/w", 0)
+    tolPos = PJ_Num(PJ_Project, "settings/tolPosMm", 0.05)
+    tolSize = PJ_Num(PJ_Project, "settings/tolSizeMm", 0.05)
+
+    ' ---------- assembly and files ----------
+    Dim asm As Object, asmPath As String, partTmpl As String, outDir As String, prefix As String
+    outDir = PJ_OutputFolder()
+    prefix = PT_SafeFile(PJ_Prefix())
+    partTmpl = PJ_Template("partTemplate", swDefaultTemplatePart)
+    If partTmpl = "" Then
+        PT_Msg "BuildSpreader did not run. The part template was not found. Leave it blank in the project settings to use the SolidWorks default.", _
+               vbExclamation, MACRO_NAME
+        Exit Sub
+    End If
+    asmPath = PJ_AsmPath()
+    On Error GoTo swFail
+    Set asm = PT_OpenAsm(asmPath)
+    If asm Is Nothing Then
+        On Error GoTo 0
+        PT_Msg "BuildSpreader did not run. The thermal assembly is not there:" & vbCrLf & asmPath & vbCrLf & _
+               "Run Build Board first.", vbExclamation, MACRO_NAME
+        Exit Sub
+    End If
+    PT_ActivateDoc asm
+    PT_LeaveHeatOnly asm
+    asm.ResolveAllLightWeightComponents False
+
+    ' ---------- the two sides ----------
+    Dim pass As Long, res As Long, nBuilt As Long, errs As Long, warns As Long
+    For pass = 0 To 1
+        bottomSide = (pass = 1)
+        Set jPlate = PJ_Obj(PJ_Project, "forSolidWorks/plates/" & IIf(bottomSide, "bottom", "top"))
+        If Not jPlate Is Nothing Then
+            res = DoSide(Nothing, asm, partTmpl, outDir, prefix, tolPos, tolSize, pcbL, pcbW)
+            If res < 0 Then Exit Sub
+            nBuilt = nBuilt + res
+        End If
+    Next
+    If nBuilt = 0 Then
+        On Error GoTo 0
+        PT_Msg "BuildSpreader did nothing: no spreader part and no covered chips." & vbCrLf & _
+               "Tick Covered for the chips on tab 7 of the page, save, and draw the plate outline (or let the macro make a rectangle).", _
+               vbExclamation, MACRO_NAME
+        Exit Sub
+    End If
+
+    ' ---------- TIM parts (both sides) ----------
+    SyncTims asm, partTmpl, outDir, prefix, tolPos, tolSize
+    PT_ActivateDoc asm
+    asm.ForceRebuild3 False
+    asm.Save3 PT_swSaveSilent + PT_swSaveReferenced, errs, warns
+    On Error GoTo 0
+
+    ' ---------- report, cad.json ----------
+    Dim rptPath As String, nLog As Long, sb As Object, k As Long
+    rptPath = outDir & prefix & "BuildSpreader_report.txt"
+    WriteReport rptPath, asmPath
+    Set sb = PJ_Obj(cad, "spreaderBuild")
+    If sb Is Nothing Then Set sb = PJ_Dict()
+    For k = 0 To 1
+        If Not sideRec(k) Is Nothing Then
+            PJ_Put sideRec(k), "report", rptPath
+            PJ_Put sb, IIf(k = 1, "bottom", "top"), sideRec(k)
+        End If
+    Next
+    PJ_Put cad, "spreaderBuild", sb
+    nLog = PJ_FlushChanges(cad)
+    If Not PJ_SaveOwn(cad, PJ_File("cad"), MACRO_NAME) Then
+        PT_Msg "The spreader was saved, but " & cadPath & " could not be written:" & vbCrLf & PT_LastErr & vbCrLf & vbCrLf & _
+               "The changes are listed in " & rptPath & ". Run Build Spreader again to write cad.json.", vbExclamation, MACRO_NAME
+        Exit Sub
+    End If
+
+    Dim s As String
+    s = "Written and saved to the spreader part(s) and the thermal assembly:" & vbCrLf & asmPath & vbCrLf & _
+        "and " & cadPath & " (the page reloads it on its own, tab 7 Spreader)." & vbCrLf & vbCrLf & resMsg & _
+        "Cuts and pedestals: " & nFeatAdded & " added, " & nFeatChanged & " rebuilt, " & nFeatSupp & " suppressed." & vbCrLf & _
+        "TIM parts: " & nTimAdded & " added, " & nTimChanged & " changed, " & nTimSupp & " suppressed." & vbCrLf
+    If nLog > 0 Then s = s & nLog & " change records written to cad.json. Tick them on tab 10 of the page." & vbCrLf
+    If skipped.Count > 0 Then s = s & skipped.Count & " covered chips skipped (listed in the report)." & vbCrLf
+    If notes.Count > 0 Then s = s & notes.Count & " notes (listed in the report)." & vbCrLf
+    If failMsgs.Count > 0 Then s = s & failMsgs.Count & " problems (listed in the report and on tab 7)." & vbCrLf
+    s = s & vbCrLf & "Report: " & rptPath
+    PT_Msg s, IIf(failMsgs.Count > 0, vbExclamation, vbInformation), MACRO_NAME
+    Exit Sub
+
+swFail:
+    If Err.Number >= vbObjectError + 34 And Err.Number <= vbObjectError + 36 Then
+        PT_Msg "BuildSpreader did not run (" & IIf(bottomSide, "bottom", "top") & " spreader): " & Err.Description, vbExclamation, MACRO_NAME
+        Exit Sub
+    End If
+    PT_Msg "BuildSpreader stopped in SolidWorks (" & IIf(bottomSide, "bottom", "top") & " spreader): " & Err.Description & vbCrLf & _
+           "Nothing was saved and cad.json was not changed. Close the spreader part and the assembly without saving, send this message, and run again.", _
+           vbExclamation, MACRO_NAME
+End Sub
+
+' Covered chips of jPlate. The chip box comes from forSolidWorks bodies (by key); the face toward the plate is
+' the body top for the top plate and the body bottom for the bottom plate.
+Sub ReadChipsJson()
+    Dim cl As Object, bl As Object, it As Variant, bx As Object, b As Variant, keyS As String, refD As String, n As Long, seen As Object
+    Set seen = CreateObject("Scripting.Dictionary")
+    Set cl = PJ_Obj(jPlate, "chips")
+    Set bl = PJ_Obj(PJ_Project, "forSolidWorks/bodies")
+    nCh = 0
+    If Not cl Is Nothing Then n = cl.Count
+    ReDim chRef(n): ReDim chKey(n): ReDim chBox(n, 4): ReDim chPed(n): ReDim chTim(n): ReDim chBody(n)
+    If n = 0 Then Exit Sub
+    For Each it In cl
+        refD = PJ_Str(it, "refDes", "")
+        keyS = PJ_Str(it, "key", "")
+        Set bx = Nothing
+        If Not bl Is Nothing Then
+            For Each b In bl
+                If PJ_Str(b, "key", "") = keyS Then Set bx = PJ_Obj(b, "box"): Exit For
+            Next
+        End If
+        If refD = "" Then
+        ElseIf bx Is Nothing Then
+            skipped.Add refD & ": its body " & keyS & " is not in the model (include it on tab 3 and save)"
+        ElseIf seen.Exists(UCase(refD)) Then
+            skipped.Add refD & ": listed twice, second one ignored"
+        Else
+            seen.Add UCase(refD), 1
+            chRef(nCh) = refD
+            chKey(nCh) = keyS
+            chBox(nCh, 0) = PJ_Num(bx, "xMin", 0)
+            chBox(nCh, 1) = PJ_Num(bx, "yMin", 0)
+            chBox(nCh, 2) = PJ_Num(bx, "l", 0)
+            chBox(nCh, 3) = PJ_Num(bx, "w", 0)
+            If bottomSide Then chBox(nCh, 4) = PJ_Num(bx, "zMin", 0) Else chBox(nCh, 4) = PJ_Num(bx, "zMin", 0) + PJ_Num(bx, "h", 0)
+            chPed(nCh) = PJ_Num(it, "pedestalMm", 0)
+            chTim(nCh) = PJ_Num(it, "timTMm", 0)
+            chBody(nCh) = (UCase(PJ_Str(it, "timMode", "Body")) = "BODY")
+            nCh = nCh + 1
+        End If
+    Next
+End Sub
+
+' Clearance cuts of jPlate: tall parts the plate does not cover, already grown by the XY clearance on the page.
+Sub ReadCutsJson()
+    Dim cl As Object, it As Variant, keyS As String, n As Long, seen As Object
+    Set seen = CreateObject("Scripting.Dictionary")
+    Set cl = PJ_Obj(jPlate, "cuts")
+    nCu = 0
+    If Not cl Is Nothing Then n = cl.Count
+    ReDim cuKey(n): ReDim cuName(n): ReDim cuBox(n, 3)
+    If n = 0 Then Exit Sub
+    For Each it In cl
+        keyS = PJ_Str(it, "key", "")
+        If keyS <> "" And Not seen.Exists(keyS) Then
+            seen.Add keyS, 1
+            cuKey(nCu) = keyS
+            cuName(nCu) = PJ_Str(it, "name", keyS)
+            cuBox(nCu, 0) = PJ_Num(it, "xMin", 0)
+            cuBox(nCu, 1) = PJ_Num(it, "yMin", 0)
+            cuBox(nCu, 2) = PJ_Num(it, "l", 0)
+            cuBox(nCu, 3) = PJ_Num(it, "w", 0)
+            nCu = nCu + 1
+        End If
+    Next
+End Sub
+
+' cad.json spreaderBuild record of the side just built. fail0 = problems before this side started.
+Function SideRecord(ByVal sprPath As String, ByVal prefix As String, ByVal fail0 As Long) As Object
+    Dim d As Object, tims As Collection, fl As Collection, i As Long, nPed As Long
+    Set d = PJ_Dict()
+    Set tims = New Collection
+    Set fl = New Collection
+    PJ_Put d, "date", PJ_Now()
+    PJ_Put d, "file", sprPath
+    For i = 0 To nCh - 1
+        If chPed(i) > 0.0005 Then nPed = nPed + 1
+        If chBody(i) And chTim(i) > 0.0005 Then tims.Add prefix & "TIM_" & PT_SafeFile(chRef(i)) & ".sldprt"
+    Next
+    PJ_Put d, "pedestals", nPed
+    PJ_Put d, "tims", tims
+    PJ_Put d, "cuts", nCu
+    For i = fail0 + 1 To failMsgs.Count
+        fl.Add CStr(failMsgs(i))
+    Next
+    PJ_Put d, "failures", fl
+    Set SideRecord = d
+End Function
 
 ' Builds or updates one plate (top, or bottom when bottomSide). Returns 1 built, 0 nothing to do, -1 stop the macro.
 Function DoSide(ByVal wb As Object, ByVal asm As Object, ByVal partTmpl As String, ByVal outDir As String, ByVal prefix As String, _
@@ -174,13 +412,22 @@ Function DoSide(ByVal wb As Object, ByVal asm As Object, ByVal partTmpl As Strin
     Dim sprComp As Object, md As Object, ans As VbMsgBoxResult, newRev As Boolean
     Dim sprPath As String, sprName As String, sprMsg As String, nFound As Long, errs As Long, warns As Long
     sideTxt = IIf(bottomSide, "Bottom", "Top")
-    zu = SNum(wb, "Spr_ZUnder", 0)
-    tPl = SNum(wb, "Spr_Thickness", 0)
-    ReadChips wb
-    ReadCuts wb
+    Dim fail0 As Long
+    fail0 = failMsgs.Count
+    If jsonMode Then
+        zu = PJ_Num(jPlate, "faceZMm", 0)
+        tPl = PJ_Num(jPlate, "thicknessMm", 0)
+        ReadChipsJson
+        ReadCutsJson
+    Else
+        zu = SNum(wb, "Spr_ZUnder", 0)
+        tPl = SNum(wb, "Spr_Thickness", 0)
+        ReadChips wb
+        ReadCuts wb
+    End If
     Set sprComp = FindSpreaderComp(asm, nFound, bottomSide)
     If nFound > 1 Then
-        MsgBox "BuildSpreader did not run. The assembly has " & nFound & " " & LCase(sideTxt) & " spreader parts that are not suppressed." & vbCrLf & _
+        PT_Msg "BuildSpreader did not run. The assembly has " & nFound & " " & LCase(sideTxt) & " spreader parts that are not suppressed." & vbCrLf & _
                "Select the one to complete in the assembly (click it in the tree) and run again.", vbExclamation, MACRO_NAME
         DoSide = -1
         Exit Function
@@ -191,7 +438,7 @@ Function DoSide(ByVal wb As Object, ByVal asm As Object, ByVal partTmpl As Strin
         Exit Function
     End If
     If tPl <= 0 Or (Not bottomSide And zu <= 0) Or (bottomSide And nCh = 0 And zu = 0) Then
-        MsgBox "BuildSpreader did not run (" & LCase(sideTxt) & " spreader). On its tab the plate thickness (" & tPl & ") must be above 0 and " & _
+        PT_Msg "BuildSpreader did not run (" & LCase(sideTxt) & " spreader). On its tab the plate thickness (" & tPl & ") must be above 0 and " & _
                "the face height (" & zu & ") must be set." & vbCrLf & _
                "Mark at least one chip Covered = Yes, or set the face height to Manual.", vbExclamation, MACRO_NAME
         DoSide = -1
@@ -203,7 +450,7 @@ Function DoSide(ByVal wb As Object, ByVal asm As Object, ByVal partTmpl As Strin
             notes.Add "Bottom: " & nCh & " chips are covered but there is no spreader part with Spreader and Bottom in its name. Draw its outline and run again."
             Exit Function
         End If
-        ans = MsgBox("The thermal assembly has no spreader part yet." & vbCrLf & vbCrLf & _
+        ans = PT_Msg("The thermal assembly has no spreader part yet." & vbCrLf & vbCrLf & _
                      "To draw your own: in the assembly choose Insert > Component > New Part, put 'Spreader' in its name, " & _
                      "pick the Front Plane (or a face parallel to it), sketch the outline, exit the sketch, name the sketch Outline, " & _
                      "save the part as a file, then run this macro again." & vbCrLf & vbCrLf & _
@@ -211,7 +458,7 @@ Function DoSide(ByVal wb As Object, ByVal asm As Object, ByVal partTmpl As Strin
                      "No = stop", vbYesNo + vbQuestion, MACRO_NAME)
         If ans <> vbYes Then DoSide = -1: Exit Function
         If pcbL <= 0 Or pcbW <= 0 Then
-            MsgBox "BuildSpreader did not run. CAD geometry has no PCB size.", vbExclamation, MACRO_NAME
+            PT_Msg "BuildSpreader did not run. CAD geometry has no PCB size.", vbExclamation, MACRO_NAME
             DoSide = -1
             Exit Function
         End If
@@ -310,6 +557,7 @@ Function DoSide(ByVal wb As Object, ByVal asm As Object, ByVal partTmpl As Strin
     For i = 0 To nCu - 1: rptBody = rptBody & "    " & cuName(i) & vbCrLf: Next
     rptBody = rptBody & vbCrLf
     resMsg = resMsg & sprMsg & " (" & sprName & ") Face at Z " & zu & " mm, plate " & tPl & " mm." & vbCrLf
+    If jsonMode Then Set sideRec(IIf(bottomSide, 1, 0)) = SideRecord(sprPath, prefix, fail0)
     DoSide = 1
 End Function
 

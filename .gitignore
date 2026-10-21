@@ -7,3 +7,10 @@
 CAD/
 backup/
 *.bak_*
+# Add-in build output
+addin/bin/
+addin/obj/
+addin/dist/
+
+# Web app development tools
+webapp/node_modules/

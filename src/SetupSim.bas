@@ -33,7 +33,10 @@ Option Explicit
 ' is made but not meshed or run, and the message says what to fix.
 '
 ' Refuses to run while the Change log has unchecked rows.
-' Needs module PTCommon in the same macro, and a copy of PCB_thermal_TEMPLATE.xlsx.
+' Project folder (page, W7): pick <prefix>_project.json at the start. Inputs come from forSolidWorks (heat, chip k,
+' PCB k, plates) and simSetup (mesh, surfaces, contacts); the new run, with a copy of those inputs, is added to
+' <prefix>_results.json for Read Results and tab 9 of the page.
+' Needs modules PTCommon and PTJson in the same macro. Old workbooks: a copy of PCB_thermal_TEMPLATE.xlsx.
 ' =====================================================================================
 
 Const MACRO_NAME As String = "SetupSim"
@@ -66,74 +69,50 @@ Dim pcbT As Double
 Dim kSprBot As Double, densSprBot As Double   ' bottom plate (Spreader bottom tab); same as the top plate when that tab is missing
 Dim twoRes As Object                     ' RefDes (upper) -> Array(theta jc, theta jb, layer mm, area mm2); two-resistor chips only
 Dim layerFrac As Double, kCore As Double  ' outer layer thickness as a fraction of chip height; k of the junction core
+' Inputs of the run, from the workbook (ReadWorkbook) or the project folder (ReadProjectJson)
+Dim jsonMode As Boolean
+Dim amb As Double, meshG As Double, meshF As Double, inclNonHeat As Boolean, kParts As Double
+Dim kPcbXY As Double, kPcbZ As Double, kSpr As Double, densSpr As Double, totalReg As Double
+Dim rPart As Double, rChipTim As Double, rTimSpr As Double           ' contact resistances, K m2/W
+Dim surfH(4) As Double, surfE(4) As Double, surfN(4) As String      ' spreader top, spreader other, PCB top, PCB bottom, parts
 
 Sub main()
     Set swApp = Application.SldWorks
+    PT_Trace MACRO_NAME & ": started (VBA macro)."
     Set problems = New Collection: Set notes = New Collection
+    jsonMode = False
 
-    ' ---------- workbook ----------
-    Dim xl As Object, wb As Object
-    Set xl = PT_GetExcel()
-    Set wb = PT_PickWorkbook(xl, MACRO_NAME, "Sim setup|Spreader|CAD geometry|Component register|Change log")
-    If wb Is Nothing Then Exit Sub
-    If Not PT_NeedNames(wb, "Sim_Type|Sim_RunName|Sim_Ambient|Sim_MeshGlobal|Sim_MeshFine|Sim_IncludeNonHeat|Sim_kParts|" & _
-                            "Sim_Surfaces|Sim_Contacts|Sim_Chips|Spr_Chips|Spr_k|Spr_Density|Geo_kXY|Geo_kZ|Geo_PCB_Used|" & _
-                            "Reg_RefDes|Reg_QUsed|Reg_TotalQ|Log_Header|Log_Unchecked|Set_Prefix|Set_OutputFolder|Set_AsmName", MACRO_NAME) Then Exit Sub
-    If PT_RefuseIfUnchecked(wb, MACRO_NAME) Then Exit Sub
-    xl.Calculate
-    If UCase(PT_NameStr(wb, "Sim_Type", "Thermal")) <> "THERMAL" Then
-        MsgBox "SetupSim did not run. Study type on Sim setup is " & PT_NameStr(wb, "Sim_Type", "") & _
-               ". This macro does SolidWorks Simulation thermal only; Flow Simulation comes later (M7).", vbExclamation, MACRO_NAME
-        Exit Sub
+    ' ---------- project folder (page) or workbook ----------
+    Dim xl As Object, wb As Object, res As Object, resPath As String
+    Select Case PJ_PickSource(MACRO_NAME)
+        Case "json"
+            jsonMode = True
+        Case "xlsx"
+        Case Else
+            Exit Sub
+    End Select
+    If jsonMode Then
+        resPath = PJ_Dir & "\" & PJ_File("results")
+        Set res = PJ_ReadOwn(PJ_File("results"), "pcb-thermal/results")
+        If res Is Nothing Then
+            PT_Msg "SetupSim did not run. Nothing was changed." & vbCrLf & vbCrLf & resPath & " could not be read:" & vbCrLf & PT_LastErr, _
+                   vbExclamation, MACRO_NAME
+            Exit Sub
+        End If
+        If Not ReadProjectJson() Then Exit Sub
+    Else
+        Set xl = PT_GetExcel()
+        Set wb = PT_PickWorkbook(xl, MACRO_NAME, "Sim setup|Spreader|CAD geometry|Component register|Change log", PJ_WbPath)
+        If wb Is Nothing Then Exit Sub
+        If Not ReadWorkbook(xl, wb) Then Exit Sub
     End If
-
-    Dim amb As Double, meshG As Double, meshF As Double, inclNonHeat As Boolean, kParts As Double
-    Dim kPcbXY As Double, kPcbZ As Double, kSpr As Double, densSpr As Double, totalReg As Double
-    amb = PT_NameNum(wb, "Sim_Ambient", 25)
-    meshG = PT_NameNum(wb, "Sim_MeshGlobal", 3)
-    meshF = PT_NameNum(wb, "Sim_MeshFine", 0.5)
-    inclNonHeat = (UCase(PT_NameStr(wb, "Sim_IncludeNonHeat", "Yes")) <> "NO")
-    kParts = PT_NameNum(wb, "Sim_kParts", 0.5)
-    layerFrac = PT_NameNum(wb, "Sim_LayerFrac", 0.1)
-    kCore = PT_NameNum(wb, "Sim_kCore", 100)
-    If layerFrac <= 0 Or layerFrac >= 0.45 Or kCore <= 0 Then
-        MsgBox "SetupSim did not run. On Sim setup the outer layer thickness must be above 0 and below 0.45 (fraction of the chip height) " & _
-               "and the core k above 0.", vbExclamation, MACRO_NAME
-        Exit Sub
-    End If
-    kPcbXY = PT_NameNum(wb, "Geo_kXY", 0)
-    kPcbZ = PT_NameNum(wb, "Geo_kZ", 0)
-    kSpr = PT_NameNum(wb, "Spr_k", 0)
-    densSpr = PT_NameNum(wb, "Spr_Density", 2700)
-    kSprBot = kSpr: densSprBot = densSpr
-    Dim wsBot As Object, rB As Object
-    Set wsBot = PT_Sheet(wb, "Spreader bottom")
-    If Not wsBot Is Nothing Then
-        On Error Resume Next
-        Set rB = wsBot.Names("Spr_k").RefersToRange
-        If Not rB Is Nothing Then kSprBot = PT_Num(rB.Cells(1, 1).Value, kSpr)
-        Set rB = Nothing
-        Set rB = wsBot.Names("Spr_Density").RefersToRange
-        If Not rB Is Nothing Then densSprBot = PT_Num(rB.Cells(1, 1).Value, densSpr)
-        On Error GoTo 0
-    End If
-    pcbT =PT_Num(PT_Rng(wb, "Geo_PCB_Used").Cells(3, 1).Value, 0)
-    totalReg = PT_NameNum(wb, "Reg_TotalQ", 0)
-    If meshG <= 0 Or meshF <= 0 Or kParts <= 0 Or kPcbXY <= 0 Or kPcbZ <= 0 Or kSpr <= 0 Then
-        MsgBox "SetupSim did not run. Mesh sizes, k of parts without heat, PCB k (CAD geometry D19:D20) and spreader k " & _
-               "must all be above 0.", vbExclamation, MACRO_NAME
-        Exit Sub
-    End If
-    ReadHeat wb
-    ReadChips wb
-    ReadTims wb
 
     ' ---------- assembly, configuration ----------
     Dim asm As Object, asmPath As String
-    asmPath = PT_AsmPath(wb)
+    If jsonMode Then asmPath = PJ_AsmPath() Else asmPath = PT_AsmPath(wb)
     Set asm = PT_OpenAsm(asmPath)
     If asm Is Nothing Then
-        MsgBox "SetupSim did not run. No thermal assembly at" & vbCrLf & asmPath & vbCrLf & "Run BuildBoard first.", vbExclamation, MACRO_NAME
+        PT_Msg "SetupSim did not run. No thermal assembly at" & vbCrLf & asmPath & vbCrLf & "Run BuildBoard first.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
     PT_ActivateDoc asm
@@ -149,14 +128,19 @@ Sub main()
         Set tagIdx = Nothing
     End If
     ' Bare board study: no spreader in the assembly (not built yet, or suppressed with its TIMs).
-    ' The chip rows of the Spreader tab are then ignored and the chip tops lose heat to air.
-    Dim itB As Variant, hasSpr As Boolean
+    ' The chip rows of the spreader are then ignored and the chip tops lose heat to air.
+    Dim itB As Variant, hasSpr As Boolean, sprFiles As Collection, sprNm As String
+    Set sprFiles = New Collection
     For Each itB In tag
-        If itB(0) = "Spreader" Then hasSpr = True
+        If itB(0) = "Spreader" Then
+            hasSpr = True
+            sprNm = itB(3).GetPathName
+            sprFiles.Add Mid(sprNm, InStrRev(sprNm, "\") + 1)
+        End If
     Next
     If Not hasSpr Then
         timK.RemoveAll: timR.RemoveAll: timBody.RemoveAll: pedH.RemoveAll
-        notes.Add "Bare board study: no spreader in the assembly, so the Spreader tab chip rows were ignored."
+        notes.Add "Bare board study: no spreader in the assembly, so the spreader chips were ignored."
     End If
 
     ' ---------- Simulation ----------
@@ -164,7 +148,7 @@ Sub main()
     Set simDoc = PT_GetSimDoc(asm)
     If simDoc Is Nothing Then
         ProgressEnd
-        MsgBox "SetupSim did not run. SolidWorks Simulation is not available." & vbCrLf & _
+        PT_Msg "SetupSim did not run. SolidWorks Simulation is not available." & vbCrLf & _
                "Turn it on in Tools > Add-Ins > SOLIDWORKS Simulation, then run again.", vbExclamation, MACRO_NAME
         Exit Sub
     End If
@@ -183,8 +167,8 @@ Sub main()
     Dim applied As Double
     Progress "SetupSim: heat, contacts, surfaces", 40
     applied = ApplyHeat(study)
-    ApplyContacts study, wb
-    ApplySurfaces study, wb, amb
+    ApplyContacts study
+    ApplySurfaces study, amb
 
     ' ---------- mesh and run, only when nothing is missing ----------
     Dim ran As Boolean, runErr As Long
@@ -206,23 +190,45 @@ Sub main()
     asm.Save3 PT_swSaveSilent, errC, k
     On Error GoTo 0
 
-    ' ---------- Excel ----------
-    On Error GoTo xlFail
-    xl.ScreenUpdating = False
-    PT_Rng(wb, "Sim_RunName").Value = runName
-    xl.ScreenUpdating = True
-    wb.Save
-    On Error GoTo 0
-
     ' ---------- report ----------
     Dim rptPath As String, s As String, it As Variant, n As Long
-    rptPath = PT_OutputFolder(wb) & PT_SafeFile(PT_Prefix(wb)) & "SetupSim_" & runName & ".txt"
+    If jsonMode Then
+        rptPath = PJ_OutputFolder() & PT_SafeFile(PJ_Prefix()) & "SetupSim_" & runName & ".txt"
+    Else
+        rptPath = PT_OutputFolder(wb) & PT_SafeFile(PT_Prefix(wb)) & "SetupSim_" & runName & ".txt"
+    End If
     WriteReport rptPath, asmPath, runName, applied, totalReg, ran
-    s = "Study " & runName & " made in" & vbCrLf & asmPath & vbCrLf & "(run name written to Sim setup, " & wb.Name & ")" & vbCrLf & vbCrLf & _
-        "Heat applied " & Round(applied, 3) & " W, register total " & Round(totalReg, 3) & " W." & vbCrLf & _
-        IIf(hasSpr, "", "Bare board study (no spreader). Compare it on the Bare board network tab." & vbCrLf)
+
+    ' ---------- run name: results file (page) or Sim setup (workbook) ----------
+    If jsonMode Then
+        Dim runs As Object, rr As Object
+        Set rr = NewRun(runName, asmPath, sprFiles, ran, rptPath, study)
+        Set runs = PJ_Obj(res, "runs")
+        If runs Is Nothing Then Set runs = New Collection
+        runs.Add rr
+        PJ_Put res, "runs", runs
+        If Not PJ_SaveOwn(res, PJ_File("results"), MACRO_NAME) Then
+            PT_Msg "The study " & runName & " was made, but " & resPath & " could not be written:" & vbCrLf & PT_LastErr & vbCrLf & _
+                   "Read Results will not find the run. Run SetupSim again.", vbExclamation, MACRO_NAME
+            Exit Sub
+        End If
+    Else
+        On Error GoTo xlFail
+        xl.ScreenUpdating = False
+        PT_Rng(wb, "Sim_RunName").Value = runName
+        xl.ScreenUpdating = True
+        wb.Save
+        On Error GoTo 0
+    End If
+
+    Dim whereS As String
+    If jsonMode Then whereS = "(run written to " & resPath & ", tab 9 of the page)" Else whereS = "(run name written to Sim setup, " & wb.Name & ")"
+    s = "Study " & runName & " made in" & vbCrLf & asmPath & vbCrLf & _
+        whereS & vbCrLf & vbCrLf & _
+        "Heat applied " & Round(applied, 3) & " W, " & IIf(jsonMode, "page", "register") & " total " & Round(totalReg, 3) & " W." & vbCrLf & _
+        IIf(hasSpr, "", "Bare board study (no spreader). Compare it with the bare board hand check (tab 5)." & vbCrLf)
     If ran Then
-        s = s & "Meshed and solved. Next: run ReadResults." & vbCrLf
+        s = s & "Meshed and solved. Next: run Read Results (button 8)." & vbCrLf
     ElseIf problems.Count > 0 Then
         s = s & "NOT meshed or run. Fix these and run SetupSim again:" & vbCrLf
         For Each it In problems
@@ -232,18 +238,240 @@ Sub main()
         Next
     End If
     s = s & vbCrLf & "Report: " & rptPath
-    MsgBox s, IIf(ran, vbInformation, vbExclamation), MACRO_NAME
+    PT_Msg s, IIf(ran, vbInformation, vbExclamation), MACRO_NAME
     Exit Sub
 
 swFail:
     ProgressEnd
-    MsgBox "SetupSim stopped in SolidWorks: " & Err.Description & vbCrLf & _
+    PT_Msg "SetupSim stopped in SolidWorks: " & Err.Description & vbCrLf & _
            "A half-made study may be in the Simulation tree: delete it, send this message, and run again.", vbExclamation, MACRO_NAME
     Exit Sub
 xlFail:
     xl.ScreenUpdating = True
-    MsgBox "The study was made, but writing the run name to Excel failed: " & Err.Description, vbExclamation, MACRO_NAME
+    PT_Msg "The study was made, but writing the run name to Excel failed: " & Err.Description, vbExclamation, MACRO_NAME
 End Sub
+
+' ================================================================= inputs
+' Workbook: the named cells of Sim setup, Spreader, CAD geometry and the register. False = stop (the user was told).
+Function ReadWorkbook(ByVal xl As Object, ByVal wb As Object) As Boolean
+    If Not PT_NeedNames(wb, "Sim_Type|Sim_RunName|Sim_Ambient|Sim_MeshGlobal|Sim_MeshFine|Sim_IncludeNonHeat|Sim_kParts|" & _
+                            "Sim_Surfaces|Sim_Contacts|Sim_Chips|Spr_Chips|Spr_k|Spr_Density|Geo_kXY|Geo_kZ|Geo_PCB_Used|" & _
+                            "Reg_RefDes|Reg_QUsed|Reg_TotalQ|Log_Header|Log_Unchecked|Set_Prefix|Set_OutputFolder|Set_AsmName", MACRO_NAME) Then Exit Function
+    If PT_RefuseIfUnchecked(wb, MACRO_NAME) Then Exit Function
+    xl.Calculate
+    If UCase(PT_NameStr(wb, "Sim_Type", "Thermal")) <> "THERMAL" Then
+        PT_Msg "SetupSim did not run. Study type on Sim setup is " & PT_NameStr(wb, "Sim_Type", "") & _
+               ". This macro does SolidWorks Simulation thermal only; use RunFlow for Flow Simulation.", vbExclamation, MACRO_NAME
+        Exit Function
+    End If
+    amb = PT_NameNum(wb, "Sim_Ambient", 25)
+    meshG = PT_NameNum(wb, "Sim_MeshGlobal", 3)
+    meshF = PT_NameNum(wb, "Sim_MeshFine", 0.5)
+    inclNonHeat = (UCase(PT_NameStr(wb, "Sim_IncludeNonHeat", "Yes")) <> "NO")
+    kParts = PT_NameNum(wb, "Sim_kParts", 0.5)
+    layerFrac = PT_NameNum(wb, "Sim_LayerFrac", 0.1)
+    kCore = PT_NameNum(wb, "Sim_kCore", 100)
+    kPcbXY = PT_NameNum(wb, "Geo_kXY", 0)
+    kPcbZ = PT_NameNum(wb, "Geo_kZ", 0)
+    kSpr = PT_NameNum(wb, "Spr_k", 0)
+    densSpr = PT_NameNum(wb, "Spr_Density", 2700)
+    kSprBot = kSpr: densSprBot = densSpr
+    Dim wsBot As Object, rB As Object, rv As Variant, sv As Variant, g As Long
+    Set wsBot = PT_Sheet(wb, "Spreader bottom")
+    If Not wsBot Is Nothing Then
+        On Error Resume Next
+        Set rB = wsBot.Names("Spr_k").RefersToRange
+        If Not rB Is Nothing Then kSprBot = PT_Num(rB.Cells(1, 1).Value, kSpr)
+        Set rB = Nothing
+        Set rB = wsBot.Names("Spr_Density").RefersToRange
+        If Not rB Is Nothing Then densSprBot = PT_Num(rB.Cells(1, 1).Value, densSpr)
+        On Error GoTo 0
+    End If
+    pcbT = PT_Num(PT_Rng(wb, "Geo_PCB_Used").Cells(3, 1).Value, 0)
+    totalReg = PT_NameNum(wb, "Reg_TotalQ", 0)
+    sv = PT_Rng(wb, "Sim_Surfaces").Value
+    For g = 0 To 4
+        surfH(g) = PT_Num(sv(g + 1, 2), 0): surfE(g) = PT_Num(sv(g + 1, 3), 0): surfN(g) = PT_Str(sv(g + 1, 1))
+    Next
+    If Not InputsOk("on Sim setup", "CAD geometry D19:D20") Then Exit Function
+    ReadHeat wb
+    ReadChips wb
+    ReadTims wb
+    ReadWorkbook = True
+End Function
+
+' Project folder: forSolidWorks (worked out by the page on Save) and simSetup. False = stop (the user was told).
+Function ReadProjectJson() As Boolean
+    Dim cad As Object, ss As Object, g As Long, grp As Variant, nm As Variant
+    Set cad = PJ_ReadOwn(PJ_File("cad"), "pcb-thermal/cad")
+    If cad Is Nothing Then
+        PT_Msg "SetupSim did not run. " & PJ_File("cad") & " could not be read:" & vbCrLf & PT_LastErr, vbExclamation, MACRO_NAME
+        Exit Function
+    End If
+    If PJ_Obj(PJ_Project, "forSolidWorks") Is Nothing Or PJ_Obj(PJ_Project, "simSetup") Is Nothing Then
+        PT_Msg "SetupSim did not run. The project has no simulation setup or no worked out numbers yet." & vbCrLf & _
+               "Open the page, check tab 8 (Simulation setup), press Save and run again.", vbExclamation, MACRO_NAME
+        Exit Function
+    End If
+    If PJ_RefuseIfUnchecked(cad, MACRO_NAME) Then Exit Function
+    Set ss = PJ_Obj(PJ_Project, "simSetup")
+    If UCase(PJ_Str(ss, "studyType", "Thermal")) <> "THERMAL" Then
+        PT_Msg "SetupSim did not run. The study type on tab 8 of the page is " & PJ_Str(ss, "studyType", "") & "." & vbCrLf & _
+               "This button makes SolidWorks Simulation thermal studies. For Flow use Run Flow Simulation (button 7).", vbExclamation, MACRO_NAME
+        Exit Function
+    End If
+    If PJ_Str(cad, "build/inputsHash", "") <> "" And PJ_Str(cad, "build/inputsHash", "") <> PJ_Str(PJ_Project, "forSolidWorks/inputsHash", "") Then
+        If PT_Msg("The PCB or the bodies changed on the page after the last Build Board." & vbCrLf & _
+                  "The study would use the old model. Run Build Board first to update it." & vbCrLf & vbCrLf & _
+                  "Make the study on the old model anyway?", vbYesNo + vbQuestion, MACRO_NAME) <> vbYes Then Exit Function
+    End If
+    amb = PJ_Num(PJ_Project, "forSolidWorks/ambientC", 25)
+    meshG = PJ_Num(ss, "meshGlobalMm", 3)
+    meshF = PJ_Num(ss, "meshFineMm", 0.5)
+    inclNonHeat = PJ_Bool(ss, "includePartsWithoutHeat", True)
+    kParts = PJ_Num(ss, "kPartsWithoutHeat", 0.5)
+    layerFrac = PJ_Num(ss, "layerFrac", 0.1)
+    kCore = PJ_Num(ss, "kCore", 100)
+    kPcbXY = PJ_Num(PJ_Project, "forSolidWorks/pcb/kxy", 0)
+    kPcbZ = PJ_Num(PJ_Project, "forSolidWorks/pcb/kz", 0)
+    pcbT = PJ_Num(PJ_Project, "forSolidWorks/pcb/h", 0)
+    ' plate material; the bottom plate falls back to the top one, a board without plates gets aluminium (unused)
+    kSpr = PJ_Num(PJ_Project, "forSolidWorks/plates/top/k", PJ_Num(PJ_Project, "forSolidWorks/plates/bottom/k", 167))
+    densSpr = PJ_Num(PJ_Project, "forSolidWorks/plates/top/densityKgM3", PJ_Num(PJ_Project, "forSolidWorks/plates/bottom/densityKgM3", 2700))
+    kSprBot = PJ_Num(PJ_Project, "forSolidWorks/plates/bottom/k", kSpr)
+    densSprBot = PJ_Num(PJ_Project, "forSolidWorks/plates/bottom/densityKgM3", densSpr)
+    rPart = PJ_Num(ss, "contacts/partToPcb", 0)
+    rChipTim = PJ_Num(ss, "contacts/chipToTim", 0)
+    rTimSpr = PJ_Num(ss, "contacts/timToSpreader", 0)
+    grp = Array("spreaderTop", "spreaderOther", "pcbTop", "pcbBottom", "parts")
+    nm = Array("Spreader top", "Spreader other", "PCB top", "PCB bottom and sides", "Parts")
+    For g = 0 To 4
+        surfH(g) = PJ_Num(ss, "surfaces/" & grp(g) & "/h", 0)
+        surfE(g) = PJ_Num(ss, "surfaces/" & grp(g) & "/emissivity", 0)
+        surfN(g) = nm(g)
+    Next
+    If Not InputsOk("on tab 8 of the page", "tab 3 PCB stack") Then Exit Function
+    ReadHeatJson
+    ReadChipsJson
+    ReadTimsJson
+    ReadProjectJson = True
+End Function
+
+' The checks both sources share. whereS: where the user fixes them.
+Function InputsOk(ByVal whereS As String, ByVal pcbWhere As String) As Boolean
+    If layerFrac <= 0 Or layerFrac >= 0.45 Or kCore <= 0 Then
+        PT_Msg "SetupSim did not run. " & whereS & " the outer layer thickness must be above 0 and below 0.45 (share of the chip height) " & _
+               "and the core k above 0.", vbExclamation, MACRO_NAME
+        Exit Function
+    End If
+    If meshG <= 0 Or meshF <= 0 Or kParts <= 0 Or kPcbXY <= 0 Or kPcbZ <= 0 Or kSpr <= 0 Then
+        PT_Msg "SetupSim did not run. Mesh sizes and k of parts without heat (" & whereS & "), PCB k (" & pcbWhere & ") and spreader k " & _
+               "must all be above 0.", vbExclamation, MACRO_NAME
+        Exit Function
+    End If
+    InputsOk = True
+End Function
+
+Sub ReadHeatJson()
+    Dim h As Object, it As Variant
+    Set heatQ = CreateObject("Scripting.Dictionary")
+    totalReg = 0
+    Set h = PJ_Obj(PJ_Project, "forSolidWorks/heat")
+    If h Is Nothing Then Exit Sub
+    For Each it In h.Keys
+        If PJ_Num(h, CStr(it), 0) > 0 And Not heatQ.Exists(UCase(CStr(it))) Then
+            heatQ.Add UCase(CStr(it)), PJ_Num(h, CStr(it), 0)
+            totalReg = totalReg + PJ_Num(h, CStr(it), 0)
+        End If
+    Next
+End Sub
+
+Sub ReadChipsJson()
+    Dim cl As Object, it As Variant, key As String, kz As Double, kxy As Double, thJc As Double, thJb As Double
+    Set chipKz = CreateObject("Scripting.Dictionary")
+    Set chipKxy = CreateObject("Scripting.Dictionary")
+    Set twoRes = CreateObject("Scripting.Dictionary")
+    Set cl = PJ_Obj(PJ_Project, "forSolidWorks/chips")
+    If cl Is Nothing Then Exit Sub
+    For Each it In cl
+        key = UCase(PJ_Str(it, "refDes", ""))
+        If key <> "" And Not chipKz.Exists(key) Then
+            If UCase(PJ_Str(it, "model", "Block")) = "TWO-RESISTOR" Then
+                thJc = PJ_Num(it, "rjcCW", 0)
+                thJb = PJ_Num(it, "rjbCW", 0)
+                If thJc > 0 And thJb > 0 And heatQ.Exists(key) Then
+                    If Not twoRes.Exists(key) Then twoRes.Add key, Array(thJc, thJb, 0#, 0#)
+                Else
+                    notes.Add key & ": two-resistor needs Rjc, Rjb and heat; built as a calibrated block."
+                End If
+            End If
+            kz = PJ_Num(it, "kz", 0)
+            kxy = PJ_Num(it, "kxy", 0)
+            If kz > 0 Then
+                If kxy <= 0 Then kxy = kz
+                chipKz.Add key, kz
+                chipKxy.Add key, kxy
+            End If
+        End If
+    Next
+End Sub
+
+' Covered chips of both plates: TIM k, TIM R (contact resistance mode), body or not, pedestal height.
+Sub ReadTimsJson()
+    Dim pass As Long, cl As Object, it As Variant, key As String
+    Set timK = CreateObject("Scripting.Dictionary"): Set timR = CreateObject("Scripting.Dictionary")
+    Set timBody = CreateObject("Scripting.Dictionary"): Set pedH = CreateObject("Scripting.Dictionary")
+    For pass = 0 To 1
+        Set cl = PJ_Obj(PJ_Project, "forSolidWorks/plates/" & IIf(pass = 0, "top", "bottom") & "/chips")
+        If Not cl Is Nothing Then
+            For Each it In cl
+                key = UCase(PJ_Str(it, "refDes", ""))
+                If key <> "" And Not timK.Exists(key) Then
+                    timK.Add key, PJ_Num(it, "timK", 0)
+                    timR.Add key, PJ_Num(it, "timRCW", 0)
+                    timBody.Add key, (UCase(PJ_Str(it, "timMode", "Body")) = "BODY")
+                    pedH.Add key, PJ_Num(it, "pedestalMm", 0)
+                End If
+            Next
+        End If
+    Next
+End Sub
+
+' results.json run for a new study, with a copy of the inputs it was made from (design 3.3).
+Function NewRun(ByVal runName As String, ByVal asmPath As String, ByVal sprFiles As Collection, ByVal ran As Boolean, _
+                ByVal rptPath As String, ByVal study As Object) As Object
+    Dim d As Object, msh As Object, inp As Object, nl As Collection, it As Variant, nodes As Long, elems As Long
+    Set d = PJ_Dict()
+    PJ_Put d, "name", runName
+    PJ_Put d, "date", PJ_Now()
+    PJ_Put d, "studyType", "Thermal"
+    PJ_Put d, "study", runName
+    PJ_Put d, "status", IIf(ran, "solved", "set up")
+    PJ_Put d, "assembly", asmPath
+    If sprFiles.Count > 0 Then PJ_Put d, "spreaderFiles", sprFiles
+    Set msh = PJ_Dict()
+    PJ_Put msh, "globalMm", meshG
+    PJ_Put msh, "fineMm", meshF
+    If ran Then
+        On Error Resume Next
+        nodes = study.Mesh.NodeCount
+        elems = study.Mesh.ElementCount
+        On Error GoTo 0
+        If nodes > 0 Then PJ_Put msh, "nodes", nodes
+        If elems > 0 Then PJ_Put msh, "elements", elems
+    End If
+    PJ_Put d, "mesh", msh
+    Set inp = PJ_Dict()
+    PJ_Put inp, "forSolidWorks", PJ_Obj(PJ_Project, "forSolidWorks")
+    PJ_Put inp, "simSetup", PJ_Obj(PJ_Project, "simSetup")
+    PJ_Put d, "inputs", inp
+    PJ_Put d, "report", rptPath
+    Set nl = New Collection
+    For Each it In problems: nl.Add "Problem: " & CStr(it): Next
+    For Each it In notes: nl.Add CStr(it): Next
+    If nl.Count > 0 Then PJ_Put d, "notes", nl
+    Set NewRun = d
+End Function
 
 ' ================================================================= Excel side
 Sub ReadHeat(ByVal wb As Object)
@@ -604,14 +832,12 @@ Function ApplyHeat(ByVal study As Object) As Double
 End Function
 
 ' ================================================================= contacts
-Sub ApplyContacts(ByVal study As Object, ByVal wb As Object)
-    Dim cm As Object, rv As Variant, rPart As Double, rChipTim As Double, rTimSpr As Double
+Sub ApplyContacts(ByVal study As Object)
+    Dim cm As Object
     Dim it As Variant, c As Object, bx As Variant, refU As String, fA As Object, fB As Object, spr As Object, tims As Object
     Dim sprBot As Object, sprUse As Object, chipBot As Boolean
     Set cm = study.ContactManager
     cm.SetGlobalContact swsBondedThermal, 0
-    rv = PT_Rng(wb, "Sim_Contacts").Value
-    rPart = PT_Num(rv(1, 2), 0): rChipTim = PT_Num(rv(2, 2), 0): rTimSpr = PT_Num(rv(3, 2), 0)
 
     Dim pcb As Object
     Set tims = CreateObject("Scripting.Dictionary")
@@ -714,8 +940,8 @@ Sub ResistanceSet(ByVal cm As Object, ByVal fSrc As Object, ByVal fTgt As Object
 End Sub
 
 ' ================================================================= convection and radiation
-Sub ApplySurfaces(ByVal study As Object, ByVal wb As Object, ByVal amb As Double)
-    Dim sv As Variant, g As Long, groups(4) As Collection, it As Variant, c As Object, md As Object
+Sub ApplySurfaces(ByVal study As Object, ByVal ambC As Double)
+    Dim g As Long, groups(4) As Collection, it As Variant, c As Object, md As Object
     Dim faces As Collection, fc As Object, nm As String, refU As String, bx As Variant, onTop As Boolean, onBottom As Boolean
     For g = 0 To 4: Set groups(g) = New Collection: Next
     For Each it In tag
@@ -761,9 +987,8 @@ Sub ApplySurfaces(ByVal study As Object, ByVal wb As Object, ByVal amb As Double
                 Next
         End Select
     Next
-    sv = PT_Rng(wb, "Sim_Surfaces").Value
     For g = 0 To 4
-        If groups(g).Count > 0 Then SurfaceLoads study, groups(g), PT_Num(sv(g + 1, 2), 0), PT_Num(sv(g + 1, 3), 0), amb, PT_Str(sv(g + 1, 1))
+        If groups(g).Count > 0 Then SurfaceLoads study, groups(g), surfH(g), surfE(g), ambC, surfN(g)
     Next
     notes.Add "PCB top and bottom faces get convection over their whole area, including where parts sit (small error)."
 End Sub
@@ -784,7 +1009,7 @@ Function InnerFace(ByVal fc As Object, ByVal bx As Variant) As Boolean
 End Function
 
 Sub SurfaceLoads(ByVal study As Object, ByVal faces As Collection, ByVal h As Double, ByVal eps As Double, _
-                 ByVal amb As Double, ByVal groupName As String)
+                 ByVal ambC As Double, ByVal groupName As String)
     Dim lbc As Object, arr As Variant, cv As Object, rd As Object, errC As Long
     Set lbc = study.LoadsAndRestraintsManager
     arr = PT_ToArray(faces)
@@ -796,7 +1021,7 @@ Sub SurfaceLoads(ByVal study As Object, ByVal faces As Collection, ByVal h As Do
             cv.ConvectionBeginEdit
             cv.Unit = swsUnitSI
             cv.ConvectionCoefficient = h
-            cv.BulkAmbientTemperature = amb + 273.15          ' SI units: kelvin
+            cv.BulkAmbientTemperature = ambC + 273.15          ' SI units: kelvin
             errC = cv.ConvectionEndEdit
             If errC <> 0 Then problems.Add "Convection on " & groupName & " could not be set (error " & errC & ")"
         End If
@@ -810,7 +1035,7 @@ Sub SurfaceLoads(ByVal study As Object, ByVal faces As Collection, ByVal h As Do
             rd.Unit = swsUnitSI
             rd.Emmisivity = eps
             rd.ViewFactor = 1
-            rd.AmbientTemperature = amb + 273.15
+            rd.AmbientTemperature = ambC + 273.15
             errC = rd.RadiationEndEdit
             If errC <> 0 Then problems.Add "Radiation on " & groupName & " could not be set (error " & errC & ")"
         End If

@@ -1,0 +1,1245 @@
+{
+  "schema": "pcb-thermal/project",
+  "schemaVersion": 1,
+  "savedBy": "convert_workbook 0.1.0",
+  "savedAt": "2026-10-18T12:00:00",
+  "importedFrom": {
+    "file": "RaspberryPi4.xlsx",
+    "date": "2026-10-18T12:00:00",
+    "notes": [
+      "U3: 4 register rows became one part with 4 loads.",
+      "Sim results: run PT_20261001_0001 is listed twice; the later row was kept."
+    ]
+  },
+  "board": {
+    "name": "RaspberryPi4",
+    "ambientC": 40,
+    "stepFile": "Raspberry Pi 4 Model B.STEP",
+    "measuredInputPowerW": 6.9,
+    "notes": "ASSUMPTIONS FOR THIS EXAMPLE (Raspberry Pi 4 Model B, full CPU load, board in a closed case)\nValues are illustrative, chosen to be plausible and to exercise every flag. Replace with datasheet or measured values for real work.\nL x W for U1, U2, U4, U5, U6 and J1 are the body sizes in 'Raspberry Pi 4 Model B.STEP'. U3 uses the STEP body (5.4 mm). L1, L2 are not in the STEP.\nU1: VDD_CORE about 0.88 V at 3.6 A under full load. θja 14 °C/W is a bare-board, still-air estimate; T max 85 °C is the throttle point.\nU3 (PMIC) has one row per output rail, as the Q methods tab asks. Each row's density, share and margin are for that rail only; the package total is the sum of the four rows (about 1.04 W).\nU3 buck efficiencies are read at the stated load, not the headline peak. Buck input is the 5V0 rail (5.1 V).\nU6: average current at a mixed Wi-Fi duty cycle. New class 'RF / wireless module' added on the Q methods tab (row 34).\nL1, L2: I squared R on DCR only; core loss not included. No θja, so their margin is not checked, only density.\nJ1: R is the VBUS plus GND contact loop resistance (0.03 Ω). Measured board input power on the Rail budget tab is 5.1 V x 1.35 A = 6.9 W."
+  },
+  "parts": [
+    {
+      "id": "p1",
+      "refDes": "U1",
+      "partNumber": "BCM2711B0 SoC",
+      "class": "Processor / SoC",
+      "package": "FCBGA, lidded",
+      "tjMaxC": 85,
+      "rjaCW": 14,
+      "rjcCW": 0.5,
+      "loads": [
+        {
+          "id": "p1l1",
+          "rail": "VDD_CORE",
+          "vinV": 0.88,
+          "iinA": 3.6
+        }
+      ]
+    },
+    {
+      "id": "p2",
+      "refDes": "U2",
+      "partNumber": "LPDDR4 4 GB (D9WHV)",
+      "class": "Memory",
+      "package": "FBGA-200",
+      "tjMaxC": 85,
+      "rjaCW": 25,
+      "rjcCW": 4,
+      "loads": [
+        {
+          "id": "p2l1",
+          "rail": "VDD2_1V1",
+          "vinV": 1.1,
+          "iinA": 0.45
+        }
+      ]
+    },
+    {
+      "id": "p3",
+      "refDes": "U3",
+      "partNumber": "MxL7704",
+      "class": "PMIC",
+      "package": "QFN-44",
+      "tjMaxC": 125,
+      "rjaCW": 30,
+      "rjcCW": 2,
+      "loads": [
+        {
+          "id": "p3l1",
+          "label": "buck1 > VDD_CORE",
+          "rail": "5V0",
+          "vinV": 5.1,
+          "voutV": 0.88,
+          "ioutA": 3.6,
+          "efficiency": 0.85
+        },
+        {
+          "id": "p3l2",
+          "label": "buck2 > 3V3",
+          "rail": "5V0",
+          "vinV": 5.1,
+          "voutV": 3.3,
+          "ioutA": 0.75,
+          "efficiency": 0.9
+        },
+        {
+          "id": "p3l3",
+          "label": "buck3 > 1V8",
+          "rail": "5V0",
+          "vinV": 5.1,
+          "voutV": 1.8,
+          "ioutA": 0.3,
+          "efficiency": 0.85
+        },
+        {
+          "id": "p3l4",
+          "label": "buck4 > VDD2_1V1",
+          "rail": "5V0",
+          "vinV": 5.1,
+          "voutV": 1.1,
+          "ioutA": 0.55,
+          "efficiency": 0.85
+        }
+      ]
+    },
+    {
+      "id": "p4",
+      "refDes": "U4",
+      "partNumber": "VL805-Q6 USB 3.0 host",
+      "class": "USB / interface IC",
+      "package": "QFN-68",
+      "tjMaxC": 105,
+      "rjaCW": 28,
+      "rjcCW": 8,
+      "loads": [
+        {
+          "id": "p4l1",
+          "rail": "3V3",
+          "vinV": 3.3,
+          "iinA": 0.25
+        }
+      ]
+    },
+    {
+      "id": "p5",
+      "refDes": "U5",
+      "partNumber": "BCM54213PE GbE PHY",
+      "class": "Ethernet PHY",
+      "package": "QFN-48",
+      "tjMaxC": 125,
+      "rjaCW": 32,
+      "rjcCW": 10,
+      "loads": [
+        {
+          "id": "p5l1",
+          "rail": "3V3",
+          "vinV": 3.3,
+          "iinA": 0.15
+        }
+      ]
+    },
+    {
+      "id": "p6",
+      "refDes": "U6",
+      "partNumber": "CYW43455 Wi-Fi/BT (under can)",
+      "class": "RF / wireless module",
+      "package": "Shielded module",
+      "tjMaxC": 85,
+      "rjaCW": 30,
+      "loads": [
+        {
+          "id": "p6l1",
+          "rail": "3V3",
+          "vinV": 3.3,
+          "iinA": 0.12
+        }
+      ]
+    },
+    {
+      "id": "p7",
+      "refDes": "L1",
+      "partNumber": "0.47 uH 2520 inductor, core buck",
+      "class": "Power inductor",
+      "package": "2520",
+      "tjMaxC": 125,
+      "loads": [
+        {
+          "id": "p7l1",
+          "rail": "VDD_CORE",
+          "iinA": 3.6,
+          "rOhm": 0.018
+        }
+      ]
+    },
+    {
+      "id": "p8",
+      "refDes": "L2",
+      "partNumber": "1 uH 2016 inductor, 3V3 buck",
+      "class": "Power inductor",
+      "package": "2016",
+      "tjMaxC": 125,
+      "loads": [
+        {
+          "id": "p8l1",
+          "rail": "3V3",
+          "iinA": 0.75,
+          "rOhm": 0.045
+        }
+      ]
+    },
+    {
+      "id": "p9",
+      "refDes": "J1",
+      "partNumber": "USB-C power input",
+      "class": "Connector",
+      "package": "USB-C receptacle",
+      "tjMaxC": 85,
+      "loads": [
+        {
+          "id": "p9l1",
+          "rail": "5V0",
+          "iinA": 1.35,
+          "rOhm": 0.03
+        }
+      ]
+    }
+  ],
+  "bodies": {
+    "254mmdupontmalepinheaderio2x20rpi4modelb": {
+      "include": true
+    },
+    "microphoneplugrpi4modelb": {
+      "include": true
+    },
+    "gigabitethernetportrpi4modelb": {
+      "include": true
+    },
+    "broadcombcm2711b0cpurpi4modelb": {
+      "include": true,
+      "refDes": "U1"
+    },
+    "254mmdupontmalepinheaderpoe2x2rpi4modelb": {
+      "include": true
+    },
+    "cameraconnectorrpi4modelb": {
+      "include": true
+    },
+    "displayconnectorrpi4modelb": {
+      "include": true
+    },
+    "femalemicrohdmiconnectorrpi4modelb": {
+      "include": true
+    },
+    "femalemicrohdmiconnectorrpi4modelb_2": {
+      "include": true
+    },
+    "91d77d9whv778k4gblpddr4sdramrpi4modelb": {
+      "include": true,
+      "refDes": "U2"
+    },
+    "cypresscyw43455wirelessmodulecoverrpi4modelb": {
+      "include": true,
+      "refDes": "U6"
+    },
+    "femaleusbtypecconnectorrpi4modelb": {
+      "include": true,
+      "refDes": "J1"
+    },
+    "2xusb30portsrpi4modelb": {
+      "include": true
+    },
+    "sdcardslotrpi4modelb": {
+      "include": true,
+      "override": {
+        "xMin": 3.5
+      }
+    },
+    "mxl7704universalpmicrpi4modelb": {
+      "include": true,
+      "refDes": "U3"
+    },
+    "viavl805pcieusb30controllerrpi4modelb": {
+      "include": true,
+      "refDes": "U4"
+    },
+    "2xusb20portsrpi4modelb": {
+      "include": true
+    },
+    "broadcombcm54213pegigabitethernettransceiverrpi4modelb": {
+      "include": true,
+      "refDes": "U5"
+    },
+    "m_l1": {
+      "include": true,
+      "refDes": "L1",
+      "manual": {
+        "name": "L1 inductor, core buck (assumed position)",
+        "box": {
+          "xMin": 13.5,
+          "yMin": 9.6,
+          "zMin": 1.6,
+          "l": 2.5,
+          "w": 2,
+          "h": 1.2
+        }
+      }
+    },
+    "m_l2": {
+      "include": true,
+      "refDes": "L2",
+      "manual": {
+        "name": "L2 inductor, 3V3 buck (assumed position)",
+        "box": {
+          "xMin": 13.5,
+          "yMin": 12.6,
+          "zMin": 1.6,
+          "l": 2,
+          "w": 1.6,
+          "h": 1
+        }
+      }
+    }
+  },
+  "pcbStack": {
+    "copperLayers": 4,
+    "copperThicknessMm": 0.035,
+    "copperCoverage": 0.6,
+    "copperK": 390,
+    "dielectricK": 0.3
+  },
+  "spreader": {
+    "top": {
+      "enabled": true,
+      "material": "Aluminium 6061",
+      "k": 167,
+      "densityKgM3": 2700,
+      "thicknessMm": 1.5,
+      "clearanceXYMm": 1,
+      "clearanceZMm": 1,
+      "minPedestalMm": 0.3,
+      "heightMode": "Auto",
+      "chips": [
+        {
+          "refDes": "U2",
+          "covered": true,
+          "heightMode": "Pedestal",
+          "timMode": "Body",
+          "timTMm": 0.2,
+          "timK": 3
+        },
+        {
+          "refDes": "U1",
+          "covered": true,
+          "heightMode": "Pedestal",
+          "timMode": "Body",
+          "timTMm": 0.2,
+          "timK": 3
+        },
+        {
+          "refDes": "J1",
+          "covered": false,
+          "heightMode": "Pedestal",
+          "timMode": "Body",
+          "timTMm": 0.2,
+          "timK": 3
+        },
+        {
+          "refDes": "U6",
+          "covered": true,
+          "heightMode": "Pedestal",
+          "timMode": "Body",
+          "timTMm": 0.2,
+          "timK": 3
+        },
+        {
+          "refDes": "U5",
+          "covered": true,
+          "heightMode": "Pedestal",
+          "timMode": "Body",
+          "timTMm": 0.2,
+          "timK": 3
+        },
+        {
+          "refDes": "U4",
+          "covered": true,
+          "heightMode": "Pedestal",
+          "timMode": "Body",
+          "timTMm": 0.2,
+          "timK": 3
+        },
+        {
+          "refDes": "U3",
+          "covered": true,
+          "heightMode": "Pedestal",
+          "timMode": "Body",
+          "timTMm": 0.2,
+          "timK": 3
+        },
+        {
+          "refDes": "L1",
+          "covered": true,
+          "heightMode": "Pedestal",
+          "timMode": "Body",
+          "timTMm": 0.2,
+          "timK": 3
+        },
+        {
+          "refDes": "L2",
+          "covered": true,
+          "heightMode": "Pedestal",
+          "timMode": "Body",
+          "timTMm": 0.2,
+          "timK": 3
+        }
+      ],
+      "heightManualMm": 5
+    }
+  },
+  "handCheck": {
+    "surfaceRiseK": 20,
+    "solutionTop": {
+      "plateLMm": 100,
+      "plateWMm": 80,
+      "plateTMm": 2,
+      "plateK": 167,
+      "hAir": 25,
+      "faces": 1,
+      "parts": {
+        "U1": {
+          "underPlate": true,
+          "tim1TMm": 0.1,
+          "tim1K": 3,
+          "localLMm": 20,
+          "localWMm": 20,
+          "localTMm": 1,
+          "localK": 390,
+          "tim2TMm": 0.2,
+          "tim2K": 3
+        }
+      }
+    }
+  },
+  "simSetup": {
+    "studyType": "Flow",
+    "meshGlobalMm": 3,
+    "meshFineMm": 0.5,
+    "includePartsWithoutHeat": true,
+    "kPartsWithoutHeat": 0.5,
+    "surfaces": {
+      "spreaderTop": {
+        "h": 10,
+        "emissivity": 0.85
+      },
+      "spreaderOther": {
+        "h": 5,
+        "emissivity": 0.85
+      },
+      "pcbTop": {
+        "h": 8,
+        "emissivity": 0.9
+      },
+      "pcbBottom": {
+        "h": 5,
+        "emissivity": 0.9
+      },
+      "parts": {
+        "h": 8,
+        "emissivity": 0.9
+      }
+    },
+    "contacts": {
+      "partToPcb": 0,
+      "chipToTim": 0,
+      "timToSpreader": 0
+    },
+    "chips": [
+      {
+        "refDes": "U2",
+        "model": "Block"
+      },
+      {
+        "refDes": "U1",
+        "model": "Block"
+      },
+      {
+        "refDes": "J1",
+        "model": "Block"
+      },
+      {
+        "refDes": "U6",
+        "model": "Block"
+      },
+      {
+        "refDes": "U5",
+        "model": "Block"
+      },
+      {
+        "refDes": "U4",
+        "model": "Block"
+      },
+      {
+        "refDes": "U3",
+        "model": "Block"
+      },
+      {
+        "refDes": "L1",
+        "model": "Block"
+      },
+      {
+        "refDes": "L2",
+        "model": "Block"
+      }
+    ]
+  },
+  "settings": {
+    "tolPosMm": 0.05,
+    "tolSizeMm": 0.05,
+    "import": {
+      "pcbNameContains": "PCB",
+      "minSizeMm": 0,
+      "topLevelOnly": true
+    },
+    "flagLimits": {
+      "critical": {
+        "marginBelowC": 15,
+        "densityAboveWcm2": 2,
+        "shareAbove": 0.25
+      },
+      "watch": {
+        "marginBelowC": 30,
+        "densityAboveWcm2": 0.8,
+        "shareAbove": 0.1
+      }
+    }
+  },
+  "forSolidWorks": {
+    "computedAt": "2026-10-18T12:00:00",
+    "computedBy": "calc 0.1.0",
+    "ambientC": 40,
+    "pcb": {
+      "l": 85,
+      "w": 56,
+      "h": 1.6,
+      "kxy": 20.759249999999998,
+      "kz": 0.328726731512456
+    },
+    "bodies": [
+      {
+        "key": "254mmdupontmalepinheaderio2x20rpi4modelb",
+        "name": "Raspberry Pi 4 Model B.STEP-1/2.54 mm DUPONT MALE PIN HEADER, IO, 2X20, RPi4ModelB.STEP-1",
+        "box": {
+          "xMin": 7.1,
+          "yMin": 49.96,
+          "zMin": -1.4,
+          "l": 50.8,
+          "w": 5.08,
+          "h": 11.3
+        }
+      },
+      {
+        "key": "microphoneplugrpi4modelb",
+        "name": "Raspberry Pi 4 Model B.STEP-1/Microphone Plug, RPi4ModelB.STEP-1",
+        "box": {
+          "xMin": 50.386,
+          "yMin": -2.4,
+          "zMin": 0.05,
+          "l": 7.228,
+          "w": 15,
+          "h": 7.55
+        }
+      },
+      {
+        "key": "gigabitethernetportrpi4modelb",
+        "name": "Raspberry Pi 4 Model B.STEP-1/Gigabit Ethernet Port, RPi4ModelB.STEP-1",
+        "box": {
+          "xMin": 66.649,
+          "yMin": 37.586,
+          "zMin": -2.111,
+          "l": 21.601,
+          "w": 16.327,
+          "h": 17.236
+        }
+      },
+      {
+        "key": "broadcombcm2711b0cpurpi4modelb",
+        "name": "Raspberry Pi 4 Model B.STEP-1/Broadcom BCM2711B0 CPU, RPi4ModelB.STEP-1",
+        "refDes": "U1",
+        "box": {
+          "xMin": 21.75,
+          "yMin": 25,
+          "zMin": 1.6,
+          "l": 15,
+          "w": 15,
+          "h": 2.3
+        }
+      },
+      {
+        "key": "254mmdupontmalepinheaderpoe2x2rpi4modelb",
+        "name": "Raspberry Pi 4 Model B.STEP-1/2.54 mm DUPONT MALE PIN HEADER, POE, 2X2, RPi4ModelB.STEP-1",
+        "box": {
+          "xMin": 58.96,
+          "yMin": 43.82,
+          "zMin": -1.4,
+          "l": 5.08,
+          "w": 5.08,
+          "h": 11.3
+        }
+      },
+      {
+        "key": "cameraconnectorrpi4modelb",
+        "name": "Raspberry Pi 4 Model B.STEP-1/Camera Connector, RPi4ModelB.STEP-1",
+        "box": {
+          "xMin": 43.878,
+          "yMin": 0.3,
+          "zMin": 1.4,
+          "l": 5.072,
+          "w": 22.4,
+          "h": 5.68
+        }
+      },
+      {
+        "key": "displayconnectorrpi4modelb",
+        "name": "Raspberry Pi 4 Model B.STEP-1/Display Connector, RPi4ModelB.STEP-1",
+        "box": {
+          "xMin": 1.55,
+          "yMin": 16.8,
+          "zMin": 1.4,
+          "l": 5.072,
+          "w": 22.4,
+          "h": 5.68
+        }
+      },
+      {
+        "key": "femalemicrohdmiconnectorrpi4modelb",
+        "name": "Raspberry Pi 4 Model B.STEP-1/Female Micro HDMI Connector, RPi4ModelB.STEP-1",
+        "box": {
+          "xMin": 36.25,
+          "yMin": -1.8,
+          "zMin": 1.055,
+          "l": 6.5,
+          "w": 7.5,
+          "h": 3.515
+        }
+      },
+      {
+        "key": "femalemicrohdmiconnectorrpi4modelb_2",
+        "name": "Raspberry Pi 4 Model B.STEP-1/Female Micro HDMI Connector, RPi4ModelB.STEP-2",
+        "box": {
+          "xMin": 22.75,
+          "yMin": -1.8,
+          "zMin": 1.055,
+          "l": 6.5,
+          "w": 7.5,
+          "h": 3.515
+        }
+      },
+      {
+        "key": "91d77d9whv778k4gblpddr4sdramrpi4modelb",
+        "name": "Raspberry Pi 4 Model B.STEP-1/91D77 D9WHV 778K, 4 GB LPDDR4 SDRAM, RPi4ModelB.STEP-1",
+        "refDes": "U2",
+        "box": {
+          "xMin": 39.75,
+          "yMin": 25.25,
+          "zMin": 1.6,
+          "l": 10,
+          "w": 14.5,
+          "h": 0.8
+        }
+      },
+      {
+        "key": "cypresscyw43455wirelessmodulecoverrpi4modelb",
+        "name": "Raspberry Pi 4 Model B.STEP-1/Cypress CYW43455 Wireless Module Cover, RPi4ModelB.STEP-1",
+        "refDes": "U6",
+        "box": {
+          "xMin": 6.5,
+          "yMin": 36,
+          "zMin": 1.6,
+          "l": 11,
+          "w": 13,
+          "h": 1.6
+        }
+      },
+      {
+        "key": "femaleusbtypecconnectorrpi4modelb",
+        "name": "Raspberry Pi 4 Model B.STEP-1/Female USB Type C Connector, RPi4ModelB.STEP-1",
+        "refDes": "J1",
+        "box": {
+          "xMin": 6.73,
+          "yMin": -1.5,
+          "zMin": 0.8,
+          "l": 8.94,
+          "w": 7.9,
+          "h": 3.96
+        }
+      },
+      {
+        "key": "2xusb30portsrpi4modelb",
+        "name": "Raspberry Pi 4 Model B.STEP-1/2X USB3.0 PORTS, RPi4ModelB.STEP-1",
+        "box": {
+          "xMin": 71.133,
+          "yMin": 19.155,
+          "zMin": -1.608,
+          "l": 17.476,
+          "w": 15.691,
+          "h": 19.416
+        }
+      },
+      {
+        "key": "sdcardslotrpi4modelb",
+        "name": "Raspberry Pi 4 Model B.STEP-1/SD Card Slot, RPi4ModelB.STEP-1",
+        "box": {
+          "xMin": 3.5,
+          "yMin": 22.1,
+          "zMin": -1.45,
+          "l": 11.4,
+          "w": 11.95,
+          "h": 1.45
+        }
+      },
+      {
+        "key": "mxl7704universalpmicrpi4modelb",
+        "name": "Raspberry Pi 4 Model B.STEP-1/MxL7704 Universal PMIC, RPi4ModelB.STEP-1",
+        "refDes": "U3",
+        "box": {
+          "xMin": 7.3,
+          "yMin": 9.3,
+          "zMin": 1.6,
+          "l": 5.4,
+          "w": 5.4,
+          "h": 0.8
+        }
+      },
+      {
+        "key": "viavl805pcieusb30controllerrpi4modelb",
+        "name": "Raspberry Pi 4 Model B.STEP-1/VIA VL805 PCIe USB 3.0 controller, RPi4ModelB.STEP-1",
+        "refDes": "U4",
+        "box": {
+          "xMin": 55.6,
+          "yMin": 19.6,
+          "zMin": 1.6,
+          "l": 8.8,
+          "w": 8.8,
+          "h": 0.8
+        }
+      },
+      {
+        "key": "2xusb20portsrpi4modelb",
+        "name": "Raspberry Pi 4 Model B.STEP-1/2X USB2.0 PORTS, RPi4ModelB.STEP-1",
+        "box": {
+          "xMin": 71.126,
+          "yMin": 1.323,
+          "zMin": -1.844,
+          "l": 17.872,
+          "w": 15.353,
+          "h": 19.171
+        }
+      },
+      {
+        "key": "broadcombcm54213pegigabitethernettransceiverrpi4modelb",
+        "name": "Raspberry Pi 4 Model B.STEP-1/Broadcom BCM54213PE Gigabit Ethernet Transceiver, RPi4ModelB.STEP-1",
+        "refDes": "U5",
+        "box": {
+          "xMin": 55.6,
+          "yMin": 34.6,
+          "zMin": 1.6,
+          "l": 6.8,
+          "w": 6.8,
+          "h": 1
+        }
+      },
+      {
+        "key": "m_l1",
+        "name": "L1 inductor, core buck (assumed position)",
+        "refDes": "L1",
+        "box": {
+          "xMin": 13.5,
+          "yMin": 9.6,
+          "zMin": 1.6,
+          "l": 2.5,
+          "w": 2,
+          "h": 1.2
+        }
+      },
+      {
+        "key": "m_l2",
+        "name": "L2 inductor, 3V3 buck (assumed position)",
+        "refDes": "L2",
+        "box": {
+          "xMin": 13.5,
+          "yMin": 12.6,
+          "zMin": 1.6,
+          "l": 2,
+          "w": 1.6,
+          "h": 1
+        }
+      }
+    ],
+    "heat": {
+      "U1": 3.168,
+      "U2": 0.49500000000000005,
+      "U3": 1.0361176470588238,
+      "U4": 0.825,
+      "U5": 0.49499999999999994,
+      "U6": 0.39599999999999996,
+      "L1": 0.23328,
+      "L2": 0.025312499999999998,
+      "J1": 0.05467500000000001
+    },
+    "chips": [
+      {
+        "refDes": "U2",
+        "model": "Block",
+        "kz": 1.3793103448275863,
+        "kxy": 1.3793103448275863,
+        "rjcCW": 4
+      },
+      {
+        "refDes": "U1",
+        "model": "Block",
+        "kz": 20.444444444444443,
+        "kxy": 20.444444444444443,
+        "rjcCW": 0.5
+      },
+      {
+        "refDes": "J1",
+        "model": "Block"
+      },
+      {
+        "refDes": "U6",
+        "model": "Block"
+      },
+      {
+        "refDes": "U5",
+        "model": "Block",
+        "kz": 2.162629757785467,
+        "kxy": 2.162629757785467,
+        "rjcCW": 10
+      },
+      {
+        "refDes": "U4",
+        "model": "Block",
+        "kz": 1.2913223140495866,
+        "kxy": 1.2913223140495866,
+        "rjcCW": 8
+      },
+      {
+        "refDes": "U3",
+        "model": "Block",
+        "kz": 13.717421124828531,
+        "kxy": 13.717421124828531,
+        "rjcCW": 2
+      },
+      {
+        "refDes": "L1",
+        "model": "Block"
+      },
+      {
+        "refDes": "L2",
+        "model": "Block"
+      }
+    ],
+    "plates": {
+      "top": {
+        "faceZMm": 4.1,
+        "material": "Aluminium 6061",
+        "k": 167,
+        "densityKgM3": 2700,
+        "thicknessMm": 1.5,
+        "clearanceXYMm": 1,
+        "chips": [
+          {
+            "refDes": "U2",
+            "key": "91d77d9whv778k4gblpddr4sdramrpi4modelb",
+            "timTMm": 0.2,
+            "pedestalMm": 1.5,
+            "timMode": "Body",
+            "timK": 3,
+            "timRCW": 0.45977011494252873
+          },
+          {
+            "refDes": "U1",
+            "key": "broadcombcm2711b0cpurpi4modelb",
+            "timTMm": 0.2,
+            "pedestalMm": 0,
+            "timMode": "Body",
+            "timK": 3,
+            "timRCW": 0.2962962962962959
+          },
+          {
+            "refDes": "U6",
+            "key": "cypresscyw43455wirelessmodulecoverrpi4modelb",
+            "timTMm": 0.2,
+            "pedestalMm": 0.7,
+            "timMode": "Body",
+            "timK": 3,
+            "timRCW": 0.4662004662004662
+          },
+          {
+            "refDes": "U5",
+            "key": "broadcombcm54213pegigabitethernettransceiverrpi4modelb",
+            "timTMm": 0.2,
+            "pedestalMm": 1.3,
+            "timMode": "Body",
+            "timK": 3,
+            "timRCW": 1.441753171856978
+          },
+          {
+            "refDes": "U4",
+            "key": "viavl805pcieusb30controllerrpi4modelb",
+            "timTMm": 0.2,
+            "pedestalMm": 1.5,
+            "timMode": "Body",
+            "timK": 3,
+            "timRCW": 0.8608815426997243
+          },
+          {
+            "refDes": "U3",
+            "key": "mxl7704universalpmicrpi4modelb",
+            "timTMm": 0.2,
+            "pedestalMm": 1.5,
+            "timMode": "Body",
+            "timK": 3,
+            "timRCW": 2.2862368541380884
+          },
+          {
+            "refDes": "L1",
+            "key": "m_l1",
+            "timTMm": 0.2,
+            "pedestalMm": 1.1,
+            "timMode": "Body",
+            "timK": 3,
+            "timRCW": 13.333333333333334
+          },
+          {
+            "refDes": "L2",
+            "key": "m_l2",
+            "timTMm": 0.2,
+            "pedestalMm": 1.3,
+            "timMode": "Body",
+            "timK": 3,
+            "timRCW": 20.83333333333333
+          }
+        ],
+        "cuts": [
+          {
+            "key": "254mmdupontmalepinheaderio2x20rpi4modelb",
+            "name": "Raspberry Pi 4 Model B.STEP-1/2.54 mm DUPONT MALE PIN HEADER, IO, 2X20, RPi4ModelB.STEP-1",
+            "xMin": 6.1,
+            "yMin": 48.96,
+            "l": 52.8,
+            "w": 7.08,
+            "edgeZMm": 9.9
+          },
+          {
+            "key": "microphoneplugrpi4modelb",
+            "name": "Raspberry Pi 4 Model B.STEP-1/Microphone Plug, RPi4ModelB.STEP-1",
+            "xMin": 49.386,
+            "yMin": -3.4,
+            "l": 9.228,
+            "w": 17,
+            "edgeZMm": 7.6
+          },
+          {
+            "key": "gigabitethernetportrpi4modelb",
+            "name": "Raspberry Pi 4 Model B.STEP-1/Gigabit Ethernet Port, RPi4ModelB.STEP-1",
+            "xMin": 65.649,
+            "yMin": 36.586,
+            "l": 23.601,
+            "w": 18.327,
+            "edgeZMm": 15.125
+          },
+          {
+            "key": "254mmdupontmalepinheaderpoe2x2rpi4modelb",
+            "name": "Raspberry Pi 4 Model B.STEP-1/2.54 mm DUPONT MALE PIN HEADER, POE, 2X2, RPi4ModelB.STEP-1",
+            "xMin": 57.96,
+            "yMin": 42.82,
+            "l": 7.08,
+            "w": 7.08,
+            "edgeZMm": 9.9
+          },
+          {
+            "key": "cameraconnectorrpi4modelb",
+            "name": "Raspberry Pi 4 Model B.STEP-1/Camera Connector, RPi4ModelB.STEP-1",
+            "xMin": 42.878,
+            "yMin": -0.7,
+            "l": 7.072,
+            "w": 24.4,
+            "edgeZMm": 7.08
+          },
+          {
+            "key": "displayconnectorrpi4modelb",
+            "name": "Raspberry Pi 4 Model B.STEP-1/Display Connector, RPi4ModelB.STEP-1",
+            "xMin": 0.55,
+            "yMin": 15.8,
+            "l": 7.072,
+            "w": 24.4,
+            "edgeZMm": 7.08
+          },
+          {
+            "key": "femalemicrohdmiconnectorrpi4modelb",
+            "name": "Raspberry Pi 4 Model B.STEP-1/Female Micro HDMI Connector, RPi4ModelB.STEP-1",
+            "xMin": 35.25,
+            "yMin": -2.8,
+            "l": 8.5,
+            "w": 9.5,
+            "edgeZMm": 4.57
+          },
+          {
+            "key": "femalemicrohdmiconnectorrpi4modelb_2",
+            "name": "Raspberry Pi 4 Model B.STEP-1/Female Micro HDMI Connector, RPi4ModelB.STEP-2",
+            "xMin": 21.75,
+            "yMin": -2.8,
+            "l": 8.5,
+            "w": 9.5,
+            "edgeZMm": 4.57
+          },
+          {
+            "key": "femaleusbtypecconnectorrpi4modelb",
+            "name": "Raspberry Pi 4 Model B.STEP-1/Female USB Type C Connector, RPi4ModelB.STEP-1",
+            "xMin": 5.73,
+            "yMin": -2.5,
+            "l": 10.94,
+            "w": 9.9,
+            "edgeZMm": 4.76
+          },
+          {
+            "key": "2xusb30portsrpi4modelb",
+            "name": "Raspberry Pi 4 Model B.STEP-1/2X USB3.0 PORTS, RPi4ModelB.STEP-1",
+            "xMin": 70.133,
+            "yMin": 18.155,
+            "l": 19.476,
+            "w": 17.691000000000003,
+            "edgeZMm": 17.808
+          },
+          {
+            "key": "2xusb20portsrpi4modelb",
+            "name": "Raspberry Pi 4 Model B.STEP-1/2X USB2.0 PORTS, RPi4ModelB.STEP-1",
+            "xMin": 70.126,
+            "yMin": 0.32299999999999995,
+            "l": 19.872,
+            "w": 17.353,
+            "edgeZMm": 17.326999999999998
+          }
+        ]
+      }
+    },
+    "flow": {
+      "chips": {
+        "U1": {
+          "basis": "calibrated block",
+          "material": "User Defined\\PCBThermal\\k 19.6"
+        },
+        "U2": {
+          "basis": "calibrated block",
+          "material": "User Defined\\PCBThermal\\k 1.33"
+        },
+        "U3": {
+          "basis": "calibrated block",
+          "material": "User Defined\\PCBThermal\\k 13.3"
+        },
+        "U4": {
+          "basis": "calibrated block",
+          "material": "User Defined\\PCBThermal\\k 1.33"
+        },
+        "U5": {
+          "basis": "calibrated block",
+          "material": "User Defined\\PCBThermal\\k 2.15"
+        },
+        "U6": {
+          "basis": "package"
+        },
+        "L1": {
+          "basis": "package"
+        },
+        "L2": {
+          "basis": "package"
+        },
+        "J1": {
+          "basis": "package"
+        }
+      },
+      "environment": {
+        "up": "+Z",
+        "gravity": [
+          0,
+          0,
+          -9.81
+        ],
+        "pressurePa": 101325,
+        "velocity": [
+          0,
+          0,
+          0
+        ],
+        "margins": {
+          "xMin": 0.5,
+          "xMax": 0.5,
+          "yMin": 0.5,
+          "yMax": 0.5,
+          "zMin": 0.5,
+          "zMax": 1.5
+        }
+      },
+      "pcb": "User Defined\\PCBThermal\\k 21.5 0.316",
+      "tims": {
+        "U2": "User Defined\\PCBThermal\\k 2.87",
+        "U1": "User Defined\\PCBThermal\\k 2.87",
+        "U6": "User Defined\\PCBThermal\\k 2.87",
+        "U5": "User Defined\\PCBThermal\\k 2.87",
+        "U4": "User Defined\\PCBThermal\\k 2.87",
+        "U3": "User Defined\\PCBThermal\\k 2.87",
+        "L1": "User Defined\\PCBThermal\\k 2.87",
+        "L2": "User Defined\\PCBThermal\\k 2.87"
+      },
+      "spreaders": {
+        "top": "User Defined\\PCBThermal\\k 162"
+      },
+      "surfaces": {
+        "pcb": "User Defined\\PCBThermal\\e 0.90",
+        "parts": "User Defined\\PCBThermal\\e 0.90",
+        "spreader": "User Defined\\PCBThermal\\e 0.85"
+      },
+      "radiative": [
+        {
+          "name": "e 0.90",
+          "path": "User Defined\\PCBThermal\\e 0.90",
+          "emissivity": 0.9,
+          "usedBy": [
+            "PCB",
+            "parts"
+          ]
+        },
+        {
+          "name": "e 0.85",
+          "path": "User Defined\\PCBThermal\\e 0.85",
+          "emissivity": 0.85,
+          "usedBy": [
+            "spreader"
+          ]
+        }
+      ],
+      "materials": [
+        {
+          "name": "k 19.6",
+          "path": "User Defined\\PCBThermal\\k 19.6",
+          "kxy": 19.6,
+          "kz": 19.6,
+          "usedBy": [
+            "U1"
+          ]
+        },
+        {
+          "name": "k 1.33",
+          "path": "User Defined\\PCBThermal\\k 1.33",
+          "kxy": 1.33,
+          "kz": 1.33,
+          "usedBy": [
+            "U2",
+            "U4"
+          ]
+        },
+        {
+          "name": "k 13.3",
+          "path": "User Defined\\PCBThermal\\k 13.3",
+          "kxy": 13.3,
+          "kz": 13.3,
+          "usedBy": [
+            "U3"
+          ]
+        },
+        {
+          "name": "k 2.15",
+          "path": "User Defined\\PCBThermal\\k 2.15",
+          "kxy": 2.15,
+          "kz": 2.15,
+          "usedBy": [
+            "U5"
+          ]
+        },
+        {
+          "name": "k 21.5 0.316",
+          "path": "User Defined\\PCBThermal\\k 21.5 0.316",
+          "kxy": 21.5,
+          "kz": 0.316,
+          "usedBy": [
+            "PCB"
+          ]
+        },
+        {
+          "name": "k 162",
+          "path": "User Defined\\PCBThermal\\k 162",
+          "kxy": 162,
+          "kz": 162,
+          "usedBy": [
+            "top spreader"
+          ]
+        },
+        {
+          "name": "k 2.87",
+          "path": "User Defined\\PCBThermal\\k 2.87",
+          "kxy": 2.87,
+          "kz": 2.87,
+          "usedBy": [
+            "TIM U2",
+            "TIM U1",
+            "TIM U6",
+            "TIM U5",
+            "TIM U4",
+            "TIM U3",
+            "TIM L1",
+            "TIM L2"
+          ]
+        }
+      ]
+    },
+    "inputsHash": "0deb0323"
+  },
+  "checks": {
+    "20261001T003434-1": {
+      "at": "2026-10-18T12:00:00"
+    },
+    "20261001T003435-1": {
+      "at": "2026-10-18T12:00:00"
+    },
+    "20261001T003435-2": {
+      "at": "2026-10-18T12:00:00"
+    },
+    "20261001T003435-3": {
+      "at": "2026-10-18T12:00:00"
+    },
+    "20261001T003300-1": {
+      "at": "2026-10-18T12:00:00"
+    },
+    "20261001T003300-2": {
+      "at": "2026-10-18T12:00:00"
+    },
+    "20261001T003300-3": {
+      "at": "2026-10-18T12:00:00"
+    },
+    "20261001T002841-1": {
+      "at": "2026-10-18T12:00:00"
+    },
+    "20261001T002841-2": {
+      "at": "2026-10-18T12:00:00"
+    },
+    "20261001T002841-3": {
+      "at": "2026-10-18T12:00:00"
+    },
+    "20261001T002554-1": {
+      "at": "2026-10-18T12:00:00"
+    },
+    "20261001T002447-1": {
+      "at": "2026-10-18T12:00:00"
+    },
+    "20260930T233828-1": {
+      "at": "2026-10-18T12:00:00"
+    },
+    "20260930T233828-2": {
+      "at": "2026-10-18T12:00:00"
+    },
+    "20260930T233828-3": {
+      "at": "2026-10-18T12:00:00"
+    }
+  }
+}

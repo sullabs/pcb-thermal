@@ -5,15 +5,21 @@
   (`flow simulation api sdk x64.exe` in the `api` folder of the Flow Simulation install).
 - Set `Sim setup` study type to `Flow`.
 
-## Make the Flow project once, by hand
-On the thermal assembly (the one BuildBoard made), with the normal configuration active:
-1. Flow Simulation > Wizard. Internal or External as you need, conduction in solids on, gravity and radiation as you need.
-2. One **volume heat source per chip with heat**. Name each one with the RefDes in it: `U1`, `Q U1`, `U1 heat`.
-   Pick the chip body as its reference. Any heat value: RunFlow overwrites it. Keep it a constant, not a formula.
-3. Solid materials, boundary conditions, mesh: as you need. RunFlow does not touch them.
-4. Goals (volume goals, temperature of solid). Name each one with the RefDes plus `max` or `avg`:
-   `U1 max`, `U1 avg`. No word means max. For the plate and board use `Spreader max`, `Spreader min`, `PCB max`, `PCB min`.
-5. Save the assembly.
+## The Flow project is built by the macro
+RunFlow makes the project `<prefix>Flow` (for example `CL_Flow`) from `PCBThermal_Flow.fwp` the first time. The template
+sits next to the macro (`macros\`) or in `C:\ProgramData\COSMOS Applications\Flow Simulation 2023	emplate\`. It holds
+external air, conduction in solids, gravity -Z, radiation with default walls `Shellac, black matte` (e about 0.9) and
+a "PCB material" whose axis is Z. On every run the macro points these features (fixed names) at the current components:
+- Materials: `PCB material` (Flow's `PCB 4-layers`, `8-layers` or `12-layers` from the copper layer count), `Parts material`
+  (typical plastic package), `Spreader material` (aluminium, copper when the spreader k is 300 or more), `TIM material` (GR25A).
+- One volume source `<RefDes> heat` per part with heat. A source you made yourself whose name holds the RefDes is kept instead.
+- Goals `<RefDes> max`, `<RefDes> avg`, `PCB max/min`, `Spreader max/min` (volume goals, solid temperature).
+- The computational domain: the assembly box plus half its longest side around it and 1.5 times above it.
+A feature whose component is gone is deleted. Anything else you add by hand (a fan, a local mesh, a lid) stays.
+
+To change what every new project starts with: open a project made from the template, change it (General Settings,
+mesh), then Flow Simulation > Project > Create Template, name `PCBThermal_Flow`, and copy the `.fwp` from the
+ProgramData template folder to `macros\`.
 
 ## Run
 1. Open the thermal assembly so it is the active window.
@@ -28,7 +34,9 @@ On the thermal assembly (the one BuildBoard made), with the normal configuration
 - AF fills for the chips that have a max goal. AG = hand minus Flow.
 
 ## Known limits
-- RunFlow does not create or delete features, materials or boundary conditions.
+- RunFlow creates and deletes only its own named features. Materials come from the Flow library, so the page's chip,
+  TIM and PCB k values are not used: Flow and Thermal chip temperatures differ where those matter.
+- The anisotropy axis and the default wall radiative surface have no API parameter: they come from the template.
 - Boundary condition temperatures are not changed, only the initial temperature.
 - The API units are SI: goals are kelvin, the macro writes degrees C.
 - The first run on a PC may fail at connecting to the API. The macro then says which step failed. Report the message.
@@ -43,3 +51,11 @@ On the thermal assembly (the one BuildBoard made), with the normal configuration
 - Realistic test run 2026-10-01 (external air 40 C, gravity, radiation on, PCB FR4, chips silicon, rest aluminium, mesh level 2,
   6.67 W): chips 97 to 99 C, PCB min 47 C. Tiny parts (L1, L2 inductors) were not meshed at level 2 and came back as 0 K, so
   they were skipped with a note. Use a higher mesh level or a local mesh on them. No radiative surfaces were defined.
+- Macro-built run 2026-10-19 (RPi4, 40 C, 6.86 W, radiation on, spreader): chips 89 to 124 C, PCB 72 to 123 C, spreader
+  86 to 88 C. The Thermal study gave U1 90, U4 88, U2 82, U6 82, U5 113 and U3 229 C (its own chip k). Without radiation
+  the same Flow project ran 40 C hotter.
+- Checks 2026-10-19 on that run: the PCB material keeps Axis Z (global, the board normal) after the macro re-points it.
+  Mesh: automatic level 3 gives 28 177 cells (24 s). A local mesh on the chips, TIMs and spreader, solid and boundary
+  refinement 3, gives 59 863 cells and moves chips by 0.6 C at most; level 5 gives 1.43 M cells (11 min) and moves them
+  by 2.8 C at most (U3 124.5 to 121.7 C, PCB max 122.8 to 120.1 C). So RunFlow adds no local mesh. For a final number on
+  a small hot chip, add a local mesh (feature 14, parameters 68 and 69) on it by hand; RunFlow keeps it.
