@@ -137,3 +137,4 @@ session scratchpad only.
 - Not available yet: board hot spot, true junction temperature of a network. The sample board gives huge temperatures (7 W on a tiny part): the numbers prove the pipeline, not the physics.
 - A killed AEDT leaves a `.lock` file next to the .aedt. Delete it before reopening.
 - `design_settings` can be None right after a solve. Do not read it there.
+- Field calculator fixed: `get_scalar_field_value` needs `solution="Study : SteadyState"` given explicitly. Never call it on a hollow network block: the failed call breaks the AEDT gRPC session (Save and GetObjectsInGroup fail afterwards; kill AEDT and delete the .lock). Board temperature = maximum over the PCB1 layer objects (`get_3d_component_object_list`), hottest anywhere = `AllObjects`. Heat source: field maximum for plain blocks, case-side monitor for network blocks.

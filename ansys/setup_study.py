@@ -434,7 +434,27 @@ def _monitors(ic, powered):
             ic.monitor.assign_point_monitor_in_object(ref, monitor_quantity="Temperature", monitor_name=f"T_{ref}")
 
 
-def _temp(ic, ref):
+def _fmax(ic, obj):
+    """highest temperature in one object (field calculator). The solution name must be given, or AEDT refuses.
+    A hollow object (network block) has no volume and fails; the stack is cleared so the next call still works."""
+    try:
+        v = ic.post.get_scalar_field_value("Temperature", "Maximum", solution=f"{SETUP} : SteadyState",
+                                           object_name=obj, object_type="volume")
+        return round(float(v), 2)
+    except BaseException:  # noqa: BLE001
+        try:
+            ic.post.ofieldsreporter.CalcStack("clear")
+        except BaseException:  # noqa: BLE001
+            pass
+        return None
+
+
+def _temp(ic, ref, hollow):
+    """temperature of a heat source: field maximum for a block, case-side monitor for a hollow network block.
+    The field calculator must never see a hollow block: the failed call breaks the whole AEDT session."""
+    v = None if hollow else _fmax(ic, ref)
+    if v is not None:
+        return v
     try:
         sd = ic.post.get_solution_data(expressions=[f"T_{ref}.Temperature"], setup_sweep_name=f"{SETUP} : SteadyState",
                                        report_category="Monitor")
@@ -452,16 +472,23 @@ def _solve(ic, folder, powered, ambient):
         check("error", "Solve failed or was stopped. Open AEDT and read the message window.")
         return
     check("ok", f"Solved in {secs:.0f} s")
-    rows = [{"refDes": p["refDes"], "powerW": p["powerW"], "tempC": _temp(ic, p["refDes"]),
+    _, tree = thermal(ic)
+    rows = [{"refDes": p["refDes"], "powerW": p["powerW"],
+             "tempC": _temp(ic, p["refDes"], tree.get(f"P_{p['refDes']}", {}).get("type") == "Network"),
              "rjaCW": p.get("rjaCW"), "tjMaxC": p.get("tjMaxC")} for p in powered]
     if any(r["tempC"] is None for r in rows):
         check("warn", "Some temperatures could not be read. Look at the result in AEDT.")
-    temps = [r["tempC"] for r in rows if r["tempC"] is not None]
+    layers = ic.modeler.get_3d_component_object_list(name=PCB)
+    on_board = [v for v in (_fmax(ic, o) for o in layers) if v is not None]
+    board = max(on_board) if on_board else None
+    if board is None:
+        check("warn", "Board temperature could not be read. Look at the result in AEDT.")
+    anywhere = _fmax(ic, "AllObjects")
     (folder / "results.json").write_text(json.dumps({
         "schema": "pcb-thermal-ansys/results", "solvedAt": time.strftime("%H:%M:%S"), "seconds": round(secs),
-        "ambientC": ambient, "hottestC": max(temps) if temps else None, "parts": rows}, indent=1), encoding="utf-8")
+        "ambientC": ambient, "boardC": board, "hottestC": anywhere, "parts": rows}, indent=1), encoding="utf-8")
     step("save project", lambda: ic.save_project())
-    check("ok", f"Hottest heat source {max(temps)} C; results.json written" if temps else "No temperatures read")
+    check("ok", f"Board hottest {board} C, hottest anywhere {anywhere} C; results.json written")
 
 
 # ---------------------------------------------------------------- read back

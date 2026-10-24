@@ -309,9 +309,9 @@ function renderResult(r) {
     return `<tr><td>${esc(p.refDes)}</td><td class="n">${p.powerW} W</td><td class="n${over ? " error" : ""}">${f(p.tempC)}</td>
       <td class="n">${p.tjMaxC != null ? p.tjMaxC + " &deg;C" : ""}</td><td class="n">${p.tempC != null && p.tjMaxC != null ? (p.tjMaxC - p.tempC).toFixed(1) + " K" : ""}</td></tr>`;
   }).join("");
-  $("result").innerHTML = `<dl class="kv"><dt>Hottest heat source</dt><dd>${f(r.hottestC)}</dd><dt>Ambient</dt><dd>${r.ambientC}</dd></dl>
+  $("result").innerHTML = `<dl class="kv"><dt>Board hottest</dt><dd>${f(r.boardC)}</dd><dt>Hottest anywhere</dt><dd>${f(r.hottestC)}</dd><dt>Ambient</dt><dd>${r.ambientC}</dd></dl>
     <div class="scroll"><table><thead><tr><th>Heat source</th><th class="n">Power</th><th class="n">Temperature</th><th class="n">Tj max</th><th class="n">Margin</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <p class="hint">Temperature is the hottest point in the part body. Full fields are in AEDT.</p>`;
+    <p class="hint">Heat source temperature is the hottest point in the part body; a junction model shows its case surface. Hottest anywhere includes the junction. Full fields are in AEDT.</p>`;
 }
 
 /* ---- jobs and refresh ---- */
