@@ -385,10 +385,15 @@ def _setup(ic, study):
                  ("Convergence Criteria - Max Iterations", int(study["iterations"]))):
         if k in s.props:
             s.props[k] = v
+    was = str(s.props.get("Radiation Model", "Off"))
     s.props["Radiation Model"] = "Discrete Ordinates Model" if study["radiation"] else "Off"
     s.update()
     check("ok", f"Setup '{SETUP}': laminar natural convection, radiation "
                 f"{'on (discrete ordinates)' if study['radiation'] else 'off'}, {study['iterations']} iterations max")
+    if was != s.props["Radiation Model"]:
+        # the next solve would restart from the old case file, which keeps the old radiation model
+        if step("clear old solution", lambda: ic.cleanup_solution()):
+            check("ok","Radiation changed: old solution deleted, the next solve starts fresh")
 
 
 def _mesh(ic, powered, study):
