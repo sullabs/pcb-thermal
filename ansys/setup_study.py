@@ -1,12 +1,13 @@
 """Build or edit the Icepak study from <folder>/study.json. No solve.
 
-    python ansys/setup_study.py <folder> [build|update|read|mesh]
+    python ansys/setup_study.py <folder> [build|update|read|mesh|solve]
 
 build  : new AEDT project from the EDB: PCB, power blocks, air, environment, setup, mesh (about 40 s)
 update : the same settings applied to the project that is already built (fast); AEDT edits to the things the
          page owns (power, ambient, air, mesh) are overwritten, everything else is left alone
 read   : only read the project into state.json, as it is in AEDT now (never starts AEDT or opens a project)
 mesh   : generate the mesh and report how long it took
+solve  : solve the setup (opens the project, never changes it) and write results.json: temperature per heat source
 
 Input  : <folder>/<board>.aedb, <folder>/study.json (written by the page)
 Output : <folder>/board.json, state.json, checks.json, <board>_icepak.aedt
@@ -136,6 +137,8 @@ def main(folder: Path, mode: str = "build") -> int:
             check("ok", f"Saved {project_file.name}")
         if mode == "mesh":
             _mesh_now(ic)
+        if mode == "solve":
+            step("solve", lambda: _solve(ic, folder, powered, study["ambientC"]), fatal=True)
         state = step("read back", lambda: read_state(ic, board))
         if state:
             (folder / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
@@ -300,6 +303,7 @@ def _blocks(ic, board, by_ref, powered, study):
             try:
                 net = ic.create_two_resistor_network_block(ref, PCB, f"{p['powerW']}W", p["rjbCW"], p["rjcCW"])
                 net.name = f"P_{ref}"
+                obj.solve_inside = False        # a network block must not be meshed inside, or the solver input fails
                 nets += 1
                 made += 1
                 continue
@@ -410,6 +414,54 @@ def _mesh_now(ic):
     t = time.time()
     ok = ic.mesh.generate_mesh(SETUP)
     check("ok" if ok else "error", f"Mesh generated in {time.time() - t:.0f} s" if ok else "Mesh generation failed")
+
+
+# ---------------------------------------------------------------- solve
+
+def _monitors(ic, powered):
+    """one point monitor T_<ref> per heat source, made fresh for each solve. A network block is hollow, so its
+    monitor sits on the case side face (top centre), a plain block gets it at its centre."""
+    for n in [n for n in ic.get_oo_name(ic.odesign, "Monitor") if n.startswith("T_")]:
+        ic.monitor.delete_monitor(n)
+    _, tree = thermal(ic)
+    for p in powered:
+        ref = p["refDes"]
+        bb = ic.modeler[ref].bounding_box
+        if tree.get(f"P_{ref}", {}).get("type") == "Network":
+            pos = [(bb[0] + bb[3]) / 2, (bb[1] + bb[4]) / 2, bb[5] if bb[5] > 0 else bb[2]]
+            ic.monitor.assign_point_monitor(pos, monitor_quantity="Temperature", monitor_name=f"T_{ref}")
+        else:
+            ic.monitor.assign_point_monitor_in_object(ref, monitor_quantity="Temperature", monitor_name=f"T_{ref}")
+
+
+def _temp(ic, ref):
+    try:
+        sd = ic.post.get_solution_data(expressions=[f"T_{ref}.Temperature"], setup_sweep_name=f"{SETUP} : SteadyState",
+                                       report_category="Monitor")
+        return round(float(sd.get_expression_data(sd.expressions[0])[1][-1]), 2)
+    except BaseException:  # noqa: BLE001  one missing value must not stop the others
+        return None
+
+
+def _solve(ic, folder, powered, ambient):
+    step("temperature monitors", lambda: _monitors(ic, powered))
+    t = time.time()
+    ok = ic.analyze_setup(SETUP)
+    secs = time.time() - t
+    if not ok:
+        check("error", "Solve failed or was stopped. Open AEDT and read the message window.")
+        return
+    check("ok", f"Solved in {secs:.0f} s")
+    rows = [{"refDes": p["refDes"], "powerW": p["powerW"], "tempC": _temp(ic, p["refDes"]),
+             "rjaCW": p.get("rjaCW"), "tjMaxC": p.get("tjMaxC")} for p in powered]
+    if any(r["tempC"] is None for r in rows):
+        check("warn", "Some temperatures could not be read. Look at the result in AEDT.")
+    temps = [r["tempC"] for r in rows if r["tempC"] is not None]
+    (folder / "results.json").write_text(json.dumps({
+        "schema": "pcb-thermal-ansys/results", "solvedAt": time.strftime("%H:%M:%S"), "seconds": round(secs),
+        "ambientC": ambient, "hottestC": max(temps) if temps else None, "parts": rows}, indent=1), encoding="utf-8")
+    step("save project", lambda: ic.save_project())
+    check("ok", f"Hottest heat source {max(temps)} C; results.json written" if temps else "No temperatures read")
 
 
 # ---------------------------------------------------------------- read back

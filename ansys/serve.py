@@ -18,7 +18,7 @@ HERE = Path(__file__).parent
 FOLDER = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else HERE / "example"
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8765
 WHAT = {"build": "Building the project", "update": "Applying changes", "mesh": "Generating the mesh",
-        "read": "Reading AEDT"}
+        "read": "Reading AEDT", "solve": "Solving"}
 job = {"running": False, "what": "", "log": "", "silent": False}
 lock = threading.Lock()
 
@@ -45,7 +45,7 @@ def run_script(script, what, *args, silent=False):
     def work():
         proc = subprocess.Popen([sys.executable, "-u", str(HERE / script), str(FOLDER), *args], stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
-        timer = threading.Timer(60 if silent else 900, proc.kill)    # a hung gRPC call must not block the page
+        timer = threading.Timer(60 if silent else 3600 if args[:1] == ("solve",) else 900, proc.kill)    # a hung gRPC call must not block the page
         timer.start()
         for line in proc.stdout:
             if not silent and "INFO" not in line:
@@ -74,7 +74,7 @@ class H(BaseHTTPRequestHandler):
             self._send(200, (HERE / "page.html").read_bytes(), "text/html; charset=utf-8")
         elif self.path == "/api/state":
             self._send(200, {"folder": str(FOLDER), "board": jread("board.json"), "study": jread("study.json"),
-                             "checks": jread("checks.json"), "state": jread("state.json"), "job": job})
+                             "checks": jread("checks.json"), "results": jread("results.json"), "state": jread("state.json"), "job": job})
         else:
             self._send(404, {"error": "not found"})
 

@@ -127,3 +127,13 @@ The old SolidWorks page lives on branch `addin-mvp` (worktree `thermal_wt_addin`
 
 Untracked, uncommitted: `ansys/`, the `.gitignore` edit, `FLOW_PLAN.md`, `.claude/`. Test scripts are in the
 session scratchpad only.
+
+## Fourth session: Solve and results
+
+- New mode `solve` (page button Solve): puts a point temperature monitor `T_<ref>` on every heat source, runs `analyze_setup("Study")`, reads the monitors, writes `results.json` (temperature per heat source, hottest heat source, Tj max margin) and the page shows a Result card. The kill timer for a solve job is 1 hour.
+- Network (Rjc/Rjb) blocks need `solve_inside = False`. Without it the solver input fails with "Face 'Case_side' of Network has mesh on both sides". Fixed in `_blocks`.
+- Network blocks are hollow, so their monitor sits on the case-side face (top centre). Plain blocks get it in the body.
+- The field calculator (`get_scalar_field_value`) fails in this setup. Monitors plus `get_solution_data(report_category="Monitor")` work.
+- Not available yet: board hot spot, true junction temperature of a network. The sample board gives huge temperatures (7 W on a tiny part): the numbers prove the pipeline, not the physics.
+- A killed AEDT leaves a `.lock` file next to the .aedt. Delete it before reopening.
+- `design_settings` can be None right after a solve. Do not read it there.

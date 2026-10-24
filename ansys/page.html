@@ -111,6 +111,11 @@
     </div>
 
     <div class="card">
+      <h2>Result <span class="mut" id="resAt"></span></h2>
+      <div id="result"><span class="mut">Not solved yet. Press Solve.</span></div>
+    </div>
+
+    <div class="card">
       <h2>Last run</h2>
       <div id="checks"><span class="mut">Not run yet.</span></div>
       <pre id="log" hidden></pre>
@@ -122,6 +127,7 @@
   <button class="main" id="buildBtn" title="Import the EDB and create the whole project. Replaces the project in AEDT.">Build</button>
   <button id="applyBtn" title="Send the yellow changes to the built project.">Apply changes</button>
   <button id="meshBtn" title="Generate the mesh without solving.">Generate mesh</button>
+  <button id="solveBtn" title="Solve the built project in AEDT. Can take several minutes. Apply your changes first.">Solve</button>
   <span class="grow" id="status"></span>
 </div></div>
 
@@ -293,10 +299,25 @@ function renderAedt() {
     ${other ? `<p class="hint">Other thermal items in AEDT, not managed by this page: ${other}</p>` : ""}`;
 }
 
+/* ---- result card ---- */
+function renderResult(r) {
+  if (!r || !r.parts) return;
+  $("resAt").textContent = `(solved ${r.solvedAt}, ${r.seconds} s)`;
+  const f = v => v == null ? "n/a" : v.toFixed(1) + " &deg;C";
+  const rows = r.parts.map(p => {
+    const over = p.tjMaxC != null && p.tempC != null && p.tempC > p.tjMaxC;
+    return `<tr><td>${esc(p.refDes)}</td><td class="n">${p.powerW} W</td><td class="n${over ? " error" : ""}">${f(p.tempC)}</td>
+      <td class="n">${p.tjMaxC != null ? p.tjMaxC + " &deg;C" : ""}</td><td class="n">${p.tempC != null && p.tjMaxC != null ? (p.tjMaxC - p.tempC).toFixed(1) + " K" : ""}</td></tr>`;
+  }).join("");
+  $("result").innerHTML = `<dl class="kv"><dt>Hottest heat source</dt><dd>${f(r.hottestC)}</dd><dt>Ambient</dt><dd>${r.ambientC}</dd></dl>
+    <div class="scroll"><table><thead><tr><th>Heat source</th><th class="n">Power</th><th class="n">Temperature</th><th class="n">Tj max</th><th class="n">Margin</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="hint">Temperature is the hottest point in the part body. Full fields are in AEDT.</p>`;
+}
+
 /* ---- jobs and refresh ---- */
 function renderJob(st) {
   job = st.job; const c = st.checks, busy = job.running && !job.silent;
-  for (const id of ["buildBtn", "applyBtn", "meshBtn"]) $(id).disabled = busy || (id !== "buildBtn" && !built);
+  for (const id of ["buildBtn", "applyBtn", "meshBtn", "solveBtn"]) $(id).disabled = busy || (id !== "buildBtn" && !built);
   $("status").innerHTML = busy ? esc(job.what) + "&hellip;" : c ? (c.ready ? '<span class="ok">Done.</span>' : '<span class="error">Not ready. See Last run.</span>') : "";
   $("log").hidden = !job.log; $("log").textContent = job.log || "";
   if (c) $("checks").innerHTML = `<ul class="plain">${c.checks.map(k => `<li class="${k.level}">${{ ok: "✓", warn: "!", error: "✗" }[k.level]} ${esc(k.text)}</li>`).join("")}</ul>`;
@@ -322,7 +343,7 @@ async function refresh() {
   built = !!(state && state.schema);
   const stamp = state && (state.readAt || "") + "|" + (state.open);
   if (state && state.schema && state.open !== false && stamp !== lastRead) { lastRead = stamp; sync(state); }
-  renderJob(st); renderAedt(); markDirty();
+  renderJob(st); renderAedt(); renderResult(st.results); markDirty();
 }
 
 function initForm() {          // first load: the page's last values, then AEDT takes over
@@ -366,6 +387,7 @@ $("readBtn").onclick = async () => { await api("/api/read", { method: "POST" });
 $("buildBtn").onclick = () => run("build");
 $("applyBtn").onclick = () => run("update");
 $("meshBtn").onclick = () => run("mesh");
+$("solveBtn").onclick = () => { if (confirm("Solve now? It can take several minutes. Apply pending changes first.")) run("solve"); };
 $("addBtn").onclick = () => { addPart($("addRef").value); $("addRef").value = ""; };
 $("addRef").onkeydown = e => { if (e.key === "Enter") $("addBtn").click(); };
 $("form").addEventListener("input", markDirty);
