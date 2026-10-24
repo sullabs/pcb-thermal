@@ -1,19 +1,22 @@
 """Local server for the page. Reads and writes files in <folder>; starts setup_study.py on request.
 
-    python ansys/serve.py <folder> [port]       (use ansys\run.ps1 serve.py <folder>)
+    .\ansys\run.ps1 serve.py [folder] [port]      (default folder: ansys\example)
 
 Open http://localhost:8765. Nothing leaves this PC.
 """
 import json
 import subprocess
+import webbrowser
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 HERE = Path(__file__).parent
-FOLDER = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else None
+FOLDER = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else HERE / "example"
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8765
+WHAT = {"build": "Building the project", "update": "Applying changes", "mesh": "Generating the mesh",
+        "read": "Reading AEDT"}
 job = {"running": False, "what": "", "log": ""}
 lock = threading.Lock()
 
@@ -23,14 +26,14 @@ def jread(name):
     return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
 
 
-def run_script(script, what):
+def run_script(script, what, *args):
     with lock:
         if job["running"]:
             return False
         job.update(running=True, what=what, log="")
 
     def work():
-        proc = subprocess.Popen([sys.executable, "-u", str(HERE / script), str(FOLDER)], stdout=subprocess.PIPE,
+        proc = subprocess.Popen([sys.executable, "-u", str(HERE / script), str(FOLDER), *args], stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
         for line in proc.stdout:
             if "INFO" not in line:
@@ -56,7 +59,7 @@ class H(BaseHTTPRequestHandler):
             self._send(200, (HERE / "page.html").read_bytes(), "text/html; charset=utf-8")
         elif self.path == "/api/state":
             self._send(200, {"folder": str(FOLDER), "board": jread("board.json"), "study": jread("study.json"),
-                             "checks": jread("checks.json"), "job": job})
+                             "checks": jread("checks.json"), "state": jread("state.json"), "job": job})
         else:
             self._send(404, {"error": "not found"})
 
@@ -70,10 +73,14 @@ class H(BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
 
     def do_POST(self):
-        script = {"/api/read": "read_board.py", "/api/run": "setup_study.py"}.get(self.path)
-        if not script:
+        path, _, query = self.path.partition("?")
+        mode = query.partition("mode=")[2] or "build"
+        if path == "/api/read":
+            ok = run_script("read_board.py", "Reading the board")
+        elif path == "/api/run" and mode in WHAT:
+            ok = run_script("setup_study.py", WHAT[mode], mode)
+        else:
             return self._send(404, {"error": "not found"})
-        ok = run_script(script, "Reading the board" if script == "read_board.py" else "Setting up")
         self._send(200 if ok else 409, {"ok": ok})
 
     def log_message(self, *a):
@@ -84,4 +91,5 @@ if __name__ == "__main__":
     if not FOLDER or not FOLDER.is_dir():
         raise SystemExit(__doc__)
     print(f"Page: http://localhost:{PORT}   folder: {FOLDER}", flush=True)
+    threading.Timer(1.0, lambda: webbrowser.open(f"http://localhost:{PORT}")).start()
     ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()

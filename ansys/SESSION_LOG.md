@@ -89,6 +89,22 @@ PyEDB: component `bounding_box` (m), `lower_elevation`/`upper_elevation` (m), `p
 Icepak: `materials.add_material(name)` returns the Material; `modeler.create_region(pad_value=[mm]*6,
 pad_type="Absolute Offset")` after deleting `Region`; `assign_free_opening(face ids)`.
 
+## Third session, part 2: engineer page, edit mode, mesh
+
+- Gravity code of `edit_design_settings` is 0 -X, 1 -Y, 2 -Z, 3 +X, 4 +Y, 5 +Z (read back from `GravityVec` and
+  `GravityDir`). My first guess was wrong; fixed.
+- **Slow call**: `ic.boundaries` (5 to 10 s) and `boundary.props` (about 10 s each). Use the model tree instead:
+  `ic.get_oo_name(ic.odesign, "Thermal")` and `ic.get_oo_property_value(node, name, "Total Power")` take 0.1 s.
+  Delete with `ic.odesign.GetModule("BoundarySetup").DeleteBoundaries([name])`, set with `SetPropValue`.
+  Local mesh values: `get_oo_object(ic.odesign, "Mesh")`, property `Maximum Element Size/X`.
+- Local mesh regions create a `Mesh_<Ref>_SubRegion` object; delete stale ones and `modeler.refresh_all_ids()` before
+  recreating, else `KeyError: 'Mesh_V1_SubRegion'`.
+- Closing a project by name fails when two have the same name (a saved-as project and a re-import). Build closes
+  same-name projects first. Failed attaches create `ProjectN` junk projects.
+- Setup property `Radiation Model` accepts any string without error; only "Discrete Ordinates Model" is a known
+  valid value (library template). Surface to surface name unverified.
+- Generate mesh on the sample: 13 s. Update after changes: 40 to 80 s.
+
 ## Not started
 
 Rjc/Rjb, TIM, emissivity, per-surface h, orientation, incremental updates, real Altium board, real heights.
