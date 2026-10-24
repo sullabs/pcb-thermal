@@ -48,7 +48,7 @@ def read_board(edb_path: Path) -> dict:
                     "refDes": ref,
                     "part": str(c.part_name),
                     "type": str(c.type),
-                    "side": "bottom" if str(c.placement_layer).upper().startswith("BOT") else "top",
+                    "side": "top" if c.is_top_mounted else "bottom",   # from the stackup order, not the layer name
                     "xMinMm": round(bx0 * M2MM, 4), "yMinMm": round(by0 * M2MM, 4),
                     "lMm": round((bx1 - bx0) * M2MM, 4), "wMm": round((by1 - by0) * M2MM, 4),
                     "zMinMm": round(z0 * M2MM, 4), "hMm": round((z1 - z0) * M2MM, 4),

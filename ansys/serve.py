@@ -43,18 +43,30 @@ def run_script(script, what, *args, silent=False):
         time.sleep(0.5)
 
     def work():
-        proc = subprocess.Popen([sys.executable, "-u", str(HERE / script), str(FOLDER), *args], stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
-        timer = threading.Timer(60 if silent else 3600 if args[:1] == ("solve",) else 900, proc.kill)    # a hung gRPC call must not block the page
-        timer.start()
-        for line in proc.stdout:
-            if not silent and "INFO" not in line:
-                job["log"] += line
-        proc.wait()
-        timer.cancel()
-        if not silent and proc.returncode not in (0, 1):
-            job["log"] += "[error] The script was stopped (exit code %s). AEDT may be busy or frozen.\n" % proc.returncode
-        job["running"] = False
+        timer, killed = None, threading.Event()
+        try:
+            proc = subprocess.Popen([sys.executable, "-u", str(HERE / script), str(FOLDER), *args], stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
+            limit = 60 if silent else 3600 if args[:1] == ("solve",) else 900
+            timer = threading.Timer(limit, lambda: (killed.set(), proc.kill()))    # a hung gRPC call must not block the page
+            timer.start()
+            for line in proc.stdout:
+                if not silent and "INFO" not in line:
+                    job["log"] += line
+            proc.wait()
+            if silent:
+                pass
+            elif killed.is_set():    # on Windows a killed process exits with 1, like a normal "not ready"
+                job["log"] += "[error] The script was stopped after %d min, the time limit. AEDT may be busy or frozen.\n" % (limit // 60)
+            elif proc.returncode not in (0, 1):
+                job["log"] += "[error] The script was stopped (exit code %s). AEDT may be busy or frozen.\n" % proc.returncode
+        except Exception as ex:  # noqa: BLE001  the job must always end, or every later request gets 409
+            if not silent:
+                job["log"] += "[error] The script could not run: %s: %s\n" % (type(ex).__name__, ex)
+        finally:
+            if timer:
+                timer.cancel()
+            job["running"] = False
 
     threading.Thread(target=work, daemon=True).start()
     return True

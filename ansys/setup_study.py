@@ -100,7 +100,11 @@ def main(folder: Path, mode: str = "build") -> int:
 
     study = load_study(folder)
     if mode == "build" or not (folder / "board.json").exists():
-        read_board.main(folder)
+        try:
+            read_board.main(folder)
+        except BaseException as ex:  # noqa: BLE001  no .aedb (SystemExit) or PyEDB failed: say so in checks.json
+            check("error", f"Reading the EDB failed: {str(ex).splitlines()[0][:160] if str(ex) else type(ex).__name__}")
+            return _finish(folder, 0)
     board = json.loads((folder / "board.json").read_text(encoding="utf-8"))
     by_ref = {p["refDes"]: p for p in board["parts"]}
     project_file = folder / f"{board['name']}_icepak.aedt"
@@ -138,7 +142,7 @@ def main(folder: Path, mode: str = "build") -> int:
         if mode == "mesh":
             _mesh_now(ic)
         if mode == "solve":
-            step("solve", lambda: _solve(ic, folder, powered, study["ambientC"]), fatal=True)
+            step("solve", lambda: _solve(ic, folder, board, powered, study["ambientC"]), fatal=True)
         state = None if mode == "solve" else step("read back", lambda: read_state(ic, board))   # right after a solve AEDT cannot be read
         if state:
             (folder / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
@@ -298,8 +302,8 @@ def _blocks(ic, board, by_ref, powered, study):
     made = nets = 0
     for p in powered:
         ref, b = p["refDes"], by_ref[p["refDes"]]
-        h = p.get("heightMm") or b["hMm"]
-        if h < MIN_BLOCK_H_MM:
+        h = p.get("heightMm") or b["hMm"]     # a typed height is used as it is, only the EDB value gets the minimum
+        if not p.get("heightMm") and h < MIN_BLOCK_H_MM:
             check("warn", f"{ref}: EDB height {b['hMm']} mm is a placeholder, using {MIN_BLOCK_H_MM} mm. "
                           f"Type the real height.")
             h = MIN_BLOCK_H_MM
@@ -349,6 +353,11 @@ def _air(ic, study):
     side, above = study["marginMm"], study["marginAboveMm"]
     pad = [side] * 6                           # +X -X +Y -Y +Z -Z
     pad[ORIENTATION[study["orientation"]][3]] += above   # extra room on the face opposite to gravity
+    bb, have = air_pad(ic)
+    if have and "Open_air" in ic.get_oo_name(ic.odesign, "Thermal") and \
+            max(abs(a - b) for a, b in zip(have, pad)) <= 0.06:   # rebuilding would throw away the mesh and solution
+        check("ok", f"Air {bb[3]-bb[0]:.0f} x {bb[4]-bb[1]:.0f} x {bb[5]-bb[2]:.0f} mm, open on all faces (unchanged)")
+        return
     ic.modeler.delete("Region")
     reg = ic.modeler.create_region(pad_value=pad, pad_type="Absolute Offset", name="Region")
     if not reg:
@@ -453,17 +462,35 @@ def _hollow(ic):
             ic.modeler[n[2:]].solve_inside = False
 
 
-def _monitors(ic, powered):
+def _sources(ic, powered):
+    """heat sources as they are in AEDT, which is what gets solved: [{refDes, powerW, network, rjaCW, tjMaxC}].
+    Rja and Tj max stay on the page, so they come from study.json."""
+    _, tree = thermal(ic)
+    names = set(ic.modeler.object_names)
+    page = {p["refDes"]: p for p in powered}
+    out = []
+    for n, d in tree.items():
+        if n.startswith("P_") and n[2:] in names and d["type"] in ("Solid Block", "Network"):
+            p = page.get(n[2:], {})
+            out.append({"refDes": n[2:], "powerW": d["power"] or 0, "network": d["type"] == "Network",
+                        "rjaCW": p.get("rjaCW"), "tjMaxC": p.get("tjMaxC")})
+    missing = sorted(set(page) - {s["refDes"] for s in out})
+    if missing:
+        check("warn", f"{', '.join(missing)}: on the page but not in AEDT, so not solved. Press Apply first.")
+    return out
+
+
+def _monitors(ic, sources, board):
     """one point monitor T_<ref> per heat source, made fresh for each solve. A network block is hollow, so its
-    monitor sits on the case side face (top centre), a plain block gets it at its centre."""
+    monitor sits on the case side face (the face away from the board), a plain block gets it at its centre."""
     for n in [n for n in ic.get_oo_name(ic.odesign, "Monitor") if n.startswith("T_")]:
         ic.monitor.delete_monitor(n)
-    _, tree = thermal(ic)
-    for p in powered:
-        ref = p["refDes"]
+    _, zhi = board_z(ic, board)
+    for s in sources:
+        ref = s["refDes"]
         bb = ic.modeler[ref].bounding_box
-        if tree.get(f"P_{ref}", {}).get("type") == "Network":
-            pos = [(bb[0] + bb[3]) / 2, (bb[1] + bb[4]) / 2, bb[5] if bb[5] > 0 else bb[2]]
+        if s["network"]:
+            pos = [(bb[0] + bb[3]) / 2, (bb[1] + bb[4]) / 2, bb[5] if bb[2] >= zhi - 1e-6 else bb[2]]
             ic.monitor.assign_point_monitor(pos, monitor_quantity="Temperature", monitor_name=f"T_{ref}")
         else:
             ic.monitor.assign_point_monitor_in_object(ref, monitor_quantity="Temperature", monitor_name=f"T_{ref}")
@@ -471,17 +498,26 @@ def _monitors(ic, powered):
 
 def _fmax(ic, obj):
     """highest temperature in one object (field calculator). The solution name must be given, or AEDT refuses.
+    Not post.get_scalar_field_value: it tries EnterQty("Temperature") first, which in Icepak always fails (Temperature
+    is only a named expression) and puts "Abnormal script termination" in the message manager for every object.
     A hollow object (network block) has no volume and fails; the stack is cleared so the next call still works."""
+    fr = ic.post.ofieldsreporter
+    f = Path(ic.working_directory) / f"fmax_{obj}.fld"
     try:
-        v = ic.post.get_scalar_field_value("Temperature", "Maximum", solution=f"{SETUP} : SteadyState",
-                                           object_name=obj, object_type="volume")
-        return round(float(v), 2)
+        fr.CalcStack("clear")
+        fr.CopyNamedExprToStack("Temperature")
+        fr.EnterVol(obj)
+        fr.CalcOp("Maximum")
+        fr.CalculatorWrite(str(f), ["Solution:=", f"{SETUP} : SteadyState"], [])
+        return round(float(f.read_text().split()[-1]), 2)
     except BaseException:  # noqa: BLE001
+        return None
+    finally:
         try:
-            ic.post.ofieldsreporter.CalcStack("clear")
+            fr.CalcStack("clear")
+            f.unlink(missing_ok=True)
         except BaseException:  # noqa: BLE001
             pass
-        return None
 
 
 def _temp(ic, ref, hollow):
@@ -539,9 +575,10 @@ def _convergence(ic):
     return {"ok": bool(known) and all(i["ok"] for i in known), "read": len(known), "items": items}
 
 
-def _solve(ic, folder, powered, ambient):
+def _solve(ic, folder, board, powered, ambient):
     step("junction blocks hollow", lambda: _hollow(ic))
-    step("temperature monitors", lambda: _monitors(ic, powered))
+    powered = _sources(ic, powered)     # from here on the heat sources are the ones in AEDT, with AEDT's power
+    step("temperature monitors", lambda: _monitors(ic, powered, board))
     flow = step("heat flow monitors", lambda: _flow_monitors(ic))
     t = time.time()
     ok = ic.analyze_setup(SETUP)
@@ -559,7 +596,8 @@ def _solve(ic, folder, powered, ambient):
     else:
         bad = ", ".join(i["name"] for i in conv["items"] if i["ok"] is False)
         check("warn", f"NOT converged ({bad}). Raise the iterations or refine the mesh before trusting the numbers.")
-    bal = step("energy balance", lambda: _balance(ic, flow, sum(p["powerW"] for p in powered))) if flow and powered else None
+    total_w = sum(p["powerW"] for p in powered)
+    bal = step("energy balance", lambda: _balance(ic, flow, total_w)) if flow and total_w > 0 else None
     radiating = str(getattr(next((x for x in ic.setups if x.name == SETUP), None), "props", {}).get("Radiation Model", "Off")) != "Off"
     if bal and radiating:
         bal["radiation"] = True
@@ -569,10 +607,8 @@ def _solve(ic, folder, powered, ambient):
         e = abs(bal["errorPct"])
         check("ok" if e <= 1 else "warn", f"Energy balance: {bal['inW']} W in, {bal['outW']} W out ({bal['errorPct']:+.2f} %)"
               + ("" if e <= 1 else ". More than 1 % is not balanced: converge further or refine the mesh."))
-    _, tree = thermal(ic)
-    rows = [{"refDes": p["refDes"], "powerW": p["powerW"],
-             "tempC": _temp(ic, p["refDes"], tree.get(f"P_{p['refDes']}", {}).get("type") == "Network"),
-             "rjaCW": p.get("rjaCW"), "tjMaxC": p.get("tjMaxC")} for p in powered]
+    rows = [{"refDes": p["refDes"], "powerW": p["powerW"], "tempC": _temp(ic, p["refDes"], p["network"]),
+             "rjaCW": p["rjaCW"], "tjMaxC": p["tjMaxC"]} for p in powered]
     if any(r["tempC"] is None for r in rows):
         check("warn", "Some temperatures could not be read. Look at the result in AEDT.")
     layers = ic.modeler.get_3d_component_object_list(name=PCB)
@@ -581,7 +617,8 @@ def _solve(ic, folder, powered, ambient):
     if board is None:
         check("warn", "Board temperature could not be read. Look at the result in AEDT.")
     # not "AllObjects": hollow network blocks in it break the AEDT session. Ask every other object one by one.
-    hollow = {p["refDes"] for p in powered if tree.get(f"P_{p['refDes']}", {}).get("type") == "Network"}
+    _, tree = thermal(ic)
+    hollow = {n[2:] for n, d in tree.items() if d["type"] == "Network" and n.startswith("P_")}
     rest = [o for o in ic.modeler.object_names if o not in hollow and o not in layers and o != "Region"]
     others = [v for v in (_fmax(ic, o) for o in rest) if v is not None]
     seen = [v for v in [board] + others + [r["tempC"] for r in rows] if v is not None]
@@ -602,32 +639,43 @@ def _get(settings, key, default=None):
         return default
 
 
+def air_pad(ic, tree=None):
+    """air box bounding box and its room around the board and heat sources in mm, [+X -X +Y -Y +Z -Z]"""
+    names = set(ic.modeler.object_names)
+    if "Region" not in names:
+        return None, None
+    if tree is None:
+        _, tree = thermal(ic)
+    ext = []
+    try:
+        ext.append(ic.modeler.user_defined_components[PCB].bounding_box)
+    except BaseException:  # noqa: BLE001
+        pass
+    ext += [ic.modeler[n[2:]].bounding_box for n, d in tree.items()
+            if n.startswith("P_") and n[2:] in names and d["type"] in ("Solid Block", "Network")]
+    reg = ic.modeler["Region"].bounding_box
+    if not ext:
+        return reg, None
+    lo = [min(e[i] for e in ext) for i in range(3)]
+    hi = [max(e[i + 3] for e in ext) for i in range(3)]
+    return reg, [round(reg[3] - hi[0], 1), round(lo[0] - reg[0], 1), round(reg[4] - hi[1], 1),
+                 round(lo[1] - reg[1], 1), round(reg[5] - hi[2], 1), round(lo[2] - reg[2], 1)]
+
+
 def read_state(ic, board=None):
     ds = ic.design_settings
     names = set(ic.modeler.object_names)
     setup = next((x for x in ic.setups if x.name == SETUP), None)
     _, tree = thermal(ic)
     blocks, other = [], []
-    ext = []
-    try:
-        ext.append(ic.modeler.user_defined_components[PCB].bounding_box)
-    except BaseException:  # noqa: BLE001
-        pass
     for n, d in tree.items():
         if n.startswith("P_") and n[2:] in names and d["type"] in ("Solid Block", "Network"):
             bb = ic.modeler[n[2:]].bounding_box
-            ext.append(bb)
             blocks.append({"refDes": n[2:], "kind": d["type"], "powerW": d["power"] or 0,
                            "heightMm": round(bb[5] - bb[2], 4), "rjcCW": d["rjc"], "rjbCW": d["rjb"]})
         elif d["type"] != "Opening":
             other.append({"name": n, "type": d["type"], "powerW": d["power"]})
-    reg = ic.modeler["Region"].bounding_box if "Region" in names else None
-    pad = None
-    if reg and ext:
-        lo = [min(e[i] for e in ext) for i in range(3)]
-        hi = [max(e[i + 3] for e in ext) for i in range(3)]
-        pad = [round(reg[3] - hi[0], 1), round(lo[0] - reg[0], 1), round(reg[4] - hi[1], 1),
-               round(lo[1] - reg[1], 1), round(reg[5] - hi[2], 1), round(lo[2] - reg[2], 1)]   # +X -X +Y -Y +Z -Z
+    reg, pad = air_pad(ic, tree)
     gm = ic.mesh.global_mesh_region
     local = [{"refDes": r, "maxMm": v} for r, v in local_mesh(ic).items()]
     return {
