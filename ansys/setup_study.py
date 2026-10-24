@@ -552,14 +552,17 @@ def _solve(ic, folder, powered, ambient):
     board = max(on_board) if on_board else None
     if board is None:
         check("warn", "Board temperature could not be read. Look at the result in AEDT.")
-    # no "AllObjects" call: with radiation on it fails and breaks the AEDT session. The junction itself is not read.
-    seen = [v for v in [board] + [r["tempC"] for r in rows] if v is not None]
+    # not "AllObjects": hollow network blocks in it break the AEDT session. Ask every other object one by one.
+    hollow = {p["refDes"] for p in powered if tree.get(f"P_{p['refDes']}", {}).get("type") == "Network"}
+    rest = [o for o in ic.modeler.object_names if o not in hollow and o not in layers and o != "Region"]
+    others = [v for v in (_fmax(ic, o) for o in rest) if v is not None]
+    seen = [v for v in [board] + others + [r["tempC"] for r in rows] if v is not None]
     anywhere = max(seen) if seen else None
     (folder / "results.json").write_text(json.dumps({
         "schema": "pcb-thermal-ansys/results", "solvedAt": time.strftime("%H:%M:%S"), "seconds": round(secs),
         "ambientC": ambient, "converged": conv, "balance": bal, "boardC": board, "hottestC": anywhere, "parts": rows}, indent=1), encoding="utf-8")
     step("save project", lambda: ic.save_project())
-    check("ok", f"Board hottest {board} C, hottest anywhere {anywhere} C; results.json written")
+    check("ok", f"Board hottest {board} C, hottest measured {anywhere} C; results.json written")
 
 
 # ---------------------------------------------------------------- read back

@@ -6,3 +6,17 @@ Starting Batch Run: 6:10:29 PM  Oct 24, 2026
 Running as user : Sultan_PC\Sultan
 Temp directory: C:\Users\Sultan\AppData\Local\Temp
 Project directory: C:\Users\Sultan\Documents\Ansoft
+ 
+Ansys Electronics Desktop Version 2026.1.0, Build: 2026-02-02 02:17:35
+Location: E:\Program Files\ANSYS Inc\v261\AnsysEM\ansysedt.exe
+Non Graphical Mode: No Project??
+Starting Batch Run: 8:26:25 PM  Oct 24, 2026
+Running as user : Sultan_PC\Sultan
+Temp directory: C:\Users\Sultan\AppData\Local\Temp
+Project directory: C:\Users\Sultan\Documents\Ansoft
+-- Message Window --
+      *Global - Messages
+        [info] gRPC server started on port 50051 of local host. Only connections from the local host initiated by the same user are permitted. 
+        [info] OpenGL Version: 4.6.0 NVIDIA 610.88
+-- Message Window --
+Stopping Batch Run: 8:30:15 PM  Oct 24, 2026

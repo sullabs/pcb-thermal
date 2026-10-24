@@ -146,3 +146,5 @@ session scratchpad only.
 - Projects built before the hollow fix keep solve_inside True after AEDT is killed: `_hollow` enforces it before each solve.
 - After a solve, reading the design (read_state) fails in the same session, so solve mode skips the read back.
 - Open: V1 case temperature rose from 809 to 1072 C with radiation on while the board fell from 748 to 354 C. Unexplained, check on a real board.
+
+Fix round: the whole-model maximum now asks every non-hollow object one by one (no AllObjects call), so it works with radiation on and the session survives. Icepak monitors have no radiation heat flow quantity (only HeatFlowRate on faces, convection only), so the energy balance with radiation stays "not checked"; the Energy residual is the check there. The read back right after a solve still fails, so solve mode skips it; the page reads AEDT in its next poll.
