@@ -159,3 +159,6 @@ Downloaded to ansys/boards_src (git-excluded); working copies in ansys/boards (e
 
 ## SVP board: unreadable results after solve
 Not reproducible. The failing solve came right after AEDT had been killed in a broken session; residuals and monitors read "No trace data" even in a fresh session. A later solve (with and without T_ and Q_ monitors, and through the real script, also after a fresh AEDT start) converged and read everything: board 97.6 C, hottest measured 98.0 C at 10 W, Energy residual 2e-9. Likely cause: stale result files from the killed run. Warning text now says to press Solve again.
+
+## siwave_multi_zones: cause of the failed solve
+The EDB has a multi-zone stackup. Icepak's PCB import makes 15 layer objects with D4, D5, L5, L6 twice and no L1, D1, L2, D2. The solver then says "layer property out of sync with geometry / unable to obtain PCB component data". Not fixable from the script. Build now stops with an error naming the duplicated layers (checked right after the import).

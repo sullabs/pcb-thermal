@@ -207,6 +207,12 @@ def _build(Hfss3dLayout, Icepak, desktop, folder, board, study):
     check("ok" if ok else "error", f"PCB from the EDB, mapping resolution {study['pcbResolution']}"
           if ok else "PCB import returned False")
     _thermal_defaults(ic)
+    names = [re.sub(r"^PCB_\d+_|_BBox$", "", o) for o in ic.modeler.get_3d_component_object_list(name=PCB)]
+    dup = sorted({n for n in names if names.count(n) > 1})
+    if dup:
+        check("error", f"The stackup has more than one zone (rigid-flex or stepped board): layers {', '.join(dup)} are "
+                       f"imported twice, so the solver will refuse to start. Icepak's PCB import cannot take this board. "
+                       f"Export one zone only, or model it in AEDT.")
     ic.save_project(str(folder / f"{board['name']}_icepak.aedt"))
     return ic
 
