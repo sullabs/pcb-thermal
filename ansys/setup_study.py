@@ -463,6 +463,24 @@ def _temp(ic, ref, hollow):
         return None
 
 
+def _convergence(ic):
+    """final residuals against the setup's convergence criteria: {"ok": bool, "items": [{name, value, limit, ok}]}"""
+    setup = next((x for x in ic.setups if x.name == SETUP), None)
+    limit = {"Continuity": "Flow", "XVelocity": "Flow", "YVelocity": "Flow", "ZVelocity": "Flow", "Energy": "Energy"}
+    items = []
+    for q, crit in limit.items():
+        try:
+            sd = ic.post.get_solution_data(expressions=["Residual." + q], setup_sweep_name=f"{SETUP} : SteadyState",
+                                           report_category="Residual")
+            val = float(sd.get_expression_data(sd.expressions[0])[1][-1])
+            lim = num(setup.props.get(f"Convergence Criteria - {crit}")) if setup else None
+            items.append({"name": q, "value": val, "limit": lim, "ok": lim is None or val <= lim})
+        except BaseException:  # noqa: BLE001
+            items.append({"name": q, "value": None, "limit": None, "ok": None})
+    known = [i for i in items if i["ok"] is not None]
+    return {"ok": bool(known) and all(i["ok"] for i in known), "read": len(known), "items": items}
+
+
 def _solve(ic, folder, powered, ambient):
     step("temperature monitors", lambda: _monitors(ic, powered))
     t = time.time()
@@ -472,6 +490,14 @@ def _solve(ic, folder, powered, ambient):
         check("error", "Solve failed or was stopped. Open AEDT and read the message window.")
         return
     check("ok", f"Solved in {secs:.0f} s")
+    conv = _convergence(ic)
+    if not conv["read"]:
+        check("warn", "Convergence could not be read. Check the residuals in AEDT before trusting the numbers.")
+    elif conv["ok"]:
+        check("ok", "Converged: all residuals are below the setup limits")
+    else:
+        bad = ", ".join(i["name"] for i in conv["items"] if i["ok"] is False)
+        check("warn", f"NOT converged ({bad}). Raise the iterations or refine the mesh before trusting the numbers.")
     _, tree = thermal(ic)
     rows = [{"refDes": p["refDes"], "powerW": p["powerW"],
              "tempC": _temp(ic, p["refDes"], tree.get(f"P_{p['refDes']}", {}).get("type") == "Network"),
@@ -486,7 +512,7 @@ def _solve(ic, folder, powered, ambient):
     anywhere = _fmax(ic, "AllObjects")
     (folder / "results.json").write_text(json.dumps({
         "schema": "pcb-thermal-ansys/results", "solvedAt": time.strftime("%H:%M:%S"), "seconds": round(secs),
-        "ambientC": ambient, "boardC": board, "hottestC": anywhere, "parts": rows}, indent=1), encoding="utf-8")
+        "ambientC": ambient, "converged": conv, "boardC": board, "hottestC": anywhere, "parts": rows}, indent=1), encoding="utf-8")
     step("save project", lambda: ic.save_project())
     check("ok", f"Board hottest {board} C, hottest anywhere {anywhere} C; results.json written")
 
