@@ -313,7 +313,8 @@ function renderResult(r) {
   const conv = !c ? "" : !c.read ? '<p class="warn">Convergence could not be read. Check the residuals in AEDT.</p>'
     : c.ok ? '<p class="ok">Converged: residuals are below the setup limits.</p>'
     : `<p class="error">NOT converged (${esc(bad)}). Do not trust these numbers. Raise the iterations or refine the mesh.</p>`;
-  $("result").innerHTML = conv + `<dl class="kv"><dt>Board hottest</dt><dd>${f(r.boardC)}</dd><dt>Hottest anywhere</dt><dd>${f(r.hottestC)}</dd><dt>Ambient</dt><dd>${r.ambientC}</dd></dl>
+  const b = r.balance, bal = !b ? "" : `<p class="${Math.abs(b.errorPct) <= 1 ? "ok" : "error"}">Energy balance: ${b.inW} W in, ${b.outW} W out (${b.errorPct > 0 ? "+" : ""}${b.errorPct} %).${Math.abs(b.errorPct) <= 1 ? "" : " Not balanced: do not trust these numbers."}</p>`;
+  $("result").innerHTML = conv + bal + `<dl class="kv"><dt>Board hottest</dt><dd>${f(r.boardC)}</dd><dt>Hottest anywhere</dt><dd>${f(r.hottestC)}</dd><dt>Ambient</dt><dd>${r.ambientC}</dd></dl>
     <div class="scroll"><table><thead><tr><th>Heat source</th><th class="n">Power</th><th class="n">Temperature</th><th class="n">Tj max</th><th class="n">Margin</th></tr></thead><tbody>${rows}</tbody></table></div>
     <p class="hint">Heat source temperature is the hottest point in the part body; a junction model shows its case surface. Hottest anywhere includes the junction. Full fields are in AEDT.</p>`;
 }

@@ -463,6 +463,27 @@ def _temp(ic, ref, hollow):
         return None
 
 
+def _flow_monitors(ic):
+    """heat flow rate monitors Q_<n> on the six faces of the air box: their sum is the heat leaving the model"""
+    for n in [n for n in ic.get_oo_name(ic.odesign, "Monitor") if n.startswith("Q_")]:
+        ic.monitor.delete_monitor(n)
+    return [ic.monitor.assign_face_monitor(f.id, monitor_quantity="HeatFlowRate", monitor_name=f"Q_{i}")
+            for i, f in enumerate(ic.modeler["Region"].faces)]
+
+
+def _balance(ic, names, total_w):
+    """heat out through the air box against the power put in. AEDT reports the flow in milliwatts."""
+    out, unit = 0.0, None
+    for n in names:
+        sd = ic.post.get_solution_data(expressions=[f"{n}.HeatFlowRate"], setup_sweep_name=f"{SETUP} : SteadyState",
+                                       report_category="Monitor")
+        out += float(sd.get_expression_data(sd.expressions[0])[1][-1])
+        unit = unit or str(sd.units_data.get(sd.expressions[0], "")) if hasattr(sd, "units_data") else unit
+    out_w = abs(out) / (1000.0 if "m" in (unit or "mW").lower() else 1.0)
+    return {"inW": round(total_w, 4), "outW": round(out_w, 4), "errorPct": round(100 * (out_w - total_w) / total_w, 2),
+            "unit": unit}
+
+
 def _convergence(ic):
     """final residuals against the setup's convergence criteria: {"ok": bool, "items": [{name, value, limit, ok}]}"""
     setup = next((x for x in ic.setups if x.name == SETUP), None)
@@ -483,6 +504,7 @@ def _convergence(ic):
 
 def _solve(ic, folder, powered, ambient):
     step("temperature monitors", lambda: _monitors(ic, powered))
+    flow = step("heat flow monitors", lambda: _flow_monitors(ic))
     t = time.time()
     ok = ic.analyze_setup(SETUP)
     secs = time.time() - t
@@ -498,6 +520,11 @@ def _solve(ic, folder, powered, ambient):
     else:
         bad = ", ".join(i["name"] for i in conv["items"] if i["ok"] is False)
         check("warn", f"NOT converged ({bad}). Raise the iterations or refine the mesh before trusting the numbers.")
+    bal = step("energy balance", lambda: _balance(ic, flow, sum(p["powerW"] for p in powered))) if flow and powered else None
+    if bal:
+        e = abs(bal["errorPct"])
+        check("ok" if e <= 1 else "warn", f"Energy balance: {bal['inW']} W in, {bal['outW']} W out ({bal['errorPct']:+.2f} %)"
+              + ("" if e <= 1 else ". More than 1 % is not balanced: converge further or refine the mesh."))
     _, tree = thermal(ic)
     rows = [{"refDes": p["refDes"], "powerW": p["powerW"],
              "tempC": _temp(ic, p["refDes"], tree.get(f"P_{p['refDes']}", {}).get("type") == "Network"),
@@ -512,7 +539,7 @@ def _solve(ic, folder, powered, ambient):
     anywhere = _fmax(ic, "AllObjects")
     (folder / "results.json").write_text(json.dumps({
         "schema": "pcb-thermal-ansys/results", "solvedAt": time.strftime("%H:%M:%S"), "seconds": round(secs),
-        "ambientC": ambient, "converged": conv, "boardC": board, "hottestC": anywhere, "parts": rows}, indent=1), encoding="utf-8")
+        "ambientC": ambient, "converged": conv, "balance": bal, "boardC": board, "hottestC": anywhere, "parts": rows}, indent=1), encoding="utf-8")
     step("save project", lambda: ic.save_project())
     check("ok", f"Board hottest {board} C, hottest anywhere {anywhere} C; results.json written")
 
