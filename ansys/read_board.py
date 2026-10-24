@@ -1,0 +1,84 @@
+"""Read an Ansys EDB (.aedb) and write board.json for the page.
+
+    python ansys/read_board.py <folder>
+
+<folder> holds one <board>.aedb (or study.json names it). Writes <folder>/board.json. Units in the file: mm.
+Needs no AEDT session, only PyEDB (about 7 s).
+"""
+import json
+import sys
+import warnings
+from pathlib import Path
+
+warnings.filterwarnings("ignore")
+VERSION = "2026.1"
+M2MM = 1000.0
+
+
+def find_edb(folder: Path) -> Path:
+    study = folder / "study.json"
+    if study.exists():
+        name = json.loads(study.read_text(encoding="utf-8")).get("edb")
+        if name and (folder / name).exists():
+            return folder / name
+    found = sorted(folder.glob("*.aedb"))
+    if not found:
+        raise SystemExit(f"No .aedb folder in {folder}")
+    return found[0]
+
+
+def read_board(edb_path: Path) -> dict:
+    from pyedb import Edb
+
+    edb = Edb(str(edb_path), version=VERSION)
+    try:
+        (x0, y0), (x1, y1) = edb.get_bounding_box()
+        layers = []
+        for name, lay in edb.stackup.layers.items():
+            try:
+                layers.append({"name": name, "type": str(lay.type), "thicknessMm": round(lay.thickness * M2MM, 4)})
+            except Exception:
+                pass
+        parts = []
+        for ref, c in edb.components.instances.items():
+            try:
+                bx0, by0, bx1, by1 = c.bounding_box
+                z0, z1 = sorted((c.lower_elevation, c.upper_elevation))
+                parts.append({
+                    "refDes": ref,
+                    "part": str(c.part_name),
+                    "type": str(c.type),
+                    "side": "bottom" if str(c.placement_layer).upper().startswith("BOT") else "top",
+                    "xMinMm": round(bx0 * M2MM, 4), "yMinMm": round(by0 * M2MM, 4),
+                    "lMm": round((bx1 - bx0) * M2MM, 4), "wMm": round((by1 - by0) * M2MM, 4),
+                    "zMinMm": round(z0 * M2MM, 4), "hMm": round((z1 - z0) * M2MM, 4),
+                })
+            except Exception:
+                continue
+        parts.sort(key=lambda p: -(p["lMm"] * p["wMm"]))
+        return {
+            "schema": "pcb-thermal-ansys/board",
+            "edb": edb_path.name,
+            "name": edb_path.stem,
+            "outlineMm": {"xMin": round(x0 * M2MM, 4), "yMin": round(y0 * M2MM, 4),
+                          "xMax": round(x1 * M2MM, 4), "yMax": round(y1 * M2MM, 4)},
+            "thicknessMm": round(sum(l["thicknessMm"] for l in layers), 4),
+            "layers": layers,
+            "parts": parts,
+        }
+    finally:
+        edb.close_edb()
+
+
+def main(folder: Path) -> Path:
+    edb = find_edb(folder)
+    board = read_board(edb)
+    out = folder / "board.json"
+    out.write_text(json.dumps(board, indent=1), encoding="utf-8")
+    return out
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        raise SystemExit(__doc__)
+    print(main(Path(sys.argv[1]).resolve()))
