@@ -5,7 +5,7 @@
 build  : new AEDT project from the EDB: PCB, power blocks, air, environment, setup, mesh (about 40 s)
 update : the same settings applied to the project that is already built (fast); AEDT edits to the things the
          page owns (power, ambient, air, mesh) are overwritten, everything else is left alone
-read   : only read the project back into state.json (the page shows it)
+read   : only read the project into state.json, as it is in AEDT now (never starts AEDT or opens a project)
 mesh   : generate the mesh and report how long it took
 
 Input  : <folder>/<board>.aedb, <folder>/study.json (written by the page)
@@ -61,7 +61,10 @@ def step(label, fn, fatal=False):
 
 
 def load_study(folder: Path) -> dict:
-    s = json.loads((folder / "study.json").read_text(encoding="utf-8"))
+    f = folder / "study.json"
+    s = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+    if not f.exists():
+        check("warn", "No study.json yet: defaults used, no heat sources")
     s.setdefault("ambientC", 25)
     s.setdefault("orientation", "flat-up")
     s.setdefault("marginMm", 50)
@@ -101,6 +104,10 @@ def main(folder: Path, mode: str = "build") -> int:
     by_ref = {p["refDes"]: p for p in board["parts"]}
     project_file = folder / f"{board['name']}_icepak.aedt"
 
+    if mode == "read":
+        return read_only(folder, board, project_file)
+    for ref in board.get("skipped", []):
+        check("warn", f"{ref}: could not be read from the EDB (no position or size), it cannot get a heat source")
     powered = [p for p in study["parts"] if (p.get("powerW") or 0) > 0]
     for p in powered:
         if p["refDes"] not in by_ref:
@@ -124,12 +131,12 @@ def main(folder: Path, mode: str = "build") -> int:
             ic = step("open project", lambda: Icepak(project=str(project_file), design=DESIGN, version=VERSION,
                                                     new_desktop=False, port=PORT), fatal=True)
         if mode in ("build", "update"):
-            _apply(ic, by_ref, powered, study)
+            _apply(ic, board, by_ref, powered, study)
             step("save project", lambda: ic.save_project())
             check("ok", f"Saved {project_file.name}")
         if mode == "mesh":
             _mesh_now(ic)
-        state = step("read back", lambda: read_state(ic))
+        state = step("read back", lambda: read_state(ic, board))
         if state:
             (folder / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
     except BaseException as ex:  # noqa: BLE001
@@ -182,8 +189,8 @@ def _build(Hfss3dLayout, Icepak, desktop, folder, board, study):
 
 # ---------------------------------------------------------------- apply (same for build and update)
 
-def _apply(ic, by_ref, powered, study):
-    step("heat sources", lambda: _blocks(ic, by_ref, powered, study))
+def _apply(ic, board, by_ref, powered, study):
+    step("heat sources", lambda: _blocks(ic, board, by_ref, powered, study))
     step("air", lambda: _air(ic, study))
     step("environment", lambda: _environment(ic, study))
     step("setup", lambda: _setup(ic, study))
@@ -191,11 +198,20 @@ def _apply(ic, by_ref, powered, study):
 
 
 def thermal(ic):
-    """{boundary name: (type, power string)} from the model tree: about 0.1 s each, ic.boundaries takes 5 to 10 s."""
+    """{boundary name: {type, power W, rjc, rjb}} from the model tree: about 0.1 s each, ic.boundaries takes 5 to 10 s."""
     node = ic.get_oo_object(ic.odesign, "Thermal")
+    val = lambda n, prop: ic.get_oo_property_value(node, n, prop)   # noqa: E731
     out = {}
     for n in ic.get_oo_name(ic.odesign, "Thermal"):
-        out[n] = (ic.get_oo_property_value(node, n, "Type"), ic.get_oo_property_value(node, n, "Total Power"))
+        typ = val(n, "Type")
+        d = {"type": typ, "power": None, "rjc": None, "rjb": None}
+        if typ == "Solid Block":
+            d["power"] = num(val(n, "Total Power"))
+        elif typ == "Network":
+            d["power"] = num(val(n, "Internal: Properties/Power"))
+            d["rjc"] = num(val(n, "Rjc: Properties/ThermalResistance"))
+            d["rjb"] = num(val(n, "Rjb: Properties/ThermalResistance"))
+        out[n] = d
     return node, out
 
 
@@ -209,20 +225,47 @@ def _delete_block(ic, ref):
         ic.modeler.delete(ref)
 
 
-def _blocks(ic, by_ref, powered, study):
+PCB = "PCB1"
+
+
+def board_z(ic, board):
+    """lowest and highest z of the imported PCB in mm"""
+    try:
+        bb = ic.modeler.user_defined_components[PCB].bounding_box
+        return bb[2], bb[5]
+    except BaseException:  # noqa: BLE001
+        return 0.0, board["thicknessMm"]
+
+
+def _kind(p):
+    rjc, rjb = p.get("rjcCW") or 0, p.get("rjbCW") or 0
+    if rjc > 0 and rjb > 0:
+        return "Network"
+    if rjc > 0 or rjb > 0:
+        check("warn", f"{p['refDes']}: only one of Rjc and Rjb is given. A junction model needs both, so a plain block "
+                      f"is used and no junction temperature is computed.")
+    return "Solid Block"
+
+
+def _same(a, b):
+    return a is not None and b is not None and abs(a - b) < 1e-9
+
+
+def _blocks(ic, board, by_ref, powered, study):
     m = ic.materials.add_material(PKG)
     if m:
         m.thermal_conductivity = study["packageK"]
         m.mass_density = 2000
     want = {p["refDes"] for p in powered}
-    node, bmap = thermal(ic)
+    node, tree = thermal(ic)
     objects = set(ic.modeler.object_names)
-    for name in list(bmap):
+    for name in list(tree):
         if name.startswith("P_") and name[2:] not in want:
             _delete_block(ic, name[2:])
-            bmap.pop(name)
+            tree.pop(name)
             check("ok", f"{name[2:]}: heat source removed")
-    made = 0
+    zlo, zhi = board_z(ic, board)
+    made = nets = 0
     for p in powered:
         ref, b = p["refDes"], by_ref[p["refDes"]]
         h = p.get("heightMm") or b["hMm"]
@@ -230,27 +273,45 @@ def _blocks(ic, by_ref, powered, study):
             check("warn", f"{ref}: EDB height {b['hMm']} mm is a placeholder, using {MIN_BLOCK_H_MM} mm. "
                           f"Type the real height.")
             h = MIN_BLOCK_H_MM
-        z = b["zMinMm"] if b["side"] == "top" else b["zMinMm"] + b["hMm"] - h
+        z = zhi if b["side"] == "top" else zlo - h      # the part sits on the board surface, so a network can touch it
         box = [b["xMinMm"], b["yMinMm"], z, b["xMinMm"] + b["lMm"], b["yMinMm"] + b["wMm"], z + h]
-        bound = bmap.get(f"P_{ref}")
-        if bound and ref in objects:
-            cur = ic.modeler[ref].bounding_box
-            if max(abs(a - c) for a, c in zip(cur, box)) > 1e-3:
-                _delete_block(ic, ref)
-                bound = None
-        if bound:
-            if num(bound[1]) != p["powerW"]:
-                ic.get_oo_object(node, f"P_{ref}").SetPropValue("Total Power", f"{p['powerW']}W")
+        kind = _kind(p)
+        cur = tree.get(f"P_{ref}")
+        ok = cur is not None and ref in objects and cur["type"] == kind
+        if ok:
+            ok = max(abs(a - c) for a, c in zip(ic.modeler[ref].bounding_box, box)) <= 1e-3
+        if ok and kind == "Network":
+            ok = _same(cur["rjc"], p["rjcCW"]) and _same(cur["rjb"], p["rjbCW"])
+        if ok:
+            if not _same(cur["power"], p["powerW"]):
+                prop = "Total Power" if kind == "Solid Block" else "Internal: Properties/Power"
+                ic.get_oo_object(node, f"P_{ref}").SetPropValue(prop, f"{p['powerW']}W")
             made += 1
+            nets += kind == "Network"
             continue
+        if cur is not None or ref in objects:
+            _delete_block(ic, ref)
         obj = ic.modeler.create_box(box[:3], [box[3] - box[0], box[4] - box[1], box[5] - box[2]],
                                     name=ref, material=PKG if m else "Ceramic_material")
-        if obj and ic.assign_solid_block(obj.name, f"{p['powerW']}W", boundary_name=f"P_{ref}"):
+        if not obj:
+            check("error", f"{ref}: block not created")
+            continue
+        if kind == "Network":
+            try:
+                net = ic.create_two_resistor_network_block(ref, PCB, f"{p['powerW']}W", p["rjbCW"], p["rjcCW"])
+                net.name = f"P_{ref}"
+                nets += 1
+                made += 1
+                continue
+            except BaseException as ex:  # noqa: BLE001
+                check("warn", f"{ref}: junction model not created ({type(ex).__name__}), plain block used")
+        if ic.assign_solid_block(obj.name, f"{p['powerW']}W", boundary_name=f"P_{ref}"):
             made += 1
         else:
-            check("error", f"{ref}: block or power not created")
+            check("error", f"{ref}: power not assigned")
     if powered:
-        check("ok" if made == len(powered) else "error", f"{made} of {len(powered)} heat sources in AEDT")
+        check("ok" if made == len(powered) else "error",
+              f"{made} of {len(powered)} heat sources in AEDT, {nets} with a junction model (Rjc, Rjb)")
 
 
 def _air(ic, study):
@@ -360,38 +421,87 @@ def _get(settings, key, default=None):
         return default
 
 
-def read_state(ic):
+def read_state(ic, board=None):
     ds = ic.design_settings
-    reg = ic.modeler["Region"].bounding_box if "Region" in ic.modeler.object_names else None
+    names = set(ic.modeler.object_names)
     setup = next((x for x in ic.setups if x.name == SETUP), None)
     _, tree = thermal(ic)
-    blocks = []
-    for n, (typ, power) in tree.items():
-        if n.startswith("P_") and n[2:] in ic.modeler.object_names:
+    blocks, other = [], []
+    ext = []
+    try:
+        ext.append(ic.modeler.user_defined_components[PCB].bounding_box)
+    except BaseException:  # noqa: BLE001
+        pass
+    for n, d in tree.items():
+        if n.startswith("P_") and n[2:] in names and d["type"] in ("Solid Block", "Network"):
             bb = ic.modeler[n[2:]].bounding_box
-            blocks.append({"refDes": n[2:], "powerW": num(power, 0), "heightMm": round(bb[5] - bb[2], 4)})
+            ext.append(bb)
+            blocks.append({"refDes": n[2:], "kind": d["type"], "powerW": d["power"] or 0,
+                           "heightMm": round(bb[5] - bb[2], 4), "rjcCW": d["rjc"], "rjbCW": d["rjb"]})
+        elif d["type"] != "Opening":
+            other.append({"name": n, "type": d["type"], "powerW": d["power"]})
+    reg = ic.modeler["Region"].bounding_box if "Region" in names else None
+    pad = None
+    if reg and ext:
+        lo = [min(e[i] for e in ext) for i in range(3)]
+        hi = [max(e[i + 3] for e in ext) for i in range(3)]
+        pad = [round(reg[3] - hi[0], 1), round(lo[0] - reg[0], 1), round(reg[4] - hi[1], 1),
+               round(lo[1] - reg[1], 1), round(reg[5] - hi[2], 1), round(lo[2] - reg[2], 1)]   # +X -X +Y -Y +Z -Z
     gm = ic.mesh.global_mesh_region
     local = [{"refDes": r, "maxMm": v} for r, v in local_mesh(ic).items()]
     return {
         "schema": "pcb-thermal-ansys/state",
+        "open": True,
         "readAt": time.strftime("%H:%M:%S"),
         "project": ic.project_name, "path": str(ic.project_file),
         "ambientC": num(ds["AmbTemp"]),
         "gravity": f"{'-' if str(ds['GravityDir']) == 'Negative' else '+'}{str(ds['GravityVec'])[-1]}",
         "airMm": [round(reg[3] - reg[0], 1), round(reg[4] - reg[1], 1), round(reg[5] - reg[2], 1)] if reg else None,
+        "padMm": pad,
         "setup": {"name": setup.name, "iterations": setup.props.get("Convergence Criteria - Max Iterations"),
                   "flow": setup.props.get("Flow Regime"),
                   "radiation": setup.props.get("Radiation Model")} if setup else None,
         "blocks": blocks,
+        "other": other,
         "mesh": {"manual": bool(gm.manual_settings),
                  "level": _get(gm.settings, "MeshRegionResolution"),
                  "maxMm": num(_get(gm.settings, "MaxElementSizeX")),
                  "gapElems": num(_get(gm.settings, "MinElementsInGap")),
                  "edgeElems": num(_get(gm.settings, "MinElementsOnEdge")),
                  "local": local},
-        "objects": len(ic.modeler.object_names),
-        "openings": [n for n, (typ, _) in tree.items() if typ == "Opening"],
+        "objects": len(names),
+        "openings": [n for n, d in tree.items() if d["type"] == "Opening"],
     }
+
+
+def read_only(folder, board, project_file):
+    """mode read: look at AEDT as it is. Never starts AEDT, never opens a project, never writes checks.json."""
+    import subprocess
+    from ansys.aedt.core import Desktop, Icepak
+    out = folder / "state.json"
+    old = json.loads(out.read_text(encoding="utf-8")) if out.exists() else {}
+    name = f"{board['name']}_icepak"
+
+    def closed(why):
+        out.write_text(json.dumps({**old, "open": False, "why": why, "checkedAt": time.strftime("%H:%M:%S")}, indent=1),
+                       encoding="utf-8")
+        print(why)
+        return 0
+
+    running = subprocess.run(["tasklist", "/FI", "IMAGENAME eq ansysedt.exe"], capture_output=True, text=True).stdout
+    if "ansysedt.exe" not in running.lower():
+        return closed("AEDT is not running")
+    desktop = Desktop(version=VERSION, new_desktop=False, port=PORT, non_graphical=False)
+    try:
+        if name not in list(desktop.odesktop.GetProjectList()):
+            return closed(f"Project {name} is not open in AEDT")
+        ic = Icepak(project=str(project_file), design=DESIGN, version=VERSION, new_desktop=False, port=PORT)
+        state = read_state(ic, board)
+        out.write_text(json.dumps(state, indent=1), encoding="utf-8")
+        print("read", state["readAt"])
+        return 0
+    finally:
+        desktop.release_desktop(close_projects=False, close_on_exit=False)
 
 
 if __name__ == "__main__":

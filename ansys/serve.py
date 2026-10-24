@@ -9,6 +9,8 @@ import subprocess
 import webbrowser
 import sys
 import threading
+import time
+from urllib.parse import parse_qs
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -17,7 +19,7 @@ FOLDER = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else HERE / "example"
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8765
 WHAT = {"build": "Building the project", "update": "Applying changes", "mesh": "Generating the mesh",
         "read": "Reading AEDT"}
-job = {"running": False, "what": "", "log": ""}
+job = {"running": False, "what": "", "log": "", "silent": False}
 lock = threading.Lock()
 
 
@@ -26,19 +28,32 @@ def jread(name):
     return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
 
 
-def run_script(script, what, *args):
-    with lock:
-        if job["running"]:
-            return False
-        job.update(running=True, what=what, log="")
+def run_script(script, what, *args, silent=False):
+    """One job at a time. A silent job (the page's background read of AEDT) never blocks a real one for long."""
+    deadline = time.time() + 90
+    while True:
+        with lock:
+            if not job["running"]:
+                job.update(running=True, what=what, silent=silent)
+                if not silent:
+                    job["log"] = ""
+                break
+            if silent or not job["silent"] or time.time() > deadline:
+                return False
+        time.sleep(0.5)
 
     def work():
         proc = subprocess.Popen([sys.executable, "-u", str(HERE / script), str(FOLDER), *args], stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
+        timer = threading.Timer(60 if silent else 900, proc.kill)    # a hung gRPC call must not block the page
+        timer.start()
         for line in proc.stdout:
-            if "INFO" not in line:
+            if not silent and "INFO" not in line:
                 job["log"] += line
         proc.wait()
+        timer.cancel()
+        if not silent and proc.returncode not in (0, 1):
+            job["log"] += "[error] The script was stopped (exit code %s). AEDT may be busy or frozen.\n" % proc.returncode
         job["running"] = False
 
     threading.Thread(target=work, daemon=True).start()
@@ -74,11 +89,12 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path, _, query = self.path.partition("?")
-        mode = query.partition("mode=")[2] or "build"
+        q = parse_qs(query)
+        mode = (q.get("mode") or ["build"])[0]
         if path == "/api/read":
             ok = run_script("read_board.py", "Reading the board")
         elif path == "/api/run" and mode in WHAT:
-            ok = run_script("setup_study.py", WHAT[mode], mode)
+            ok = run_script("setup_study.py", WHAT[mode], mode, silent="silent" in q)
         else:
             return self._send(404, {"error": "not found"})
         self._send(200 if ok else 409, {"ok": ok})

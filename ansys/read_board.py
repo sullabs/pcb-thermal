@@ -39,7 +39,7 @@ def read_board(edb_path: Path) -> dict:
                 layers.append({"name": name, "type": str(lay.type), "thicknessMm": round(lay.thickness * M2MM, 4)})
             except Exception:
                 pass
-        parts = []
+        parts, skipped = [], []
         for ref, c in edb.components.instances.items():
             try:
                 bx0, by0, bx1, by1 = c.bounding_box
@@ -54,7 +54,7 @@ def read_board(edb_path: Path) -> dict:
                     "zMinMm": round(z0 * M2MM, 4), "hMm": round((z1 - z0) * M2MM, 4),
                 })
             except Exception:
-                continue
+                skipped.append(ref)
         parts.sort(key=lambda p: -(p["lMm"] * p["wMm"]))
         return {
             "schema": "pcb-thermal-ansys/board",
@@ -65,6 +65,7 @@ def read_board(edb_path: Path) -> dict:
             "thicknessMm": round(sum(l["thicknessMm"] for l in layers), 4),
             "layers": layers,
             "parts": parts,
+            "skipped": skipped,
         }
     finally:
         edb.close_edb()

@@ -105,6 +105,19 @@ pad_type="Absolute Offset")` after deleting `Region`; `assign_free_opening(face 
   valid value (library template). Surface to surface name unverified.
 - Generate mesh on the sample: 13 s. Update after changes: 40 to 80 s.
 
+## Third session, part 3: junction model, truth from AEDT
+
+- `create_two_resistor_network_block(object, pcb, power, rjb, rjc)`: `power` must be a **string** ("3W"), a float fails
+  with a generic "Failed to create boundary". The block must touch the PCB, so blocks now sit on the board surface
+  (z of the PCB1 top). Rename the result to `P_<RefDes>` with `.name =`. Read back from the tree:
+  `Internal: Properties/Power`, `Rjc: Properties/ThermalResistance`, `Rjb: Properties/ThermalResistance`.
+  Power change only: `SetPropValue` on the same property works.
+- Two PyAEDT clients attaching at the same moment hung one of them (the page's background read vs my test script).
+  Server jobs are serialised and killed after a timeout.
+- `read` mode: `tasklist` check first, so it never starts AEDT; does not open a project that is not open.
+- Page: form values follow AEDT unless edited (yellow); `derive()` maps state to form; air margins come from the
+  region against the union of PCB and blocks.
+
 ## Not started
 
 Rjc/Rjb, TIM, emissivity, per-surface h, orientation, incremental updates, real Altium board, real heights.

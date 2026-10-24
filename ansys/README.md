@@ -16,16 +16,40 @@ No solve, no spreader, no other cooling solution for now.
 | # | Who | What |
 |---|---|---|
 | 1 | You | Altium: File > Export > Ansys EDB. Put `<board>.aedb` in the folder `ansys\example` (or any folder) |
-| 2 | You | `.nsysun.ps1 serve.py [folder]`. The browser opens http://localhost:8765. Press **Read the board** (once) |
+| 2 | You | `.nsys
+un.ps1 serve.py [folder]`. The browser opens http://localhost:8765. Press **Read the board** (once) |
 | 3 | You | Ambient, board position, air, heat sources (add parts, or load the designer's CSV: RefDes, W), mesh. Press **Build** |
 | 4 | You | Look at the project in AEDT. Edit there if you want. **Read AEDT** shows what is there |
 | 5 | You | Change values on the page, press **Apply changes** (about 40 s), **Generate mesh** to see the mesh without solving |
 
-The page and AEDT can drift apart: the "In AEDT now" card marks the differences and offers **Take AEDT values**
-(copy AEDT into the page) or **Apply changes** (copy the page into AEDT). Apply only touches what the page owns:
-heat-source blocks and their power, the air box and its opening, ambient and gravity, the setup values shown,
-the global mesh and `Mesh_<RefDes>` regions. Everything else you made in AEDT is left alone. Build replaces the
-whole project and asks first.
+**AEDT is the source of truth.** The page asks the server every 15 s to read AEDT (the `read` mode: it never starts
+AEDT and never opens a project). Whatever changes in AEDT (ambient, board position, air, mesh, power, height, Rjc,
+Rjb, parts added or removed) shows up in the page fields by itself. Fields you edit on the page turn yellow and stay
+yours until you press **Apply** (it says how many changes). Apply only touches what the page owns: heat-source
+blocks and their power, the air box and its opening, ambient and gravity, the setup values shown, the global mesh and
+`Mesh_<RefDes>` regions. Everything else you made in AEDT is left alone and listed under "Other thermal items".
+Build replaces the whole project and asks first. If AEDT is closed, the page shows the last values it read and says so.
+
+Rja and Tj max are page-only (kept in `study.json`): the page shows Tj by Rja = ambient + power x Rja as a hand check.
+Rjc and Rjb together make a two-resistor junction model in AEDT (`P_<RefDes>`, type Network), the block then sits on
+the board surface so it can touch the PCB.
+
+### When something is missing
+
+| Missing | What happens |
+|---|---|
+| Power | No heat source for that part; warning if none has power |
+| Height (EDB gives a placeholder under 0.2 mm) | 0.2 mm used, warning says to type the real one |
+| Only one of Rjc, Rjb | Plain block, warning; no junction temperature |
+| Rjc and Rjb both | Junction model; if AEDT refuses it, plain block and a warning |
+| Tj max or Rja | No hand check or margin line, nothing else changes |
+| Part not in the EDB | Error for that part, the others are still built |
+| Part without position or size in the EDB | Listed as skipped in `board.json`, warning, no heat source possible |
+| `study.json` | Defaults, no heat sources |
+| AEDT closed (read) | Last known values kept, page says AEDT is not running |
+
+**Do not run another PyAEDT script against the same AEDT while the page is open**: two clients attaching at the same
+time made one of them hang. The page's own jobs never overlap, and a hung job is killed after 60 s (read) or 15 min.
 
 ## Files
 
@@ -40,7 +64,7 @@ whole project and asks first.
 Folder contents: `<board>.aedb` (you), `board.json`, `study.json` (page), `state.json`, `checks.json`, `<board>_icepak.aedt`.
 `study.json`: `edb`, `ambientC`, `orientation` (flat-up, flat-down, vertical-long, vertical-short), `marginMm`,
 `marginAboveMm`, `radiation`, `pcbResolution`, `mesh {mode auto|manual, level, maxMm, gapElems, edgeElems}`,
-`parts[{refDes, powerW, heightMm?, meshMm?}]`.
+`parts[{refDes, powerW, heightMm?, meshMm?, rjcCW?, rjbCW?, rjaCW?, tjMaxC?}]`.
 
 Timings on the sample: build about 1.5 min, apply with a change 40 to 80 s, generate mesh 15 s.
 
@@ -61,5 +85,7 @@ Timings on the sample: build about 1.5 min, apply with a change 40 to 80 s, gene
 - [x] Page for the mechanical engineer; "In AEDT now" card with differences and Take AEDT values
 - [ ] Real Altium export (only the GitHub sample board was used)
 - [ ] Real part heights and materials (sample EDB heights are 0.04 mm placeholders)
-- [ ] Radiation model name for S2S (the page uses discrete ordinates); Rjc/Rjb, TIM, per-surface h; solving
+- [x] Rjc/Rjb junction model, Rja/Tj max hand check, AEDT as source of truth (auto read), missing-data fallbacks
+- [ ] Solve button and results card (temperatures per part, board hot spot)
+- [ ] Radiation model name for S2S (the page uses discrete ordinates); TIM and spreader (with a cooling solution), per-surface emissivity
 - [ ] Mesh cell count in the page (Generate mesh reports time only)
