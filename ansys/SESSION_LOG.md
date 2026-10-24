@@ -148,3 +148,11 @@ session scratchpad only.
 - Open: V1 case temperature rose from 809 to 1072 C with radiation on while the board fell from 748 to 354 C. Unexplained, check on a real board.
 
 Fix round: the whole-model maximum now asks every non-hollow object one by one (no AllObjects call), so it works with radiation on and the session survives. Icepak monitors have no radiation heat flow quantity (only HeatFlowRate on faces, convection only), so the energy balance with radiation stays "not checked"; the Energy residual is the check there. The read back right after a solve still fails, so solve mode skips it; the page reads AEDT in its next poll.
+
+## More boards (example-data, pyaedt/edb)
+Downloaded to ansys/boards_src (git-excluded); working copies in ansys/boards (excluded).
+- Read OK: ANSYS-HSD_V1 (509 parts), ANSYS_SVP_V1_1 (544), BGA_Package (2), cpwg (0), siwave_multi_zones (2).
+- Powerboard_SiC_MOSFET.tgz is ODB++, not an aedb. Converts with PyEDB (56 parts) but layer thickness and part heights read 1000x too big (35 mm copper). Not usable without a unit fix.
+- Fix added: EDB materials with no density/heat capacity (megtron, solder resist) stop the solver. _thermal_defaults gives them FR-4 values and warns.
+- siwave_multi_zones: build OK, solve fails: "PCB layer property out of sync with geometry / Unable to obtain PCB component data". Open.
+- ANSYS_SVP_V1_1: build OK, solve OK (170 s), but convergence, monitors and temperatures could not be read afterwards. Open.

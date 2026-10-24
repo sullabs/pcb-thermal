@@ -175,6 +175,26 @@ def _close_same_name(desktop, names):
                     break
 
 
+def _thermal_defaults(ic):
+    """EDB materials from an electrical export (Megtron, Rogers...) can lack density, heat capacity and
+    conductivity, and the solver then refuses to start. Give them FR-4 values and say so."""
+    fixed = []
+    for name, m in ic.materials.material_keys.items():
+        try:
+            if not m.is_dielectric() or float(m.mass_density.value) > 0:
+                continue
+            if float(m.thermal_conductivity.value) <= 0.01:
+                m.thermal_conductivity = 0.3
+                fixed.append(name)
+            m.mass_density = 1900
+            m.specific_heat = 1100
+        except BaseException:  # noqa: BLE001
+            continue
+    if fixed:
+        check("warn", f"No thermal data in the EDB for {', '.join(fixed)}. FR-4 values used (0.3 W/mK). "
+                      f"Type the real conductivity in AEDT if it matters.")
+
+
 def _build(Hfss3dLayout, Icepak, desktop, folder, board, study):
     _close_same_name(desktop, [board["name"], f"{board['name']}_icepak"])
     lay = Hfss3dLayout(version=VERSION, new_desktop=False, port=PORT)
@@ -186,6 +206,7 @@ def _build(Hfss3dLayout, Icepak, desktop, folder, board, study):
                                      rad="Both" if study["radiation"] else "Nothing")
     check("ok" if ok else "error", f"PCB from the EDB, mapping resolution {study['pcbResolution']}"
           if ok else "PCB import returned False")
+    _thermal_defaults(ic)
     ic.save_project(str(folder / f"{board['name']}_icepak.aedt"))
     return ic
 
