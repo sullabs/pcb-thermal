@@ -156,3 +156,6 @@ Downloaded to ansys/boards_src (git-excluded); working copies in ansys/boards (e
 - Fix added: EDB materials with no density/heat capacity (megtron, solder resist) stop the solver. _thermal_defaults gives them FR-4 values and warns.
 - siwave_multi_zones: build OK, solve fails: "PCB layer property out of sync with geometry / Unable to obtain PCB component data". Open.
 - ANSYS_SVP_V1_1: build OK, solve OK (170 s), but convergence, monitors and temperatures could not be read afterwards. Open.
+
+## SVP board: unreadable results after solve
+Not reproducible. The failing solve came right after AEDT had been killed in a broken session; residuals and monitors read "No trace data" even in a fresh session. A later solve (with and without T_ and Q_ monitors, and through the real script, also after a fresh AEDT start) converged and read everything: board 97.6 C, hottest measured 98.0 C at 10 W, Energy residual 2e-9. Likely cause: stale result files from the killed run. Warning text now says to press Solve again.

@@ -546,7 +546,8 @@ def _solve(ic, folder, powered, ambient):
     check("ok", f"Solved in {secs:.0f} s")
     conv = _convergence(ic)
     if not conv["read"]:
-        check("warn", "Convergence could not be read. Check the residuals in AEDT before trusting the numbers.")
+        check("warn", "Convergence could not be read. The result files may be stale (AEDT was killed or crashed earlier). "
+                      "Press Solve again; if it stays, check the residuals in AEDT before trusting the numbers.")
     elif conv["ok"]:
         check("ok", "Converged: all residuals are below the setup limits")
     else:
