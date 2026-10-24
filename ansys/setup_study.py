@@ -139,7 +139,7 @@ def main(folder: Path, mode: str = "build") -> int:
             _mesh_now(ic)
         if mode == "solve":
             step("solve", lambda: _solve(ic, folder, powered, study["ambientC"]), fatal=True)
-        state = step("read back", lambda: read_state(ic, board))
+        state = None if mode == "solve" else step("read back", lambda: read_state(ic, board))   # right after a solve AEDT cannot be read
         if state:
             (folder / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
     except BaseException as ex:  # noqa: BLE001
@@ -418,6 +418,14 @@ def _mesh_now(ic):
 
 # ---------------------------------------------------------------- solve
 
+def _hollow(ic):
+    """network blocks must not be meshed inside, also in projects built before this was set"""
+    _, tree = thermal(ic)
+    for n, d in tree.items():
+        if d["type"] == "Network" and n.startswith("P_") and ic.modeler[n[2:]].solve_inside:
+            ic.modeler[n[2:]].solve_inside = False
+
+
 def _monitors(ic, powered):
     """one point monitor T_<ref> per heat source, made fresh for each solve. A network block is hollow, so its
     monitor sits on the case side face (top centre), a plain block gets it at its centre."""
@@ -488,6 +496,8 @@ def _convergence(ic):
     """final residuals against the setup's convergence criteria: {"ok": bool, "items": [{name, value, limit, ok}]}"""
     setup = next((x for x in ic.setups if x.name == SETUP), None)
     limit = {"Continuity": "Flow", "XVelocity": "Flow", "YVelocity": "Flow", "ZVelocity": "Flow", "Energy": "Energy"}
+    if setup and str(setup.props.get("Radiation Model", "Off")) != "Off":
+        limit["DOIntensity"] = "Discrete Ordinates"
     items = []
     for q, crit in limit.items():
         try:
@@ -503,6 +513,7 @@ def _convergence(ic):
 
 
 def _solve(ic, folder, powered, ambient):
+    step("junction blocks hollow", lambda: _hollow(ic))
     step("temperature monitors", lambda: _monitors(ic, powered))
     flow = step("heat flow monitors", lambda: _flow_monitors(ic))
     t = time.time()
@@ -521,7 +532,12 @@ def _solve(ic, folder, powered, ambient):
         bad = ", ".join(i["name"] for i in conv["items"] if i["ok"] is False)
         check("warn", f"NOT converged ({bad}). Raise the iterations or refine the mesh before trusting the numbers.")
     bal = step("energy balance", lambda: _balance(ic, flow, sum(p["powerW"] for p in powered))) if flow and powered else None
-    if bal:
+    radiating = str(getattr(next((x for x in ic.setups if x.name == SETUP), None), "props", {}).get("Radiation Model", "Off")) != "Off"
+    if bal and radiating:
+        bal["radiation"] = True
+        check("warn", f"Energy balance not checked: radiation is on and AEDT's heat flow monitors count only convection "
+                      f"({bal['outW']} W of {bal['inW']} W). Check the balance in AEDT.")
+    elif bal:
         e = abs(bal["errorPct"])
         check("ok" if e <= 1 else "warn", f"Energy balance: {bal['inW']} W in, {bal['outW']} W out ({bal['errorPct']:+.2f} %)"
               + ("" if e <= 1 else ". More than 1 % is not balanced: converge further or refine the mesh."))
@@ -536,7 +552,9 @@ def _solve(ic, folder, powered, ambient):
     board = max(on_board) if on_board else None
     if board is None:
         check("warn", "Board temperature could not be read. Look at the result in AEDT.")
-    anywhere = _fmax(ic, "AllObjects")
+    # no "AllObjects" call: with radiation on it fails and breaks the AEDT session. The junction itself is not read.
+    seen = [v for v in [board] + [r["tempC"] for r in rows] if v is not None]
+    anywhere = max(seen) if seen else None
     (folder / "results.json").write_text(json.dumps({
         "schema": "pcb-thermal-ansys/results", "solvedAt": time.strftime("%H:%M:%S"), "seconds": round(secs),
         "ambientC": ambient, "converged": conv, "balance": bal, "boardC": board, "hottestC": anywhere, "parts": rows}, indent=1), encoding="utf-8")
