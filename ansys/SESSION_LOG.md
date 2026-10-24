@@ -162,3 +162,7 @@ Not reproducible. The failing solve came right after AEDT had been killed in a b
 
 ## siwave_multi_zones: cause of the failed solve
 The EDB has a multi-zone stackup. Icepak's PCB import makes 15 layer objects with D4, D5, L5, L6 twice and no L1, D1, L2, D2. The solver then says "layer property out of sync with geometry / unable to obtain PCB component data". Not fixable from the script. Build now stops with an error naming the duplicated layers (checked right after the import).
+
+## Energy balance with radiation
+The Fields Summary (`ic.post.create_field_summary`, entity "Boundary", surface "Open_air") has HeatFlowRate, RadiationFlow and ConvectiveHeatFlow in W. HeatFlowRate there is the total, radiation included. The Q_ face monitors are gone (deleted from older projects at solve). Test board 3.3 W: radiation on 1.49 W convection + 1.81 W radiation = 3.3006 W (+0.02 %); radiation off 3.3012 W, all convection (+0.04 %).
+- Open: changing the radiation model and pressing Solve restarts from the previous case (`rc previous.nc_cas`), which keeps the old radiation model: the residuals still show do-intensity and the result does not change. Only after deleting the solution (`cleanup_solution`) did radiation off take effect (board 210 to 325 C).

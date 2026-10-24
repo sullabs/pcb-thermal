@@ -534,25 +534,22 @@ def _temp(ic, ref, hollow):
         return None
 
 
-def _flow_monitors(ic):
-    """heat flow rate monitors Q_<n> on the six faces of the air box: their sum is the heat leaving the model"""
+def _balance(ic, total_w):
+    """heat out through the Open_air faces against the power put in, from AEDT's Fields Summary.
+    Face monitors count only convection; the summary also has the radiation that leaves through the opening."""
     for n in [n for n in ic.get_oo_name(ic.odesign, "Monitor") if n.startswith("Q_")]:
-        ic.monitor.delete_monitor(n)
-    return [ic.monitor.assign_face_monitor(f.id, monitor_quantity="HeatFlowRate", monitor_name=f"Q_{i}")
-            for i, f in enumerate(ic.modeler["Region"].faces)]
-
-
-def _balance(ic, names, total_w):
-    """heat out through the air box against the power put in. AEDT reports the flow in milliwatts."""
-    out, unit = 0.0, None
-    for n in names:
-        sd = ic.post.get_solution_data(expressions=[f"{n}.HeatFlowRate"], setup_sweep_name=f"{SETUP} : SteadyState",
-                                       report_category="Monitor")
-        out += float(sd.get_expression_data(sd.expressions[0])[1][-1])
-        unit = unit or str(sd.units_data.get(sd.expressions[0], "")) if hasattr(sd, "units_data") else unit
-    out_w = abs(out) / (1000.0 if "m" in (unit or "mW").lower() else 1.0)
-    return {"inW": round(total_w, 4), "outW": round(out_w, 4), "errorPct": round(100 * (out_w - total_w) / total_w, 2),
-            "unit": unit}
+        ic.monitor.delete_monitor(n)    # the heat flow face monitors older versions made
+    fs = ic.post.create_field_summary()
+    qs = {"outW": "HeatFlowRate", "radiationW": "RadiationFlow", "convectionW": "ConvectiveHeatFlow"}
+    for q in qs.values():
+        fs.add_calculation("Boundary", "Surface", "Open_air", q)
+    data = fs.get_field_summary_data(setup=f"{SETUP} : SteadyState")
+    got = {}
+    for name, total in zip(data["Quantity"], data["Total"]):    # "HeatFlowRate[W]" -> "3.30061"
+        q, unit = name.rstrip("]").split("[")
+        got[q] = abs(float(total)) / (1000.0 if unit == "mW" else 1.0)
+    bal = {k: round(got[q], 4) for k, q in qs.items()}
+    return {"inW": round(total_w, 4), **bal, "errorPct": round(100 * (bal["outW"] - total_w) / total_w, 2)}
 
 
 def _convergence(ic):
@@ -579,7 +576,6 @@ def _solve(ic, folder, board, powered, ambient):
     step("junction blocks hollow", lambda: _hollow(ic))
     powered = _sources(ic, powered)     # from here on the heat sources are the ones in AEDT, with AEDT's power
     step("temperature monitors", lambda: _monitors(ic, powered, board))
-    flow = step("heat flow monitors", lambda: _flow_monitors(ic))
     t = time.time()
     ok = ic.analyze_setup(SETUP)
     secs = time.time() - t
@@ -597,15 +593,11 @@ def _solve(ic, folder, board, powered, ambient):
         bad = ", ".join(i["name"] for i in conv["items"] if i["ok"] is False)
         check("warn", f"NOT converged ({bad}). Raise the iterations or refine the mesh before trusting the numbers.")
     total_w = sum(p["powerW"] for p in powered)
-    bal = step("energy balance", lambda: _balance(ic, flow, total_w)) if flow and total_w > 0 else None
-    radiating = str(getattr(next((x for x in ic.setups if x.name == SETUP), None), "props", {}).get("Radiation Model", "Off")) != "Off"
-    if bal and radiating:
-        bal["radiation"] = True
-        check("warn", f"Energy balance not checked: radiation is on and AEDT's heat flow monitors count only convection "
-                      f"({bal['outW']} W of {bal['inW']} W). Check the balance in AEDT.")
-    elif bal:
+    bal = step("energy balance", lambda: _balance(ic, total_w)) if total_w > 0 else None
+    if bal:
         e = abs(bal["errorPct"])
-        check("ok" if e <= 1 else "warn", f"Energy balance: {bal['inW']} W in, {bal['outW']} W out ({bal['errorPct']:+.2f} %)"
+        check("ok" if e <= 1 else "warn", f"Energy balance: {bal['inW']} W in, {bal['outW']} W out "
+              f"({bal['convectionW']} W convection, {bal['radiationW']} W radiation, {bal['errorPct']:+.2f} %)"
               + ("" if e <= 1 else ". More than 1 % is not balanced: converge further or refine the mesh."))
     rows = [{"refDes": p["refDes"], "powerW": p["powerW"], "tempC": _temp(ic, p["refDes"], p["network"]),
              "rjaCW": p["rjaCW"], "tjMaxC": p["tjMaxC"]} for p in powered]
