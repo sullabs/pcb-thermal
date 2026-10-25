@@ -179,24 +179,40 @@ def _close_same_name(desktop, names):
                     break
 
 
-def _thermal_defaults(ic):
-    """EDB materials from an electrical export (Megtron, Rogers...) can lack density, heat capacity and
-    conductivity, and the solver then refuses to start. Give them FR-4 values and say so."""
-    fixed = []
-    for name, m in ic.materials.material_keys.items():
+THERMAL = {"copper": (400, 8933, 385), "solder": (48, 8000, 167), "FR-4": (0.3, 1900, 1100)}   # W/mK, kg/m3, J/kgK
+
+
+def _thermal_kind(name, m):
+    n = name.lower()
+    if "solder" in n and "resist" not in n and "mask" not in n:
+        return "solder"
+    if "copper" in n or n.startswith("cu") or not m.is_dielectric():
+        return "copper"
+    return "FR-4"
+
+
+def _thermal_defaults(app):
+    """EDB materials from an electrical export (Altium, Megtron, Rogers...) can lack density, heat capacity and
+    conductivity: the solver then refuses to start or, for copper, solves with no conduction. Give them copper, solder
+    or FR-4 values and say so. Run on the layout design before the PCB import too: the PCB component copies the
+    layout's materials again at every solve, and a changed material marks the solution invalid."""
+    fixed = {}
+    for name, m in app.materials.material_keys.items():
         try:
-            if not m.is_dielectric() or float(m.mass_density.value) > 0:
+            if float(m.mass_density.value) > 0 and float(m.thermal_conductivity.value) > 0.01:
                 continue
+            kind = _thermal_kind(name, m)
+            k, rho, cp = THERMAL[kind]
             if float(m.thermal_conductivity.value) <= 0.01:
-                m.thermal_conductivity = 0.3
-                fixed.append(name)
-            m.mass_density = 1900
-            m.specific_heat = 1100
+                m.thermal_conductivity = k
+            m.mass_density = rho
+            m.specific_heat = cp
+            fixed.setdefault(kind, []).append(name)
         except BaseException:  # noqa: BLE001
             continue
     if fixed:
-        check("warn", f"No thermal data in the EDB for {', '.join(fixed)}. FR-4 values used (0.3 W/mK). "
-                      f"Type the real conductivity in AEDT if it matters.")
+        used = "; ".join(f"{kind} values ({THERMAL[kind][0]} W/mK) for {', '.join(names)}" for kind, names in fixed.items())
+        check("warn", f"No thermal data in the EDB: {used}. Type the real values in AEDT if they matter.")
 
 
 def _build(Hfss3dLayout, Icepak, desktop, folder, board, study):
@@ -204,6 +220,7 @@ def _build(Hfss3dLayout, Icepak, desktop, folder, board, study):
     lay = Hfss3dLayout(version=VERSION, new_desktop=False, port=PORT)
     lay.import_edb(str(folder / board["edb"]))
     pn, dn = lay.project_name, lay.design_name
+    _thermal_defaults(lay)
     ic = Icepak(project=pn, design=DESIGN, version=VERSION, new_desktop=False, port=PORT)
     ok = ic.create_pcb_from_3dlayout("PCB", pn, dn, resolution=int(study["pcbResolution"]), extent_type="Bounding Box",
                                      close_linked_project_after_import=False,
