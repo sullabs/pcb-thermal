@@ -9,11 +9,13 @@ read   : only read the project into state.json, as it is in AEDT now (never star
 mesh   : generate the mesh and report how long it took
 solve  : solve the setup (opens the project, never changes it) and write results.json: temperature per heat source
 
-Input  : <folder>/<board>.aedb, <folder>/study.json (written by the page)
+Input  : <folder>/<board>.aedb (or Altium's <board>.edb), <folder>/study.json (written by the page)
 Output : <folder>/board.json, state.json, checks.json, <board>_icepak.aedt
 """
 import json
+import os
 import re
+import subprocess
 import sys
 import time
 import warnings
@@ -29,6 +31,7 @@ MIN_BLOCK_H_MM = 0.2   # EDB heights below this are placeholders; the page value
 DESIGN = "Icepak"
 SETUP = "Study"
 PKG = "pkg_material"
+BUSY = ".setup_running"   # in <folder> while a build/update/mesh/solve runs; mode read leaves AEDT alone then
 
 # gravity points down. edit_design_settings code: 0 -X, 1 -Y, 2 -Z, 3 +X, 4 +Y, 5 +Z (read back from AEDT)
 # fields: gravity code, label, text, index of the air face opposite to gravity in [+X, -X, +Y, -Y, +Z, -Z]
@@ -394,7 +397,9 @@ def _environment(ic, study):
 
 
 def _setup(ic, study):
-    s = next((x for x in ic.setups if x.name == SETUP), None) or ic.create_setup(SETUP)
+    s = next((x for x in ic.setups if x.name == SETUP), None)
+    existed = bool(s)
+    s = s or ic.create_setup(SETUP)
     if not s:
         check("error", "Setup not created")
         return
@@ -407,7 +412,7 @@ def _setup(ic, study):
     s.update()
     check("ok", f"Setup '{SETUP}': laminar natural convection, radiation "
                 f"{'on (discrete ordinates)' if study['radiation'] else 'off'}, {study['iterations']} iterations max")
-    if was != s.props["Radiation Model"]:
+    if existed and was != s.props["Radiation Model"]:
         # the next solve would restart from the old case file, which keeps the old radiation model
         if step("clear old solution", lambda: ic.cleanup_solution()):
             check("ok","Radiation changed: old solution deleted, the next solve starts fresh")
@@ -719,7 +724,6 @@ def read_state(ic, board=None):
 
 def read_only(folder, board, project_file):
     """mode read: look at AEDT as it is. Never starts AEDT, never opens a project, never writes checks.json."""
-    import subprocess
     from ansys.aedt.core import Desktop, Icepak
     out = folder / "state.json"
     old = json.loads(out.read_text(encoding="utf-8")) if out.exists() else {}
@@ -734,6 +738,10 @@ def read_only(folder, board, project_file):
     running = subprocess.run(["tasklist", "/FI", "IMAGENAME eq ansysedt.exe"], capture_output=True, text=True).stdout
     if "ansysedt.exe" not in running.lower():
         return closed("AEDT is not running")
+    pid = _busy_pid(folder)
+    if pid:   # a second gRPC client during a build made AEDT fail and once crash: keep the last state
+        print(f"setup_study is running (process {pid}), AEDT not read")
+        return 0
     desktop = Desktop(version=VERSION, new_desktop=False, port=PORT, non_graphical=False)
     try:
         if name not in list(desktop.odesktop.GetProjectList()):
@@ -747,7 +755,26 @@ def read_only(folder, board, project_file):
         desktop.release_desktop(close_projects=False, close_on_exit=False)
 
 
+def _busy_pid(folder):
+    """process id of a running build/update/mesh/solve on this folder, else None. A file left by a killed run is ignored."""
+    try:
+        pid = int((folder / BUSY).read_text())
+    except (OSError, ValueError):
+        return None
+    tasks = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True).stdout
+    return pid if str(pid) in tasks else None
+
+
 if __name__ == "__main__":
     if len(sys.argv) not in (2, 3):
         raise SystemExit(__doc__)
-    sys.exit(main(Path(sys.argv[1]).resolve(), sys.argv[2] if len(sys.argv) == 3 else "build"))
+    folder, mode = Path(sys.argv[1]).resolve(), sys.argv[2] if len(sys.argv) == 3 else "build"
+    if mode == "read":
+        sys.exit(main(folder, mode))
+    busy = folder / BUSY
+    busy.write_text(str(os.getpid()))
+    try:
+        code = main(folder, mode)
+    finally:
+        busy.unlink(missing_ok=True)
+    sys.exit(code)

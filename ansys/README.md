@@ -15,7 +15,7 @@ No solve, no spreader, no other cooling solution for now.
 
 | # | Who | What |
 |---|---|---|
-| 1 | You | Altium: File > Export > Ansys EDB. Put `<board>.aedb` in the folder `ansys\example` (or any folder) |
+| 1 | You | Altium: File > Export > Ansys EDB. Put the exported `<board>.edb` (or `<board>.aedb`) in the folder `ansys\example` (or any folder); a `.edb` is copied to `.aedb` on read |
 | 2 | You | `.nsys
 un.ps1 serve.py [folder]`. The browser opens http://localhost:8765. Press **Read the board** (once) |
 | 3 | You | Ambient, board position, air, heat sources (add parts, or load the designer's CSV: RefDes, W), mesh. Press **Build** |
