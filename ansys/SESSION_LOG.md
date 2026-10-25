@@ -191,3 +191,20 @@ Altium exports no heights, only pad outlines and no thermal material values (two
 - Parts: Body X / Body Y (board axes, centred on the footprint) replace the pad outline. A part with a height and no power becomes a block without heat (object named after the RefDes, no `P_` boundary); `read` reports it as kind `Passive`. Checked on Spartan: HDR2, HDR3 8.5 mm and J1 11 mm, U1 body 28 x 28: 9 of 9 parts, 3 without power, no overlaps left.
 - CSV columns: RefDes, W, height, body X, body Y (the last three optional). "Read the export again" after a new export.
 - `start.bat [folder]`: starts AEDT with `-grpcsrv 50051` if it is not running, then `serve.py`; if the page already runs it only opens it. The page has a board folder picker (the start folder and its sub-folders with an export).
+
+## Mesh study (overnight, 1000 iterations max, all converged, balance within 0.06 %)
+`example/mesh_study/summary.txt`. Auto mesh level against result:
+
+| Board | Level | Solve | Board max | Hottest | Convection / radiation |
+|---|---|---|---|---|---|
+| Spartan | 2 | 65 s | 46.4 C | U3 51.8 | 0.51 / 1.12 W |
+| Spartan | 3 | 195 s | 47.2 | U3 51.5 | 0.51 / 1.12 |
+| Spartan | 4 | 264 s | 47.2 | U3 51.5 | 0.52 / 1.12 |
+| Spartan | 5 | 341 s | 47.2 | U3 51.5 | 0.51 / 1.12 |
+| Sentinel | 2 | 97 s | 60.3 | LED1 81.6 | 0.19 / 0.48 |
+| Sentinel | 3 | 147 s | 52.3 | LED1 71.9 | 0.19 / 0.48 |
+| Sentinel | 4 | 195 s | 52.1 | LED1 71.7 | 0.19 / 0.48 |
+
+- Level 3 is enough on both boards (level 4 and 5 move nothing by more than 0.6 C). Level 2 is not: on Sentinel (0.35 mm LEDs, 1 mm U4) it was 10 C too hot on the LEDs and 7 C too cold on U4. Use level 3 or finer; the page default is already 3.
+- The convection share (about 30 %) does not change with the mesh, so it is not under-resolved air. Earlier 1.4 W/m2K was worked out from the board maximum; the board average is lower, so the real h is higher. Still to check: the surface emissivities the PCB import sets, and an average board temperature.
+- Spartan FR-4 k 0.4 against 0.3 at level 2: board 46.0 against 46.4 C, U3 51.2 against 51.8: a material typed on the page and sent with Apply reaches the solve.
