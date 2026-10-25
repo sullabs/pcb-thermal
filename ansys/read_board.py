@@ -15,6 +15,17 @@ from pathlib import Path
 warnings.filterwarnings("ignore")
 VERSION = "2026.1"
 M2MM = 1000.0
+THERMAL = {"copper": (400, 8933, 385), "solder": (48, 8000, 167), "FR-4": (0.3, 1900, 1100)}   # W/mK, kg/m3, J/kgK
+
+
+def thermal_kind(name, conductor):
+    """which THERMAL values stand in for a material that has none: copper, solder or FR-4"""
+    n = name.lower()
+    if "solder" in n and "resist" not in n and "mask" not in n:
+        return "solder"
+    if "copper" in n or n.startswith("cu") or conductor:
+        return "copper"
+    return "FR-4"
 
 
 def find_edb(folder: Path) -> Path:
@@ -46,12 +57,19 @@ def read_board(edb_path: Path) -> dict:
     edb = Edb(str(edb_path), version=VERSION)
     try:
         (x0, y0), (x1, y1) = edb.get_bounding_box()
-        layers = []
+        layers, used = [], {}
         for name, lay in edb.stackup.layers.items():
             try:
                 layers.append({"name": name, "type": str(lay.type), "thicknessMm": round(lay.thickness * M2MM, 4)})
+                for mat in {lay.material, getattr(lay, "fill_material", None)} - {None, ""}:
+                    used.setdefault(mat, []).append(name)
             except Exception:
                 pass
+        materials = []      # an electrical export (Altium) leaves the thermal values at 0; the page shows what stands in
+        for name, m in edb.materials.materials.items():
+            if name in used:
+                materials.append({"name": name, "layers": used[name], "kind": thermal_kind(name, (m.conductivity or 0) > 1e5),
+                                  "kWmK": m.thermal_conductivity or 0, "rhoKgM3": m.mass_density or 0, "cpJkgK": m.specific_heat or 0})
         parts, skipped = [], []
         for ref, c in edb.components.instances.items():
             try:
@@ -77,6 +95,7 @@ def read_board(edb_path: Path) -> dict:
                           "xMax": round(x1 * M2MM, 4), "yMax": round(y1 * M2MM, 4)},
             "thicknessMm": round(sum(l["thicknessMm"] for l in layers), 4),
             "layers": layers,
+            "materials": materials,
             "parts": parts,
             "skipped": skipped,
         }

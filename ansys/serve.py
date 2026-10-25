@@ -1,8 +1,10 @@
 """Local server for the page. Reads and writes files in <folder>; starts setup_study.py on request.
 
     .\ansys\run.ps1 serve.py [folder] [port]      (default folder: ansys\example)
+    ansys\start.bat [folder]                       (the same, and starts AEDT first)
 
-Open http://localhost:8765. Nothing leaves this PC.
+Open http://localhost:8765. Nothing leaves this PC. The page can switch to <folder> or any of its sub-folders that
+holds a .edb or .aedb export.
 """
 import json
 import subprocess
@@ -16,6 +18,7 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 FOLDER = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else HERE / "example"
+ROOT = FOLDER
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8765
 WHAT = {"build": "Building the project", "update": "Applying changes", "mesh": "Generating the mesh",
         "read": "Reading AEDT", "solve": "Solving"}
@@ -26,6 +29,12 @@ lock = threading.Lock()
 def jread(name):
     p = FOLDER / name
     return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+
+
+def boards():
+    """board folders the page can switch to: ROOT and its sub-folders that hold an export or a board.json"""
+    has = lambda d: (d / "board.json").exists() or any(x.is_dir() for p in ("*.edb", "*.aedb") for x in d.glob(p))  # noqa: E731
+    return [str(d) for d in [ROOT, *sorted(x for x in ROOT.iterdir() if x.is_dir())] if has(d)]
 
 
 def run_script(script, what, *args, silent=False):
@@ -85,7 +94,7 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/":
             self._send(200, (HERE / "page.html").read_bytes(), "text/html; charset=utf-8")
         elif self.path == "/api/state":
-            self._send(200, {"folder": str(FOLDER), "board": jread("board.json"), "study": jread("study.json"),
+            self._send(200, {"folder": str(FOLDER), "boards": boards(), "board": jread("board.json"), "study": jread("study.json"),
                              "checks": jread("checks.json"), "results": jread("results.json"), "state": jread("state.json"), "job": job})
         else:
             self._send(404, {"error": "not found"})
@@ -100,9 +109,16 @@ class H(BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
 
     def do_POST(self):
+        global FOLDER
         path, _, query = self.path.partition("?")
         q = parse_qs(query)
         mode = (q.get("mode") or ["build"])[0]
+        if path == "/api/folder":
+            want = (q.get("path") or [""])[0]
+            if job["running"] or want not in boards():     # a background read still writes to the old folder
+                return self._send(409, {"ok": False})
+            FOLDER = Path(want)
+            return self._send(200, {"ok": True})
         if path == "/api/read":
             ok = run_script("read_board.py", "Reading the board")
         elif path == "/api/run" and mode in WHAT:
@@ -118,6 +134,12 @@ class H(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     if not FOLDER or not FOLDER.is_dir():
         raise SystemExit(__doc__)
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", PORT), H)
+    except OSError:     # the page is running already (or the port is taken): show it
+        print(f"Port {PORT} is in use, the page is probably running already. Opening it.", flush=True)
+        webbrowser.open(f"http://localhost:{PORT}")
+        sys.exit(0)
     print(f"Page: http://localhost:{PORT}   folder: {FOLDER}", flush=True)
     threading.Timer(1.0, lambda: webbrowser.open(f"http://localhost:{PORT}")).start()
-    ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()
+    server.serve_forever()

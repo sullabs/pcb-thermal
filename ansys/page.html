@@ -41,13 +41,14 @@
 </head>
 <body>
 <main>
-  <h1 id="title">PCB thermal: Icepak</h1>
+  <div class="row" style="justify-content:space-between"><h1 id="title">PCB thermal: Icepak</h1>
+    <label id="boardPick" hidden>Board folder<select id="folderSel"></select></label></div>
   <p class="sub" id="sub">Loading</p>
   <div class="banner" id="closed" hidden></div>
 
   <div class="card" id="noboard" hidden>
     <h2>No board yet</h2>
-    <p>Put your <code>.aedb</code> folder (Altium: File &gt; Export &gt; Ansys EDB) in the project folder, then read it.</p>
+    <p>Put your export (Altium: File &gt; Export &gt; Ansys EDB, a <code>.edb</code> folder, or a <code>.aedb</code>) in the board folder, then read it.</p>
     <button class="main" id="readBtn">Read the board</button>
   </div>
 
@@ -71,24 +72,37 @@
     </div>
 
     <div class="card">
-      <h2>Heat sources</h2>
+      <h2>What the export is missing</h2>
+      <ul class="plain" id="gaps"></ul>
+      <div class="scroll"><table>
+        <thead><tr><th>Board material</th><th>Layers</th><th>In the export</th><th class="n">k (W/m&middot;K)</th><th class="n">Density (kg/m&sup3;)</th><th class="n">Heat capacity (J/kg&middot;K)</th></tr></thead>
+        <tbody id="mats"></tbody>
+      </table></div>
+      <p class="hint">Grey numbers are the stand-in values used when a field is empty. Apply sends typed material values to AEDT.
+        <button class="x" id="rereadBtn" title="Read the export again, after a new export from Altium">Read the export again</button></p>
+    </div>
+
+    <div class="card">
+      <h2>Parts</h2>
       <div class="row" style="margin-bottom:10px">
         <label>Add a part<input list="refs" id="addRef" placeholder="RefDes"></label>
         <button id="addBtn">Add</button>
-        <label>Power list from the PCB designer (CSV: RefDes, W)<input type="file" id="csv" accept=".csv,.txt"></label>
+        <label>Part list (CSV: RefDes, W, and optionally height, body X, body Y in mm)<input type="file" id="csv" accept=".csv,.txt"></label>
         <span class="grow"></span><span>Total <b id="total">0</b> W</span>
       </div>
       <datalist id="refs"></datalist>
       <div class="scroll"><table>
-        <thead><tr><th>RefDes</th><th class="n">Power (W)</th><th class="n">Height (mm)</th><th class="n">Mesh (mm)</th>
+        <thead><tr><th>RefDes</th><th class="n">Power (W)</th><th class="n">Height (mm)</th>
+          <th class="n" title="Package body size along the board X axis. Empty: the pad outline from the export">Body X (mm)</th><th class="n" title="Package body size along the board Y axis">Body Y (mm)</th><th class="n">Mesh (mm)</th>
           <th class="n" title="Junction to case, from the datasheet">Rjc (&deg;C/W)</th><th class="n" title="Junction to board, from the datasheet">Rjb (&deg;C/W)</th>
           <th class="n" title="Junction to ambient. Hand check only, not sent to AEDT">Rja (&deg;C/W)</th><th class="n" title="Maximum junction temperature. Hand check only">Tj max (&deg;C)</th>
           <th class="n" title="Ambient + power x Rja">Tj by Rja</th><th></th></tr></thead>
         <tbody id="rows"></tbody>
       </table></div>
-      <p class="hint" id="noheat">No heat sources yet. Add the parts that matter; the rest of the board is a plain PCB.</p>
+      <p class="hint" id="noheat">No parts yet. Add the parts that matter; the rest of the board is a plain PCB.</p>
       <ul class="plain hint" id="notes"></ul>
-      <p class="hint">Rjc and Rjb together make a junction model in AEDT. Rja and Tj max stay on this page for a quick hand check. Yellow fields are changes not yet sent to AEDT.</p>
+      <p class="hint">A part with power is a heat source. A tall part with a height and no power (a connector, a big capacitor) is a block without heat that shapes the air flow.
+        Rjc and Rjb together make a junction model in AEDT. Rja and Tj max stay on this page for a quick hand check. Yellow fields are changes not yet sent to AEDT.</p>
     </div>
 
     <div class="card">
@@ -135,17 +149,21 @@
 "use strict";
 /* AEDT is the source of truth. Whatever changes in AEDT flows into this page by itself.
    Changes typed here stay yellow until Apply sends them. */
-let board = null, study = {}, base = null, lastRead = null, lastCheckedAt = null, state = null, job = {}, built = false;
+let board = null, study = {}, base = null, lastRead = null, lastCheckedAt = null, state = null, job = {}, built = false, folder = null;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const api = async (path, opt) => (await fetch(path, opt)).json();
 const GRAV = { "-Z": "flat-up", "+Z": "flat-down", "-Y": "vertical-long", "-X": "vertical-short" };
 const UP = { "flat-up": 4, "flat-down": 5, "vertical-long": 2, "vertical-short": 0 };   // air face away from gravity: +X -X +Y -Y +Z -Z
 const PART_F = ["powerW", "heightMm", "meshMm", "rjcCW", "rjbCW"];     // sent to AEDT
+const BODY_F = ["bodyXMm", "bodyYMm"];                                 // sent to AEDT, not read back (a block cut back for an overlap is smaller)
 const PAGE_F = ["rjaCW", "tjMaxC"];                                     // stay on the page
+const MAT_F = ["kWmK", "rhoKgM3", "cpJkgK"];                            // board materials, sent to AEDT
+const STANDIN = { copper: [400, 8933, 385], solder: [48, 8000, 167], "FR-4": [0.3, 1900, 1100] };   // as setup_study.py
 const SCALARS = ["ambientC", "orientation", "marginMm", "marginAboveMm", "radiation", "mesh.mode", "mesh.level", "mesh.maxMm", "mesh.gapElems", "mesh.edgeElems"];
-let parts = {};   // ref -> {powerW, heightMm, meshMm, rjcCW, rjbCW, rjaCW, tjMaxC}
+let parts = {};   // ref -> {powerW, heightMm, bodyXMm, bodyYMm, meshMm, rjcCW, rjbCW, rjaCW, tjMaxC}
 let order = [];   // rows in the order they were added
+let mats = {};    // material name -> {kWmK, rhoKgM3, cpJkgK}
 
 const el = k => document.querySelector(`[data-k="${k}"]`);
 const getS = k => {
@@ -175,8 +193,9 @@ function derive(s) {
   else if (s.mesh.level) d["mesh.level"] = s.mesh.level;
   for (const b of s.blocks) {
     const l = s.mesh.local.find(x => x.refDes === b.refDes);
-    d.parts[b.refDes] = { powerW: b.powerW, heightMm: b.heightMm, meshMm: l ? l.maxMm : undefined, rjcCW: b.rjcCW ?? undefined, rjbCW: b.rjbCW ?? undefined };
+    d.parts[b.refDes] = { powerW: b.kind === "Passive" ? undefined : b.powerW, heightMm: b.heightMm, meshMm: l ? l.maxMm : undefined, rjcCW: b.rjcCW ?? undefined, rjbCW: b.rjbCW ?? undefined };
   }
+  d.mats = Object.fromEntries((s.materials || []).map(m => [m.name, { kWmK: m.kWmK, rhoKgM3: m.rhoKgM3, cpJkgK: m.cpJkgK }]));
   return d;
 }
 const flatBase = d => { const o = { ...d }; delete o.marginMm; return o; };
@@ -208,15 +227,54 @@ function sync(s) {
     if (nb.parts[ref]) continue;
     if (PART_F.every(f => same(parts[ref]?.[f], bp[ref][f]))) { delete parts[ref]; order = order.filter(r => r !== ref); }
   }
+  readMats();
+  const bm = base ? base.mats : {};
+  for (const [name, v] of Object.entries(nb.mats)) {
+    mats[name] ??= {};
+    for (const f of MAT_F) if (!base || !bm[name] || same(mats[name][f], bm[name][f])) mats[name][f] = v[f];
+  }
   base = nb;
-  drawParts(); markDirty();
+  drawParts(); drawMats(); markDirty();
+}
+
+/* ---- what the export lacks, and the board materials ---- */
+function gaps() {
+  const n = board.parts.length, flat = board.parts.filter(p => p.hMm < 0.2).length;
+  const zero = (board.materials || []).filter(m => !(m.kWmK > 0 && m.rhoKgM3 > 0 && m.cpJkgK > 0)).map(m => m.name);
+  const out = [];
+  out.push(flat ? `<li class="warn">! Heights: ${flat === n ? `all ${n}` : `${flat} of ${n}`} parts are under 0.2 mm, a placeholder. Type the height of every part that matters in Parts, also tall parts without power.</li>`
+                : `<li class="ok">✓ Heights: every part has a height in the export.</li>`);
+  out.push(`<li class="warn">! Part sizes are the pad outlines, not the package bodies. Type Body X and Y where it matters (big packages, close neighbours).</li>`);
+  out.push(zero.length ? `<li class="warn">! Thermal values are missing for ${esc(zero.join(", "))}: the grey stand-ins below are used. Type the real ones if you have them.</li>`
+                       : `<li class="ok">✓ Every board material has thermal values.</li>`);
+  out.push(`<li class="mut">Power is never in the export: type it in Parts, or load the designer's CSV.</li>`);
+  if (board.skipped?.length) out.push(`<li class="warn">! ${board.skipped.length} parts have no position or size in the export: ${esc(board.skipped.join(", "))}.</li>`);
+  $("gaps").innerHTML = out.join("");
+}
+function readMats() {
+  for (const tr of $("mats").children) {
+    const m = mats[tr.dataset.mat] ??= {};
+    for (const f of MAT_F) { const v = parseFloat(tr.querySelector(`[data-f=${f}]`).value); m[f] = v > 0 ? v : undefined; }
+  }
+}
+function drawMats() {
+  const show = v => v > 0 ? +v.toPrecision(4) : "0";
+  $("mats").innerHTML = (board.materials || []).map(m => {
+    const sub = STANDIN[m.kind], have = [m.kWmK, m.rhoKgM3, m.cpJkgK];
+    const ph = MAT_F.map((f, i) => have[i] > (i ? 0 : 0.01) ? +have[i].toPrecision(4) : sub[i]);
+    const missing = have.some((v, i) => !(v > (i ? 0 : 0.01)));
+    const cell = (f, i) => `<td class="n"><input type="number" data-f="${f}" min="0" step="any" placeholder="${ph[i]}" value="${mats[m.name]?.[f] ?? ""}"></td>`;
+    return `<tr data-mat="${esc(m.name)}"><td><b>${esc(m.name)}</b></td><td><small>${esc(m.layers.join(", "))}</small></td>
+      <td class="${missing ? "warn" : ""}">${have.map(show).join(" / ")}${missing ? `<small>missing: ${esc(m.kind)} stand-in</small>` : ""}</td>
+      ${MAT_F.map(cell).join("")}</tr>`;
+  }).join("");
 }
 
 /* ---- parts table ---- */
 function readRows() {
   for (const tr of $("rows").children) {
     const p = parts[tr.dataset.ref]; if (!p) continue;
-    for (const f of [...PART_F, ...PAGE_F]) { const v = parseFloat(tr.querySelector(`[data-f=${f}]`).value); p[f] = v >= 0 ? v : undefined; }
+    for (const f of [...PART_F, ...BODY_F, ...PAGE_F]) { const v = parseFloat(tr.querySelector(`[data-f=${f}]`).value); p[f] = v >= 0 ? v : undefined; }
   }
 }
 function drawParts() {
@@ -225,7 +283,7 @@ function drawParts() {
   $("rows").innerHTML = order.filter(r => parts[r]).map(ref => {
     const b = by[ref] || { part: "not in the EDB", lMm: 0, wMm: 0, hMm: 0 };
     return `<tr data-ref="${esc(ref)}"><td><b>${esc(ref)}</b><small>${esc(b.part)}, ${b.lMm.toFixed(1)} &times; ${b.wMm.toFixed(1)}</small></td>
-      ${cell(ref, "powerW", 0.01)}${cell(ref, "heightMm", 0.1, b.hMm.toFixed(2))}${cell(ref, "meshMm", 0.1, "global")}
+      ${cell(ref, "powerW", 0.01)}${cell(ref, "heightMm", 0.1, b.hMm.toFixed(2))}${cell(ref, "bodyXMm", 0.1, b.lMm.toFixed(1))}${cell(ref, "bodyYMm", 0.1, b.wMm.toFixed(1))}${cell(ref, "meshMm", 0.1, "global")}
       ${cell(ref, "rjcCW", 0.1)}${cell(ref, "rjbCW", 0.1)}${cell(ref, "rjaCW", 0.1)}${cell(ref, "tjMaxC", 1)}
       <td class="n" data-est></td><td><button class="x" data-del="${esc(ref)}" title="Remove from AEDT on Apply">&times;</button></td></tr>`;
   }).join("");
@@ -241,8 +299,9 @@ function markDirty() {
     flag(k === "mesh.mode" ? document.querySelector("input[name=mm][value=auto]").closest("label") : e, dirty);
     if (k === "mesh.mode") document.querySelector("input[name=mm][value=manual]").closest("label").classList.toggle("dirty", dirty);
   }
-  readRows();
-  const bp = base ? base.parts : {};
+  readRows(); readMats();
+  const bp = base ? base.parts : {}, bm = base ? base.mats : {};
+  const sent = Object.fromEntries((study.parts || []).map(p => [p.refDes, p]));   // body sizes as last sent
   let total = 0;
   for (const tr of $("rows").children) {
     const ref = tr.dataset.ref, p = parts[ref];
@@ -252,6 +311,10 @@ function markDirty() {
       const dirty = built && !same(p[f], bp[ref]?.[f]) && !(bp[ref] === undefined && !p[f]);
       e.classList.toggle("dirty", dirty); n += dirty;
     }
+    for (const f of BODY_F) {
+      const dirty = built && !same(p[f], sent[ref]?.[f]) && (p.powerW > 0 || p.heightMm > 0);
+      tr.querySelector(`[data-f=${f}]`).classList.toggle("dirty", dirty); n += dirty;
+    }
     const est = tr.querySelector("[data-est]"), ta = getS("ambientC");
     if (p.rjaCW > 0 && p.powerW > 0) {
       const tj = ta + p.powerW * p.rjaCW;
@@ -259,6 +322,13 @@ function markDirty() {
     } else { est.textContent = ""; est.className = "n"; }
   }
   for (const ref of Object.keys(bp)) if (!parts[ref] && built) n++;     // a part removed here will be removed in AEDT
+  for (const tr of $("mats").children) {
+    const name = tr.dataset.mat;
+    for (const f of MAT_F) {
+      const dirty = built && !!bm?.[name] && mats[name]?.[f] !== undefined && !same(mats[name][f], bm[name][f]);
+      tr.querySelector(`[data-f=${f}]`).classList.toggle("dirty", dirty); n += dirty;
+    }
+  }
   $("total").textContent = total.toFixed(3);
   $("applyBtn").classList.toggle("main", n > 0);
   $("applyBtn").textContent = n > 0 ? `Apply ${n} change${n > 1 ? "s" : ""}` : "Apply changes";
@@ -269,7 +339,11 @@ function notes() {
   for (const ref of order.filter(r => parts[r])) {
     const p = parts[ref], b = by[ref];
     if (!b) { out.push(`<li class="error">${esc(ref)} is not in the EDB and will be skipped.</li>`); continue; }
-    if (!(p.powerW > 0)) out.push(`<li class="warn">${esc(ref)} has no power: no heat source is made.</li>`);
+    if (!(p.powerW > 0)) {
+      out.push(p.heightMm > 0 ? `<li class="mut">${esc(ref)}: no power, so a block without heat. It shapes the air flow and spreads heat.</li>`
+                              : `<li class="warn">${esc(ref)} has no power and no height: nothing is made for it.</li>`);
+      continue;
+    }
     if (!(p.heightMm > 0) && b.hMm < 0.2) out.push(`<li class="warn">${esc(ref)}: the EDB height is ${b.hMm.toFixed(2)} mm, a placeholder. 0.2 mm is used until you type the real height.</li>`);
     if (p.rjcCW > 0 !== p.rjbCW > 0) out.push(`<li class="warn">${esc(ref)}: Rjc and Rjb are both needed for a junction model. A plain block is used until both are given.</li>`);
     if (p.rjaCW > 0 && !(p.tjMaxC > 0)) out.push(`<li class="mut">${esc(ref)}: no Tj max, so no margin check.</li>`);
@@ -334,7 +408,12 @@ function renderJob(st) {
 
 async function refresh() {
   const st = await api("/api/state");
+  const fresh = board && st.board && JSON.stringify(board) !== JSON.stringify(st.board);   // the export was read again
   board = st.board; state = st.state;
+  if (folder && folder !== st.folder) { location.reload(); return; }   // switched in another tab
+  folder = st.folder;
+  $("boardPick").hidden = st.boards.length < 2;
+  if (!$("folderSel").options.length) $("folderSel").innerHTML = st.boards.map(b => `<option value="${esc(b)}"${b === st.folder ? " selected" : ""}>${esc(b.split(/[\\/]/).pop())}</option>`).join("");
   $("noboard").hidden = !!board; $("form").hidden = !board; $("bar").hidden = !board;
   if (!board) { $("sub").textContent = st.folder; return; }
   $("title").textContent = board.name;
@@ -346,6 +425,11 @@ async function refresh() {
     $("pcbRes").value = study.pcbResolution ?? 2;
     initForm();
   }
+  if (fresh) {
+    readRows(); readMats(); drawParts(); drawMats();
+    $("refs").innerHTML = board.parts.map(p => `<option value="${esc(p.refDes)}">${esc(p.part)}</option>`).join("");
+  }
+  gaps();
   built = !!(state && state.schema);
   const stamp = state && (state.readAt || "") + "|" + (state.open);
   if (state && state.schema && state.open !== false && stamp !== lastRead) { lastRead = stamp; sync(state); }
@@ -357,18 +441,21 @@ function initForm() {          // first load: the page's last values, then AEDT 
   const m = study.mesh || {}, flat = { ...d, ...study, "mesh.mode": m.mode ?? d["mesh.mode"], "mesh.level": m.level ?? 3, "mesh.maxMm": m.maxMm ?? 3, "mesh.gapElems": m.gapElems ?? 3, "mesh.edgeElems": m.edgeElems ?? 2 };
   for (const k of SCALARS) setS(k, flat[k]);
   for (const p of study.parts || []) { parts[p.refDes] = { ...p }; order.push(p.refDes); }
-  drawParts();
+  for (const [name, v] of Object.entries(study.materials || {})) mats[name] = { ...v };
+  drawParts(); drawMats();
 }
 
 function collect() {
-  readRows();
+  readRows(); readMats();
   const mode = getS("mesh.mode");
+  const typed = Object.entries(mats).map(([n, v]) => [n, Object.fromEntries(Object.entries(v).filter(([, x]) => x > 0))]).filter(([, v]) => Object.keys(v).length);
   return {
     schema: "pcb-thermal-ansys/study", edb: board.edb,
     ambientC: getS("ambientC"), orientation: getS("orientation"), marginMm: getS("marginMm"), marginAboveMm: getS("marginAboveMm"),
     radiation: getS("radiation"), pcbResolution: parseInt($("pcbRes").value, 10), iterations: state?.setup?.iterations ?? study.iterations ?? 300, packageK: study.packageK ?? 1,
     mesh: { mode, level: getS("mesh.level"), maxMm: getS("mesh.maxMm"), gapElems: getS("mesh.gapElems"), edgeElems: getS("mesh.edgeElems") },
     parts: order.filter(r => parts[r]).map(r => ({ refDes: r, ...Object.fromEntries(Object.entries(parts[r]).filter(([, v]) => v !== undefined)) })),
+    materials: Object.fromEntries(typed),
   };
 }
 async function run(mode) {
@@ -379,17 +466,26 @@ async function run(mode) {
   refresh();
 }
 
-function addPart(ref, w) {
+function addPart(ref, vals = {}) {
   ref = ref.trim(); if (!ref) return;
   const hit = board.parts.find(p => p.refDes.toLowerCase() === ref.toLowerCase());
   if (!hit) { alert(`${ref} is not in the board.`); return; }
   readRows();
   if (!parts[hit.refDes]) { parts[hit.refDes] = {}; order.push(hit.refDes); }
-  if (w != null) parts[hit.refDes].powerW = w;
+  Object.assign(parts[hit.refDes], vals);
   drawParts(); markDirty();
 }
 
 $("readBtn").onclick = async () => { await api("/api/read", { method: "POST" }); const t = setInterval(async () => { await refresh(); if (board) clearInterval(t); }, 2000); };
+$("rereadBtn").onclick = async () => {
+  const r = await api("/api/read", { method: "POST" });
+  if (!r.ok) alert("Another job is running. Try again in a moment.");
+  refresh();
+};
+$("folderSel").onchange = async e => {
+  const r = await api("/api/folder?path=" + encodeURIComponent(e.target.value), { method: "POST" });
+  if (r.ok) location.reload(); else { alert("A job is running. Switch when it has finished."); e.target.value = folder; }
+};
 $("buildBtn").onclick = () => run("build");
 $("applyBtn").onclick = () => run("update");
 $("meshBtn").onclick = () => run("mesh");
@@ -403,8 +499,10 @@ $("csv").onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
   const miss = [];
   for (const line of (await f.text()).split(/\r?\n/)) {
-    const m = line.split(/[,;\t]/).map(x => x.trim()), w = parseFloat(m[1]);
-    if (m[0] && w > 0) { if (board.parts.some(p => p.refDes.toLowerCase() === m[0].toLowerCase())) addPart(m[0], w); else miss.push(m[0]); }
+    const m = line.split(/[,;\t]/).map(x => x.trim()), [w, heightMm, bodyXMm, bodyYMm] = m.slice(1, 5).map(parseFloat);
+    if (!m[0] || !(w > 0 || heightMm > 0)) continue;     // a header line or an empty one
+    const vals = Object.fromEntries(Object.entries({ powerW: w, heightMm, bodyXMm, bodyYMm }).filter(([, v]) => v > 0));
+    if (board.parts.some(p => p.refDes.toLowerCase() === m[0].toLowerCase())) addPart(m[0], vals); else miss.push(m[0]);
   }
   if (miss.length) alert("Not in the board: " + miss.join(", "));
   e.target.value = "";

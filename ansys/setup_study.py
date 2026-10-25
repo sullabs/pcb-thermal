@@ -118,11 +118,13 @@ def main(folder: Path, mode: str = "build") -> int:
         return read_only(folder, board, project_file)
     for ref in board.get("skipped", []):
         check("warn", f"{ref}: could not be read from the EDB (no position or size), it cannot get a heat source")
-    powered = [p for p in study["parts"] if (p.get("powerW") or 0) > 0]
-    for p in powered:
+    # a block per part with power (heat source) or with only a typed height (no heat, it shapes the air flow)
+    parts = [p for p in study["parts"] if (p.get("powerW") or 0) > 0 or (p.get("heightMm") or 0) > 0]
+    for p in parts:
         if p["refDes"] not in by_ref:
-            check("error", f"{p['refDes']} has power but is not in the EDB")
-    powered = [p for p in powered if p["refDes"] in by_ref]
+            check("error", f"{p['refDes']} has a power or height but is not in the EDB")
+    parts = [p for p in parts if p["refDes"] in by_ref]
+    powered = [p for p in parts if (p.get("powerW") or 0) > 0]
     total = sum(p["powerW"] for p in powered)
     if mode in ("build", "update"):
         check("ok" if powered else "warn",
@@ -140,8 +142,10 @@ def main(folder: Path, mode: str = "build") -> int:
                 raise RuntimeError("No built project yet. Press Build first.")
             ic = step("open project", lambda: Icepak(project=str(project_file), design=DESIGN, version=VERSION,
                                                     new_desktop=False, port=PORT), fatal=True)
+        if mode == "update":
+            step("materials", lambda: _thermal_defaults(ic, study))
         if mode in ("build", "update"):
-            _apply(ic, board, by_ref, powered, study)
+            _apply(ic, board, by_ref, parts, study)
             step("save project", lambda: ic.save_project())
             check("ok", f"Saved {project_file.name}")
         if mode == "mesh":
@@ -184,40 +188,41 @@ def _close_same_name(desktop, names):
                     break
 
 
-THERMAL = {"copper": (400, 8933, 385), "solder": (48, 8000, 167), "FR-4": (0.3, 1900, 1100)}   # W/mK, kg/m3, J/kgK
+THERMAL = read_board.THERMAL
+MAT_F = (("kWmK", "thermal_conductivity", 0.01), ("rhoKgM3", "mass_density", 0), ("cpJkgK", "specific_heat", 0))
 
 
-def _thermal_kind(name, m):
-    n = name.lower()
-    if "solder" in n and "resist" not in n and "mask" not in n:
-        return "solder"
-    if "copper" in n or n.startswith("cu") or not m.is_dielectric():
-        return "copper"
-    return "FR-4"
-
-
-def _thermal_defaults(app):
+def _thermal_defaults(app, study):
     """EDB materials from an electrical export (Altium, Megtron, Rogers...) can lack density, heat capacity and
-    conductivity: the solver then refuses to start or, for copper, solves with no conduction. Give them copper, solder
-    or FR-4 values and say so. Run on the layout design before the PCB import too: the PCB component copies the
-    layout's materials again at every solve, and a changed material marks the solution invalid."""
-    fixed = {}
+    conductivity: the solver then refuses to start or, for copper, solves with no conduction. Values typed on the page
+    (study "materials") are used first, a missing one gets copper, solder or FR-4 values, and the check says which.
+    Run on the layout design before the PCB import too: the PCB component copies the layout's materials again at every
+    solve, and a changed material marks the solution invalid. On update it runs on the Icepak design: materials belong
+    to the project, which holds both designs."""
+    typed = {k.lower(): v for k, v in study.get("materials", {}).items()}
+    fixed, own = {}, set()
     for name, m in app.materials.material_keys.items():
+        if name == PKG:     # the blocks' own material, set by _blocks
+            continue
         try:
-            if float(m.mass_density.value) > 0 and float(m.thermal_conductivity.value) > 0.01:
-                continue
-            kind = _thermal_kind(name, m)
-            k, rho, cp = THERMAL[kind]
-            if float(m.thermal_conductivity.value) <= 0.01:
-                m.thermal_conductivity = k
-            m.mass_density = rho
-            m.specific_heat = cp
-            fixed.setdefault(kind, []).append(name)
+            t = typed.get(name.lower(), {})
+            kind = read_board.thermal_kind(name, not m.is_dielectric())
+            for i, (f, attr, low) in enumerate(MAT_F):
+                have = float(getattr(m, attr).value)
+                if t.get(f):
+                    if abs(have - t[f]) > 1e-9:
+                        setattr(m, attr, t[f])
+                        own.add(getattr(m, "name", name))
+                elif have <= low:
+                    setattr(m, attr, THERMAL[kind][i])
+                    fixed.setdefault(kind, set()).add(name)
         except BaseException:  # noqa: BLE001
             continue
+    if own:
+        check("ok", f"Material values from the page: {', '.join(sorted(own))}")
     if fixed:
-        used = "; ".join(f"{kind} values ({THERMAL[kind][0]} W/mK) for {', '.join(names)}" for kind, names in fixed.items())
-        check("warn", f"No thermal data in the EDB: {used}. Type the real values in AEDT if they matter.")
+        used = "; ".join(f"{kind} values ({THERMAL[kind][0]} W/mK) for {', '.join(sorted(names))}" for kind, names in fixed.items())
+        check("warn", f"No thermal data in the EDB: {used}. Type the real values on the page (Board materials) if they matter.")
 
 
 def _build(Hfss3dLayout, Icepak, desktop, folder, board, study):
@@ -225,14 +230,14 @@ def _build(Hfss3dLayout, Icepak, desktop, folder, board, study):
     lay = Hfss3dLayout(version=VERSION, new_desktop=False, port=PORT)
     lay.import_edb(str(folder / board["edb"]))
     pn, dn = lay.project_name, lay.design_name
-    _thermal_defaults(lay)
+    _thermal_defaults(lay, study)
     ic = Icepak(project=pn, design=DESIGN, version=VERSION, new_desktop=False, port=PORT)
     ok = ic.create_pcb_from_3dlayout("PCB", pn, dn, resolution=int(study["pcbResolution"]), extent_type="Bounding Box",
                                      close_linked_project_after_import=False,
                                      rad="Both" if study["radiation"] else "Nothing")
     check("ok" if ok else "error", f"PCB from the EDB, mapping resolution {study['pcbResolution']}"
           if ok else "PCB import returned False")
-    _thermal_defaults(ic)
+    _thermal_defaults(ic, study)
     names = [re.sub(r"^PCB_\d+_|_BBox$", "", o) for o in ic.modeler.get_3d_component_object_list(name=PCB)]
     dup = sorted({n for n in names if names.count(n) > 1})
     if dup:
@@ -245,12 +250,12 @@ def _build(Hfss3dLayout, Icepak, desktop, folder, board, study):
 
 # ---------------------------------------------------------------- apply (same for build and update)
 
-def _apply(ic, board, by_ref, powered, study):
-    step("heat sources", lambda: _blocks(ic, board, by_ref, powered, study))
-    step("air", lambda: _air(ic, study))
+def _apply(ic, board, by_ref, parts, study):
+    step("parts", lambda: _blocks(ic, board, by_ref, parts, study))
+    step("air", lambda: _air(ic, study, board))
     step("environment", lambda: _environment(ic, study))
     step("setup", lambda: _setup(ic, study))
-    step("mesh", lambda: _mesh(ic, powered, study))
+    step("mesh", lambda: _mesh(ic, parts, study))
 
 
 def thermal(ic):
@@ -276,7 +281,8 @@ def _delete_boundary(ic, name):
 
 
 def _delete_block(ic, ref):
-    _delete_boundary(ic, f"P_{ref}")
+    if f"P_{ref}" in ic.get_oo_name(ic.odesign, "Thermal"):     # a block without power has none
+        _delete_boundary(ic, f"P_{ref}")
     if ref in ic.modeler.object_names:
         ic.modeler.delete(ref)
 
@@ -307,11 +313,22 @@ def _same(a, b):
     return a is not None and b is not None and abs(a - b) < 1e-9
 
 
-def _footprints(powered, by_ref):
-    """x0, y0, x1, y1 per heat source from the EDB, which gives the pad extents, not the package body. Close parts
-    can overlap, and Icepak refuses to solve intersecting blocks: two that overlap are cut back to meet halfway."""
-    xy = {p["refDes"]: [b["xMinMm"], b["yMinMm"], b["xMinMm"] + b["lMm"], b["yMinMm"] + b["wMm"]]
-          for p in powered for b in [by_ref[p["refDes"]]]}
+def _passive(ic, tree, board):
+    """blocks without power: objects named after a board part that have no P_ boundary"""
+    refs = {p["refDes"] for p in board["parts"]}
+    return [o for o in ic.modeler.object_names if o in refs and f"P_{o}" not in tree]
+
+
+def _footprints(parts, by_ref):
+    """x0, y0, x1, y1 per block: the body size typed on the page (X and Y of the board), centred on the footprint, else
+    the EDB's size, which is the pad extents, not the package body. Close parts can overlap, and Icepak refuses to
+    solve intersecting blocks: two that overlap are cut back to meet halfway."""
+    xy = {}
+    for p in parts:
+        b = by_ref[p["refDes"]]
+        cx, cy = b["xMinMm"] + b["lMm"] / 2, b["yMinMm"] + b["wMm"] / 2
+        lx, ly = p.get("bodyXMm") or b["lMm"], p.get("bodyYMm") or b["wMm"]
+        xy[p["refDes"]] = [cx - lx / 2, cy - ly / 2, cx + lx / 2, cy + ly / 2]
     refs = list(xy)
     for i, a in enumerate(refs):
         for c in refs[i + 1:]:
@@ -328,23 +345,28 @@ def _footprints(powered, by_ref):
     return xy
 
 
-def _blocks(ic, board, by_ref, powered, study):
+def _blocks(ic, board, by_ref, parts, study):
     m = ic.materials.add_material(PKG)
     if m:
         m.thermal_conductivity = study["packageK"]
         m.mass_density = 2000
-    want = {p["refDes"] for p in powered}
+        m.specific_heat = 1000
+    want = {p["refDes"] for p in parts}
     node, tree = thermal(ic)
-    objects = set(ic.modeler.object_names)
     for name in list(tree):
         if name.startswith("P_") and name[2:] not in want:
             _delete_block(ic, name[2:])
             tree.pop(name)
             check("ok", f"{name[2:]}: heat source removed")
+    for ref in _passive(ic, tree, board):
+        if ref not in want:
+            ic.modeler.delete(ref)
+            check("ok", f"{ref}: block without power removed")
+    objects = set(ic.modeler.object_names)
     zlo, zhi = board_z(ic, board)
-    xy = _footprints(powered, by_ref)
-    made = nets = 0
-    for p in powered:
+    xy = _footprints(parts, by_ref)
+    made = nets = passive = 0
+    for p in parts:
         ref, b = p["refDes"], by_ref[p["refDes"]]
         h = p.get("heightMm") or b["hMm"]     # a typed height is used as it is, only the EDB value gets the minimum
         if not p.get("heightMm") and h < MIN_BLOCK_H_MM:
@@ -354,13 +376,17 @@ def _blocks(ic, board, by_ref, powered, study):
         z = zhi if b["side"] == "top" else zlo - h      # the part sits on the board surface, so a network can touch it
         x0, y0, x1, y1 = xy[ref]
         box = [x0, y0, z, x1, y1, z + h]
-        kind = _kind(p)
+        kind = _kind(p) if (p.get("powerW") or 0) > 0 else "Passive"
         cur = tree.get(f"P_{ref}")
-        ok = cur is not None and ref in objects and cur["type"] == kind
+        ok = ref in objects and (cur is None if kind == "Passive" else cur is not None and cur["type"] == kind)
         if ok:
             ok = max(abs(a - c) for a, c in zip(ic.modeler[ref].bounding_box, box)) <= 1e-3
         if ok and kind == "Network":
             ok = _same(cur["rjc"], p["rjcCW"]) and _same(cur["rjb"], p["rjbCW"])
+        if ok and kind == "Passive":
+            made += 1
+            passive += 1
+            continue
         if ok:
             if not _same(cur["power"], p["powerW"]):
                 prop = "Total Power" if kind == "Solid Block" else "Internal: Properties/Power"
@@ -374,6 +400,10 @@ def _blocks(ic, board, by_ref, powered, study):
                                     name=ref, material=PKG if m else "Ceramic_material")
         if not obj:
             check("error", f"{ref}: block not created")
+            continue
+        if kind == "Passive":
+            made += 1
+            passive += 1
             continue
         if kind == "Network":
             try:
@@ -389,16 +419,16 @@ def _blocks(ic, board, by_ref, powered, study):
             made += 1
         else:
             check("error", f"{ref}: power not assigned")
-    if powered:
-        check("ok" if made == len(powered) else "error",
-              f"{made} of {len(powered)} heat sources in AEDT, {nets} with a junction model (Rjc, Rjb)")
+    if parts:
+        check("ok" if made == len(parts) else "error",
+              f"{made} of {len(parts)} parts in AEDT: {nets} with a junction model (Rjc, Rjb), {passive} without power")
 
 
-def _air(ic, study):
+def _air(ic, study, board):
     side, above = study["marginMm"], study["marginAboveMm"]
     pad = [side] * 6                           # +X -X +Y -Y +Z -Z
     pad[ORIENTATION[study["orientation"]][3]] += above   # extra room on the face opposite to gravity
-    bb, have = air_pad(ic)
+    bb, have = air_pad(ic, board)
     if have and "Open_air" in ic.get_oo_name(ic.odesign, "Thermal") and \
             max(abs(a - b) for a, b in zip(have, pad)) <= 0.06:   # rebuilding would throw away the mesh and solution
         check("ok", f"Air {bb[3]-bb[0]:.0f} x {bb[4]-bb[1]:.0f} x {bb[5]-bb[2]:.0f} mm, open on all faces (unchanged)")
@@ -443,7 +473,7 @@ def _setup(ic, study):
             check("ok","Radiation changed: old solution deleted, the next solve starts fresh")
 
 
-def _mesh(ic, powered, study):
+def _mesh(ic, parts, study):
     m = study["mesh"]
     gm = ic.mesh.global_mesh_region
     manual = m.get("mode") == "manual"
@@ -460,7 +490,7 @@ def _mesh(ic, powered, study):
         else:
             gm.settings["MeshRegionResolution"] = int(m.get("level", 3))
         gm.update()
-    wanted = {p["refDes"]: p["meshMm"] for p in powered if p.get("meshMm")}
+    wanted = {p["refDes"]: p["meshMm"] for p in parts if p.get("meshMm")}
     have = local_mesh(ic)
     stale = [ref for ref, size in have.items() if wanted.get(ref) != size]
     if stale:
@@ -683,8 +713,8 @@ def _get(settings, key, default=None):
         return default
 
 
-def air_pad(ic, tree=None):
-    """air box bounding box and its room around the board and heat sources in mm, [+X -X +Y -Y +Z -Z]"""
+def air_pad(ic, board, tree=None):
+    """air box bounding box and its room around the board and part blocks in mm, [+X -X +Y -Y +Z -Z]"""
     names = set(ic.modeler.object_names)
     if "Region" not in names:
         return None, None
@@ -697,6 +727,7 @@ def air_pad(ic, tree=None):
         pass
     ext += [ic.modeler[n[2:]].bounding_box for n, d in tree.items()
             if n.startswith("P_") and n[2:] in names and d["type"] in ("Solid Block", "Network")]
+    ext += [ic.modeler[o].bounding_box for o in _passive(ic, tree, board)]
     reg = ic.modeler["Region"].bounding_box
     if not ext:
         return reg, None
@@ -706,7 +737,7 @@ def air_pad(ic, tree=None):
                  round(lo[1] - reg[1], 1), round(reg[5] - hi[2], 1), round(lo[2] - reg[2], 1)]
 
 
-def read_state(ic, board=None):
+def read_state(ic, board):
     ds = ic.design_settings
     names = set(ic.modeler.object_names)
     setup = next((x for x in ic.setups if x.name == SETUP), None)
@@ -719,7 +750,13 @@ def read_state(ic, board=None):
                            "heightMm": round(bb[5] - bb[2], 4), "rjcCW": d["rjc"], "rjbCW": d["rjb"]})
         elif d["type"] != "Opening":
             other.append({"name": n, "type": d["type"], "powerW": d["power"]})
-    reg, pad = air_pad(ic, tree)
+    for o in _passive(ic, tree, board):
+        bb = ic.modeler[o].bounding_box
+        blocks.append({"refDes": o, "kind": "Passive", "powerW": 0, "heightMm": round(bb[5] - bb[2], 4), "rjcCW": None, "rjbCW": None})
+    reg, pad = air_pad(ic, board, tree)
+    keys = ic.materials.material_keys
+    mats = [{"name": b["name"], **{f: num(getattr(m, attr).value) for f, attr, _ in MAT_F}}
+            for b in board.get("materials", []) for m in [keys.get(b["name"].lower())] if m]
     gm = ic.mesh.global_mesh_region
     local = [{"refDes": r, "maxMm": v} for r, v in local_mesh(ic).items()]
     return {
@@ -735,6 +772,7 @@ def read_state(ic, board=None):
                   "flow": setup.props.get("Flow Regime"),
                   "radiation": setup.props.get("Radiation Model")} if setup else None,
         "blocks": blocks,
+        "materials": mats,
         "other": other,
         "mesh": {"manual": bool(gm.manual_settings),
                  "level": _get(gm.settings, "MeshRegionResolution"),

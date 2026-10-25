@@ -16,9 +16,8 @@ No solve, no spreader, no other cooling solution for now.
 | # | Who | What |
 |---|---|---|
 | 1 | You | Altium: File > Export > Ansys EDB. Put the exported `<board>.edb` (or `<board>.aedb`) in the folder `ansys\example` (or any folder); a `.edb` is copied to `.aedb` on read |
-| 2 | You | `.nsys
-un.ps1 serve.py [folder]`. The browser opens http://localhost:8765. Press **Read the board** (once) |
-| 3 | You | Ambient, board position, air, heat sources (add parts, or load the designer's CSV: RefDes, W), mesh. Press **Build** |
+| 2 | You | Double-click `ansys\start.bat` (or drag a board folder onto it). It starts AEDT if needed and the page server; the browser opens http://localhost:8765. Pick the board folder at the top right, press **Read the board** (once) |
+| 3 | You | "What the export is missing" lists the gaps. Fill them: heights and body sizes of the parts that matter, tall parts without power, material values. Then ambient, board position, air, power (or the designer's CSV: RefDes, W, height, body X, body Y), mesh. Press **Build** |
 | 4 | You | Look at the project in AEDT. Edit there if you want. **Read AEDT** shows what is there |
 | 5 | You | Change values on the page, press **Apply changes** (about 40 s), **Generate mesh** to see the mesh without solving |
 
@@ -39,7 +38,10 @@ the board surface so it can touch the PCB.
 | Missing | What happens |
 |---|---|
 | Power | No heat source for that part; warning if none has power |
-| Height (EDB gives a placeholder under 0.2 mm) | 0.2 mm used, warning says to type the real one |
+| Height (EDB gives a placeholder under 0.2 mm; Altium never exports heights) | 0.2 mm used, warning says to type the real one |
+| Body size (the EDB has only the pad outline) | Pad outline used; overlapping blocks are cut back to meet. Type Body X, Y (board axes) |
+| Material k, density, heat capacity (Altium exports 0) | Copper, solder or FR-4 stand-ins, shown grey on the page; typed values are sent on Apply |
+| Height but no power | A block without heat: it shapes the air flow and spreads heat |
 | Only one of Rjc, Rjb | Plain block, warning; no junction temperature |
 | Rjc and Rjb both | Junction model; if AEDT refuses it, plain block and a warning |
 | Tj max or Rja | No hand check or margin line, nothing else changes |
@@ -60,11 +62,13 @@ time made one of them hang. The page's own jobs never overlap, and a hung job is
 | `read_board.py` | EDB -> `board.json` (outline, stackup, parts with position, size, height). PyEDB only, about 7 s |
 | `setup_study.py` | `build`, `update`, `read`, `mesh` modes. Writes `state.json` (what AEDT holds) and `checks.json` |
 | `run.ps1` | Runs a script with Ansys' Python and `ansys\.venv` packages (the venv launcher itself is broken) |
+| `start.bat` | Starts AEDT (gRPC port 50051) if it is not running, then `serve.py`. If the page already runs, it just opens it |
 
 Folder contents: `<board>.aedb` (you), `board.json`, `study.json` (page), `state.json`, `checks.json`, `<board>_icepak.aedt`.
 `study.json`: `edb`, `ambientC`, `orientation` (flat-up, flat-down, vertical-long, vertical-short), `marginMm`,
 `marginAboveMm`, `radiation`, `pcbResolution`, `mesh {mode auto|manual, level, maxMm, gapElems, edgeElems}`,
-`parts[{refDes, powerW, heightMm?, meshMm?, rjcCW?, rjbCW?, rjaCW?, tjMaxC?}]`.
+`parts[{refDes, powerW?, heightMm?, bodyXMm?, bodyYMm?, meshMm?, rjcCW?, rjbCW?, rjaCW?, tjMaxC?}]`,
+`materials {name: {kWmK?, rhoKgM3?, cpJkgK?}}`.
 
 Timings on the sample: build about 1.5 min, apply with a change 40 to 80 s, generate mesh 15 s.
 
@@ -83,9 +87,9 @@ Timings on the sample: build about 1.5 min, apply with a change 40 to 80 s, gene
 - [x] EDB -> AEDT -> Icepak PCB works from Python (about 45 s); see [SESSION_LOG.md](SESSION_LOG.md) for gotchas
 - [x] `setup_study.py` build / update / read / mesh verified on the sample (power, orientation, air, mesh global and local)
 - [x] Page for the mechanical engineer; "In AEDT now" card with differences and Take AEDT values
-- [ ] Real Altium export (only the GitHub sample board was used)
-- [ ] Real part heights and materials (sample EDB heights are 0.04 mm placeholders)
+- [x] Real Altium exports: Bluetooth Sentinel and Spartan-IIE (AD examples), built and solved
+- [x] Missing heights, body sizes and material values filled from the page (Altium exports none of them)
 - [x] Rjc/Rjb junction model, Rja/Tj max hand check, AEDT as source of truth (auto read), missing-data fallbacks
-- [ ] Solve button and results card (temperatures per part, board hot spot)
+- [x] Solve button and results card (temperatures per part, board hot spot, convergence, energy balance)
 - [ ] Radiation model name for S2S (the page uses discrete ordinates); TIM and spreader (with a cooling solution), per-surface emissivity
 - [ ] Mesh cell count in the page (Generate mesh reports time only)
