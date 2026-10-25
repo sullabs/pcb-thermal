@@ -17,6 +17,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import warnings
 from pathlib import Path
@@ -31,7 +32,8 @@ MIN_BLOCK_H_MM = 0.2   # EDB heights below this are placeholders; the page value
 DESIGN = "Icepak"
 SETUP = "Study"
 PKG = "pkg_material"
-BUSY = ".setup_running"   # in <folder> while a build/update/mesh/solve runs; mode read leaves AEDT alone then
+# exists while a build/update/mesh/solve talks to the AEDT on PORT, for any board folder; mode read leaves AEDT alone then
+BUSY = Path(tempfile.gettempdir()) / f"pcb_thermal_aedt_{PORT}.busy"
 
 # gravity points down. edit_design_settings code: 0 -X, 1 -Y, 2 -Z, 3 +X, 4 +Y, 5 +Z (read back from AEDT)
 # fields: gravity code, label, text, index of the air face opposite to gravity in [+X, -X, +Y, -Y, +Z, -Z]
@@ -305,6 +307,27 @@ def _same(a, b):
     return a is not None and b is not None and abs(a - b) < 1e-9
 
 
+def _footprints(powered, by_ref):
+    """x0, y0, x1, y1 per heat source from the EDB, which gives the pad extents, not the package body. Close parts
+    can overlap, and Icepak refuses to solve intersecting blocks: two that overlap are cut back to meet halfway."""
+    xy = {p["refDes"]: [b["xMinMm"], b["yMinMm"], b["xMinMm"] + b["lMm"], b["yMinMm"] + b["wMm"]]
+          for p in powered for b in [by_ref[p["refDes"]]]}
+    refs = list(xy)
+    for i, a in enumerate(refs):
+        for c in refs[i + 1:]:
+            if by_ref[a]["side"] != by_ref[c]["side"]:
+                continue
+            A, C = xy[a], xy[c]
+            ox, oy = min(A[2], C[2]) - max(A[0], C[0]), min(A[3], C[3]) - max(A[1], C[1])
+            if ox <= 0 or oy <= 0:
+                continue
+            k = 0 if ox <= oy else 1                       # cut across the smaller overlap
+            lo, hi = (A, C) if A[k] + A[k + 2] <= C[k] + C[k + 2] else (C, A)
+            lo[k + 2] = hi[k] = (max(A[k], C[k]) + min(A[k + 2], C[k + 2])) / 2
+            check("warn", f"{a} and {c}: footprints overlap by {min(ox, oy):.2f} mm, both blocks cut back to meet")
+    return xy
+
+
 def _blocks(ic, board, by_ref, powered, study):
     m = ic.materials.add_material(PKG)
     if m:
@@ -319,6 +342,7 @@ def _blocks(ic, board, by_ref, powered, study):
             tree.pop(name)
             check("ok", f"{name[2:]}: heat source removed")
     zlo, zhi = board_z(ic, board)
+    xy = _footprints(powered, by_ref)
     made = nets = 0
     for p in powered:
         ref, b = p["refDes"], by_ref[p["refDes"]]
@@ -328,7 +352,8 @@ def _blocks(ic, board, by_ref, powered, study):
                           f"Type the real height.")
             h = MIN_BLOCK_H_MM
         z = zhi if b["side"] == "top" else zlo - h      # the part sits on the board surface, so a network can touch it
-        box = [b["xMinMm"], b["yMinMm"], z, b["xMinMm"] + b["lMm"], b["yMinMm"] + b["wMm"], z + h]
+        x0, y0, x1, y1 = xy[ref]
+        box = [x0, y0, z, x1, y1, z + h]
         kind = _kind(p)
         cur = tree.get(f"P_{ref}")
         ok = cur is not None and ref in objects and cur["type"] == kind
@@ -738,7 +763,7 @@ def read_only(folder, board, project_file):
     running = subprocess.run(["tasklist", "/FI", "IMAGENAME eq ansysedt.exe"], capture_output=True, text=True).stdout
     if "ansysedt.exe" not in running.lower():
         return closed("AEDT is not running")
-    pid = _busy_pid(folder)
+    pid = _busy_pid()
     if pid:   # a second gRPC client during a build made AEDT fail and once crash: keep the last state
         print(f"setup_study is running (process {pid}), AEDT not read")
         return 0
@@ -755,10 +780,10 @@ def read_only(folder, board, project_file):
         desktop.release_desktop(close_projects=False, close_on_exit=False)
 
 
-def _busy_pid(folder):
-    """process id of a running build/update/mesh/solve on this folder, else None. A file left by a killed run is ignored."""
+def _busy_pid():
+    """process id of a running build/update/mesh/solve, else None. A file left by a killed run is ignored."""
     try:
-        pid = int((folder / BUSY).read_text())
+        pid = int(BUSY.read_text())
     except (OSError, ValueError):
         return None
     tasks = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True).stdout
@@ -771,10 +796,9 @@ if __name__ == "__main__":
     folder, mode = Path(sys.argv[1]).resolve(), sys.argv[2] if len(sys.argv) == 3 else "build"
     if mode == "read":
         sys.exit(main(folder, mode))
-    busy = folder / BUSY
-    busy.write_text(str(os.getpid()))
+    BUSY.write_text(str(os.getpid()))
     try:
         code = main(folder, mode)
     finally:
-        busy.unlink(missing_ok=True)
+        BUSY.unlink(missing_ok=True)
     sys.exit(code)
