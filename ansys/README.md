@@ -93,3 +93,4 @@ Timings on the sample: build about 1.5 min, apply with a change 40 to 80 s, gene
 - [x] Solve button and results card (temperatures per part, board hot spot, convergence, energy balance)
 - [ ] Radiation model name for S2S (the page uses discrete ordinates); TIM and spreader (with a cooling solution), per-surface emissivity
 - [ ] Mesh cell count in the page (Generate mesh reports time only)
+- [ ] Bring over the hand calculations, thermal network analysis and network diagram from the SolidWorks route (`../PCB_Thermal.html`): the user wants them on this page too
