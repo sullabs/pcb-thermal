@@ -447,8 +447,9 @@ def _air(ic, study, board):
 
 def _environment(ic, study):
     gdir, label, what, _ = ORIENTATION[study["orientation"]]
-    ic.edit_design_settings(gravity_dir=gdir, ambient_temperature=study["ambientC"])
-    check("ok", f"Ambient {study['ambientC']} C, gravity {label} ({what})")
+    # radiation_temperature must be given: PyAEDT sets 20 C otherwise, and a colder surround over-states radiation
+    ic.edit_design_settings(gravity_dir=gdir, ambient_temperature=study["ambientC"], radiation_temperature=study["ambientC"])
+    check("ok", f"Ambient {study['ambientC']} C (air and radiation surround), gravity {label} ({what})")
 
 
 def _setup(ic, study):
@@ -578,18 +579,19 @@ def _monitors(ic, sources, board):
             ic.monitor.assign_point_monitor_in_object(ref, monitor_quantity="Temperature", monitor_name=f"T_{ref}")
 
 
-def _fmax(ic, obj):
-    """highest temperature in one object (field calculator). The solution name must be given, or AEDT refuses.
-    Not post.get_scalar_field_value: it tries EnterQty("Temperature") first, which in Icepak always fails (Temperature
-    is only a named expression) and puts "Abnormal script termination" in the message manager for every object.
-    A hollow object (network block) has no volume and fails; the stack is cleared so the next call still works."""
+def _fmax(ic, obj, op="Maximum"):
+    """highest (op "Mean": volume average) temperature in one object (field calculator). The solution name must be
+    given, or AEDT refuses. Not post.get_scalar_field_value: it tries EnterQty("Temperature") first, which in Icepak
+    always fails (Temperature is only a named expression) and puts "Abnormal script termination" in the message manager
+    for every object. A hollow object (network block) has no volume and fails; the stack is cleared so the next call
+    still works."""
     fr = ic.post.ofieldsreporter
     f = Path(ic.working_directory) / f"fmax_{obj}.fld"
     try:
         fr.CalcStack("clear")
         fr.CopyNamedExprToStack("Temperature")
         fr.EnterVol(obj)
-        fr.CalcOp("Maximum")
+        fr.CalcOp(op)
         fr.CalculatorWrite(str(f), ["Solution:=", f"{SETUP} : SteadyState"], [])
         return round(float(f.read_text().split()[-1]), 2)
     except BaseException:  # noqa: BLE001
@@ -690,6 +692,7 @@ def _solve(ic, folder, board, powered, ambient):
     board = max(on_board) if on_board else None
     if board is None:
         check("warn", "Board temperature could not be read. Look at the result in AEDT.")
+    board_mean = step("board average", lambda: _board_mean(ic, layers))
     # not "AllObjects": hollow network blocks in it break the AEDT session. Ask every other object one by one.
     _, tree = thermal(ic)
     hollow = {n[2:] for n, d in tree.items() if d["type"] == "Network" and n.startswith("P_")}
@@ -699,9 +702,19 @@ def _solve(ic, folder, board, powered, ambient):
     anywhere = max(seen) if seen else None
     (folder / "results.json").write_text(json.dumps({
         "schema": "pcb-thermal-ansys/results", "solvedAt": time.strftime("%H:%M:%S"), "seconds": round(secs),
-        "ambientC": ambient, "converged": conv, "balance": bal, "boardC": board, "hottestC": anywhere, "parts": rows}, indent=1), encoding="utf-8")
+        "ambientC": ambient, "converged": conv, "balance": bal, "boardC": board, "boardMeanC": board_mean, "hottestC": anywhere,
+        "parts": rows}, indent=1), encoding="utf-8")
     step("save project", lambda: ic.save_project())
-    check("ok", f"Board hottest {board} C, hottest measured {anywhere} C; results.json written")
+    check("ok", f"Board hottest {board} C, board average {board_mean} C, hottest measured {anywhere} C; results.json written")
+
+
+def _board_mean(ic, layers):
+    """volume average temperature of the PCB, from each layer's average weighted by its volume. Tells how much of the
+    board is near the hot spot; heat leaves through the whole surface, so this is the number to compare with a
+    hand estimate of convection and radiation."""
+    got = [(m, ic.modeler[o].volume) for o in layers for m in [_fmax(ic, o, "Mean")] if m is not None]
+    total = sum(v for _, v in got)
+    return round(sum(m * v for m, v in got) / total, 2) if total else None
 
 
 # ---------------------------------------------------------------- read back
@@ -765,6 +778,7 @@ def read_state(ic, board):
         "readAt": time.strftime("%H:%M:%S"),
         "project": ic.project_name, "path": str(ic.project_file),
         "ambientC": num(ds["AmbTemp"]),
+        "radiationC": num(_get(ds, "AmbRadTemp")),
         "gravity": f"{'-' if str(ds['GravityDir']) == 'Negative' else '+'}{str(ds['GravityVec'])[-1]}",
         "airMm": [round(reg[3] - reg[0], 1), round(reg[4] - reg[1], 1), round(reg[5] - reg[2], 1)] if reg else None,
         "padMm": pad,

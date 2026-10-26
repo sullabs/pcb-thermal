@@ -364,7 +364,7 @@ function renderAedt() {
   const other = (s.other || []).map(o => `${esc(o.name)} (${esc(o.type)}${o.powerW != null ? ", " + o.powerW + " W" : ""})`).join(", ");
   $("aedt").innerHTML = `<dl class="kv">
       <dt>Project</dt><dd>${esc(s.path)}</dd>
-      <dt>Ambient</dt><dd>${s.ambientC} &deg;C</dd>
+      <dt>Ambient</dt><dd>${s.ambientC} &deg;C${s.radiationC != null ? `, radiation surround ${s.radiationC} &deg;C` : ""}</dd>
       <dt>Gravity</dt><dd>${esc(s.gravity)} (${GRAV_TXT[GRAV[s.gravity]] || "other"})</dd>
       <dt>Air box</dt><dd>${s.airMm ? s.airMm.join(" &times; ") + " mm" : "none"}; ${s.openings.length ? "open faces" : "no opening"}</dd>
       <dt>Setup</dt><dd>${s.setup ? esc(s.setup.name) + ", " + esc(s.setup.flow) + ", radiation " + esc(s.setup.radiation) + ", " + s.setup.iterations + " iterations" : "none"}</dd>
@@ -389,7 +389,7 @@ function renderResult(r) {
     : `<p class="error">NOT converged (${esc(bad)}). Do not trust these numbers. Raise the iterations or refine the mesh.</p>`;
   const b = r.balance, split = b && b.radiationW != null ? `, ${b.convectionW} W convection, ${b.radiationW} W radiation` : "";
   const bal = !b ? "" : b.radiation ? `<p class="warn">Energy balance not checked: radiation is on, and the monitors count only convection (${b.outW} W of ${b.inW} W). Solve again to check it.</p>` : `<p class="${Math.abs(b.errorPct) <= 1 ? "ok" : "error"}">Energy balance: ${b.inW} W in, ${b.outW} W out (${split.slice(2)}${split ? ", " : ""}${b.errorPct > 0 ? "+" : ""}${b.errorPct} %).${Math.abs(b.errorPct) <= 1 ? "" : " Not balanced: do not trust these numbers."}</p>`;
-  $("result").innerHTML = conv + bal + `<dl class="kv"><dt>Board hottest</dt><dd>${f(r.boardC)}</dd><dt>Hottest measured</dt><dd>${f(r.hottestC)}</dd><dt>Ambient</dt><dd>${r.ambientC}</dd></dl>
+  $("result").innerHTML = conv + bal + `<dl class="kv"><dt>Board hottest</dt><dd>${f(r.boardC)}</dd><dt>Board average</dt><dd>${f(r.boardMeanC)}</dd><dt>Hottest measured</dt><dd>${f(r.hottestC)}</dd><dt>Ambient</dt><dd>${r.ambientC}</dd></dl>
     <div class="scroll"><table><thead><tr><th>Heat source</th><th class="n">Power</th><th class="n">Temperature</th><th class="n">Tj max</th><th class="n">Margin</th></tr></thead><tbody>${rows}</tbody></table></div>
     <p class="hint">Heat source temperature is the hottest point in the part body; a junction model shows its case surface. The junction temperature itself is not read. Full fields are in AEDT.</p>`;
 }

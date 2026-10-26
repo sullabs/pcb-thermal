@@ -208,3 +208,19 @@ Altium exports no heights, only pad outlines and no thermal material values (two
 - Level 3 is enough on both boards (level 4 and 5 move nothing by more than 0.6 C). Level 2 is not: on Sentinel (0.35 mm LEDs, 1 mm U4) it was 10 C too hot on the LEDs and 7 C too cold on U4. Use level 3 or finer; the page default is already 3.
 - The convection share (about 30 %) does not change with the mesh, so it is not under-resolved air. Earlier 1.4 W/m2K was worked out from the board maximum; the board average is lower, so the real h is higher. Still to check: the surface emissivities the PCB import sets, and an average board temperature.
 - Spartan FR-4 k 0.4 against 0.3 at level 2: board 46.0 against 46.4 C, U3 51.2 against 51.8: a material typed on the page and sent with Apply reaches the solve.
+
+## Emissivity, radiation surround, board average
+- Emissivity: the PCB import and the blocks all get AEDT's default surface material `Steel-oxidised-surface`, emissivity 0.8 (solder mask and plastic packages are nearer 0.9). Not set by the tool; not changeable from the page yet.
+- Bug found: `edit_design_settings` sets the radiation surround to 20 C unless `radiation_temperature` is given, so with a 25 C ambient every surface radiated to a background 5 K colder than the air. Every radiation-on result before this was too cool and over-stated radiation (about 1.7x on Spartan). Fixed: the surround follows the ambient; `read` reports it (`radiationC`) and the page shows it in "In AEDT now".
+- `results.json` has `boardMeanC`: the volume average of the PCB layers (field calculator Mean, weighted by layer volume). The page shows it under Board hottest.
+
+Level 3, before and after the fix:
+
+| Board | Surround | Board max | Board average | Hottest part | Convection / radiation |
+|---|---|---|---|---|---|
+| Spartan | 20 C | 47.2 C | 31.3 C | U3 51.5 | 0.51 / 1.12 W (31 % / 69 %) |
+| Spartan | 25 C | 49.4 | 33.9 | U3 53.7 | 0.70 / 0.93 W (43 % / 57 %) |
+| Sentinel | 20 C | 52.3 | 31.3 | LED1 71.9 | 0.19 / 0.48 W (29 % / 71 %) |
+| Sentinel | 25 C | 54.7 | 33.9 | LED1 74.3 | 0.28 / 0.39 W (42 % / 58 %) |
+
+Hand check (Spartan, about 0.021 m2 of board and part surface, average rise 8.9 K): convection about 3.7 W/m2K, radiation about 4.9 W/m2K against 4 x 0.8 x sigma x T^3 = 5.0 W/m2K. Both now plausible for a small board in still air. Earlier results in this log (and the mesh study) were made with the 20 C surround; the mesh conclusion (level 3 is enough) does not depend on it.
