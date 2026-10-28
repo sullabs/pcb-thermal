@@ -50,6 +50,7 @@
     <h2>No board yet</h2>
     <p>Put your export (Altium: File &gt; Export &gt; Ansys EDB, a <code>.edb</code> folder, or a <code>.aedb</code>) in the board folder, then read it. To use another folder anywhere on the PC, press <b>Open folder</b> at the top.</p>
     <button class="main" id="readBtn">Read the board</button>
+    <pre id="readLog" hidden></pre>
   </div>
 
   <div id="form" hidden>
@@ -422,7 +423,15 @@ async function refresh() {
     $("folderSel").innerHTML = st.boards.map(b => `<option value="${esc(b)}" title="${esc(b)}"${b === st.folder ? " selected" : ""}>${esc(label(b))}</option>`).join("");
   }
   $("noboard").hidden = !!board; $("form").hidden = !board; $("bar").hidden = !board;
-  if (!board) { $("sub").textContent = st.folder; return; }
+  if (!board) {
+    $("sub").textContent = st.folder;
+    if (reading) {      // a failed read leaves no board: show why and let the user try again
+      const real = st.job.running && !st.job.silent;
+      $("readLog").hidden = !st.job.log; $("readLog").textContent = st.job.log || "";
+      if (!real) { reading = "done"; $("readBtn").disabled = false; $("readBtn").textContent = "Read the board"; }
+    }
+    return;
+  }
   $("title").textContent = board.name;
   const o = board.outlineMm;
   $("sub").textContent = `${st.folder}  |  ${(o.xMax - o.xMin).toFixed(1)} × ${(o.yMax - o.yMin).toFixed(1)} × ${board.thicknessMm} mm  |  ${board.parts.length} parts`;
@@ -483,7 +492,14 @@ function addPart(ref, vals = {}) {
   drawParts(); markDirty();
 }
 
-$("readBtn").onclick = async () => { await api("/api/read", { method: "POST" }); const t = setInterval(async () => { await refresh(); if (board) clearInterval(t); }, 2000); };
+var reading = "";     // "started" while the server reads the board, then "done"
+$("readBtn").onclick = async () => {
+  $("readBtn").disabled = true; $("readBtn").textContent = "Reading the board…"; $("readLog").hidden = true;
+  const r = await api("/api/read", { method: "POST" });
+  if (!r.ok) { alert("Another job is running. Try again in a moment."); $("readBtn").disabled = false; $("readBtn").textContent = "Read the board"; return; }
+  reading = "started";
+  const t = setInterval(async () => { await refresh(); if (board || reading === "done") clearInterval(t); }, 2000);
+};
 $("rereadBtn").onclick = async () => {
   const r = await api("/api/read", { method: "POST" });
   if (!r.ok) alert("Another job is running. Try again in a moment.");
