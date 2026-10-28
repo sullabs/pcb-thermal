@@ -4,7 +4,8 @@
     read_board.py calls for_board() when the board folder holds a .step or .stp next to the EDB.
 
 Walks the assembly tree, applies each placement, and boxes the solids under every product: the box of a product
-holds its own solids and those of its children. The box comes from the vertices, the arcs of circles and ellipses
+holds its own solids and those of its children. Parts are matched at the component level: the children of the board
+assembly (the assembly with the most children), each boxed whole with its sub-parts. The box comes from the vertices, the arcs of circles and ellipses
 (sampled) and the control points of splines, so a dome that bulges past its edges is boxed a little short.
 """
 import json
@@ -162,6 +163,25 @@ def _refs(v):
 
 def boxes(path):
     """{product name: [xMin, yMin, zMin, xMax, yMax, zMax]} in mm, in the frame of the top assembly"""
+    out = {}
+    for name, box, _ in tree(path):
+        out.setdefault(name, []).append(box)
+    return out
+
+
+def components(path):
+    """[(name, box)] of the components: the children of the assembly with the most children (the board assembly,
+    also when the board sits inside a bigger product). Each box holds the whole component with its sub-parts"""
+    nodes = tree(path)
+    count = {}
+    for _, _, parent in nodes:
+        count[parent] = count.get(parent, 0) + 1
+    board = max((p for p in count if p is not None), key=count.get, default=None)
+    return [(name, box) for name, box, parent in nodes if parent == board]
+
+
+def tree(path):
+    """[(product name, box, index of the parent in this list or None)], one per occurrence, parents after children"""
     ents = read(path)
     scale = 1.0
     for e in ents.values():
@@ -219,27 +239,37 @@ def boxes(path):
 
     child_reps = {c for v in children.values() for c, _, _ in v}
     roots = [d for d, r in rep_of_pd.items() if r not in child_reps]
-    out = {}
+    out = []
 
-    def walk(rep, m, names):
-        pts = [_apply(m, p) for p in own_points(rep)]
+    def walk(rep, m, name):
+        """the points under this occurrence; adds it to out and returns its index there (None without solids)"""
+        pts, kids = [_apply(m, p) for p in own_points(rep)], []
         for child, t, pd in children.get(rep, []):
-            pts += walk(child, _mul(m, t), names + [name_of_pd.get(pd, "")])
-        if pts and names:
-            box = [min(p[k] for p in pts) * scale for k in range(3)] + [max(p[k] for p in pts) * scale for k in range(3)]
-            out.setdefault(names[-1], []).append(box)
-        return pts
+            p, k = walk(child, _mul(m, t), name_of_pd.get(pd, ""))
+            pts += p
+            kids.append(k)
+        if not pts:
+            return pts, None
+        out.append([name, [min(p[k] for p in pts) * scale for k in range(3)] + [max(p[k] for p in pts) * scale for k in range(3)], None])
+        for k in kids:
+            if k is not None:
+                out[k][2] = len(out) - 1
+        return pts, len(out) - 1
 
     for d in roots:
-        walk(rep_of_pd[d], I, [name_of_pd[d]])
-    return out
+        walk(rep_of_pd[d], I, name_of_pd[d])
+    return [tuple(n) for n in out]
 
 
 def for_board(path, board):
     """{RefDes: {hMm, xMm, yMm, by}} for the parts of board.json found in the STEP: height above the board face the part
-    sits on, body size along the board axes. by: "name" (a product named like the RefDes) or "position" (the biggest body
-    centred on the part's pads, for exporters that name products after the model)"""
-    found = boxes(path)
+    sits on, body size along the board axes. Only whole components count (components()), never one of their sub-parts.
+    by: "name" (a component named like the RefDes) or "position" (the component on the part's pads, for exporters
+    that name components after the model)"""
+    comps = components(path)
+    found = {}
+    for name, box in comps:
+        found.setdefault(name, []).append(box)
     centre = lambda b: ((b[0] + b[3]) / 2, (b[1] + b[4]) / 2)  # noqa: E731
     edb = {p["refDes"]: p for p in board["parts"]}
     named = {r: found[r][0] for r in edb if len(found.get(r, [])) == 1}
@@ -249,13 +279,17 @@ def for_board(path, board):
     near = lambda p, b, grow: (p["xMinMm"] - grow <= centre(b)[0] + off[0] <= p["xMinMm"] + p["lMm"] + grow and  # noqa: E731
                                p["yMinMm"] - grow <= centre(b)[1] + off[1] <= p["yMinMm"] + p["wMm"] + grow)
     hits = {r: (b, "name") for r, b in named.items() if near(edb[r], b, 2.0)}    # a name far from its pads is someone else's
-    every = [b for v in found.values() for b in v]
-    for r, p in edb.items():
+    o = board["outlineMm"]
+    half = (o["xMax"] - o["xMin"]) * (o["yMax"] - o["yMin"]) / 2      # bigger than that is the board itself
+    free = [b for _, b in comps if (b[3] - b[0]) * (b[4] - b[1]) < half and not any(b is h for h, _ in hits.values())]
+    for r, p in sorted(edb.items(), key=lambda rp: rp[1]["lMm"] * rp[1]["wMm"], reverse=True):
         if r not in hits:
-            area = (p["lMm"] + 1) * (p["wMm"] + 1) * 4         # bigger than that is the board or a whole sub-assembly
-            fit = [b for b in every if near(p, b, 0.5) and (b[3] - b[0]) * (b[4] - b[1]) <= area]
+            fit = [b for b in free if near(p, b, 0.5)]        # centred on the pads; a connector may overhang them
             if fit:
-                hits[r] = (max(fit, key=lambda b: (b[3] - b[0]) * (b[4] - b[1]) * (b[5] - b[2])), "position")
+                pc = (p["xMinMm"] + p["lMm"] / 2 - off[0], p["yMinMm"] + p["wMm"] / 2 - off[1])
+                b = min(fit, key=lambda b: math.dist(centre(b), pc))
+                hits[r] = (b, "position")
+                free.remove(b)
     # the face a part sits on: the commonest body bottom of the top-side parts; the bottom face is a board thickness lower
     tops = [round(b[2], 2) for r, (b, _) in hits.items() if edb[r]["side"] == "top"]
     top = max(set(tops), key=tops.count) if tops else max(b[2] for b, _ in hits.values()) if hits else 0.0

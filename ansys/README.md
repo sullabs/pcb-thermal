@@ -61,7 +61,7 @@ time made one of them hang. The page's own jobs never overlap, and a hung job is
 | `page.html` | The page. No build step |
 | `serve.py` | Local server for the page (stdlib only). Reads/writes the folder files, starts the scripts one at a time. Folders opened before: `%APPDATA%\pcb-thermal\recent.json` |
 | `read_board.py` | EDB -> `board.json` (outline, stackup, parts with position, size, height). PyEDB only, about 7 s |
-| `step_parts.py` | Board STEP -> height and body size per part (`stepHMm`, `stepXMm`, `stepYMm` in `board.json`). Standard library only, under a second. Matches products named like the RefDes, else the biggest body centred on the pads. Height is from the board face the part sits on (standoff included) |
+| `step_parts.py` | Board STEP -> height and body size per part (`stepHMm`, `stepXMm`, `stepYMm` in `board.json`). Standard library only, under a second. Works on whole components (the children of the board assembly, with all their sub-parts), never on one sub-part: matches a component named like the RefDes, else the component centred on the pads. Height is from the board face the part sits on (standoff included) |
 | `setup_study.py` | `build`, `update`, `read`, `mesh` modes. Writes `state.json` (what AEDT holds) and `checks.json` |
 | `run.ps1` | Runs a script with Ansys' Python and `ansys\.venv` packages (the venv launcher itself is broken) |
 | `start.bat` | Starts AEDT (gRPC port 50051) if it is not running, then `serve.py`. If the page already runs, it just opens it |
