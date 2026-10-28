@@ -7,13 +7,14 @@ because PyEDB and AEDT only open the .aedb name. Writes <folder>/board.json. Uni
 Needs no AEDT session, only PyEDB (about 7 s).
 """
 import json
+import os
 import shutil
 import sys
 import warnings
 from pathlib import Path
 
 warnings.filterwarnings("ignore")
-VERSION = "2026.1"
+VERSION = os.environ.get("AEDT_VERSION", "2026.1")   # start.bat / run.ps1 set it to the newest AEDT installed
 M2MM = 1000.0
 THERMAL = {"copper": (400, 8933, 385), "solder": (48, 8000, 167), "FR-4": (0.3, 1900, 1100)}   # W/mK, kg/m3, J/kgK
 

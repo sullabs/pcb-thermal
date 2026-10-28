@@ -10,4 +10,5 @@ backup/
 
 # Ansys route
 ansys/.venv/
+dist/
 ansys/**/__pycache__/

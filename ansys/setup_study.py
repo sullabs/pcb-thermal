@@ -26,7 +26,7 @@ warnings.filterwarnings("ignore")
 sys.path.insert(0, str(Path(__file__).parent))
 import read_board  # noqa: E402
 
-VERSION = "2026.1"
+VERSION = read_board.VERSION
 PORT = 50051
 MIN_BLOCK_H_MM = 0.2   # EDB heights below this are placeholders; the page value or this minimum is used
 DESIGN = "Icepak"

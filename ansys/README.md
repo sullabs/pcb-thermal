@@ -63,6 +63,7 @@ time made one of them hang. The page's own jobs never overlap, and a hung job is
 | `setup_study.py` | `build`, `update`, `read`, `mesh` modes. Writes `state.json` (what AEDT holds) and `checks.json` |
 | `run.ps1` | Runs a script with Ansys' Python and `ansys\.venv` packages (the venv launcher itself is broken) |
 | `start.bat` | Starts AEDT (gRPC port 50051) if it is not running, then `serve.py`. If the page already runs, it just opens it |
+| `make_offline.ps1` | Writes `dist\pcb-thermal` (+ zip) to install on a PC without internet |
 
 Folder contents: `<board>.aedb` (you), `board.json`, `study.json` (page), `state.json`, `checks.json`, `<board>_icepak.aedt`.
 `study.json`: `edb`, `ambientC`, `orientation` (flat-up, flat-down, vertical-long, vertical-short), `marginMm`,
@@ -74,11 +75,17 @@ Timings on the sample: build about 1.5 min, apply with a change 40 to 80 s, gene
 
 ## Environment
 
-- AEDT 2026 R1 (v261), PyAEDT 1.9.0, Python 3.10 (Ansys ships 3.10.19 with pip).
+- AEDT 2026 R1 (v261) here, 2025 R2 (v252) or later elsewhere; PyAEDT 1.9.0, Python 3.10 (AEDT ships its own with pip).
   Install root here: `E:\Program Files\ANSYS Inc\v261\AnsysEM`.
-- `start.bat` and `run.ps1` install `requirements.txt` into `ansys\.venv\Lib\site-packages` (`pip install --target`)
-  when PyAEDT is not there, so the first run on a new PC needs internet access. They check only that PyAEDT is
+- `start.bat` and `run.ps1` use the newest AEDT installed (the highest `ANSYSEM_ROOTnnn` variable; `AEDT_RELEASE=252`
+  picks one) and pass its version to the scripts as `AEDT_VERSION` (`2025.2`). Only tested on 2026 R1 so far.
+- They install `requirements.txt` into `ansys\.venv\Lib\site-packages` (`pip install --target`) when PyAEDT is not
+  there: from `offline\wheels` if that folder exists, else from the internet. They check only that PyAEDT is
   present, not its version: after changing the pin, delete `ansys\.venv` to reinstall.
+- New PC without internet: `make_offline.ps1` writes `dist\pcb-thermal\` and `dist\pcb-thermal.zip` (about 60 MB):
+  these files, the sample board, `offline\wheels`, the Python 3.10.11 installer (only for an AEDT without
+  `commonfiles\CPython`) and `INSTALL.txt`. Copy it over, then run `start.bat`.
+- `requirements.txt` alone gives the same `board.json` as the fuller `.venv` here (PyEDB over gRPC, no pythonnet).
 - Same on the work PC: AEDT installed, gRPC allowed on localhost (port 50051 here), then `start.bat`.
 
 ## Status
