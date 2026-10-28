@@ -20,6 +20,18 @@ if errorlevel 1 (
   echo AEDT is already running.
 )
 
+set "PY=%ANSYSEM_ROOT261%\commonfiles\CPython\3_10\winx64\Release\python\python.exe"
 set "PYTHONPATH=%HERE%.venv\Lib\site-packages"
-"%ANSYSEM_ROOT261%\commonfiles\CPython\3_10\winx64\Release\python\python.exe" -u "%HERE%serve.py" "%FOLDER%"
+rem First run on a PC: install requirements.txt into ansys\.venv (pip --target, the venv launcher itself is broken).
+"%PY%" -c "import importlib.metadata as m; m.distribution('pyaedt')" 2>nul
+if errorlevel 1 (
+  echo PyAEDT is missing, installing requirements.txt into .venv...
+  "%PY%" -m pip install --target "%PYTHONPATH%" -r "%HERE%requirements.txt"
+  if errorlevel 1 (
+    echo The install failed. It needs internet access; see the pip output above.
+    pause
+    exit /b 1
+  )
+)
+"%PY%" -u "%HERE%serve.py" "%FOLDER%"
 pause

@@ -74,9 +74,12 @@ Timings on the sample: build about 1.5 min, apply with a change 40 to 80 s, gene
 
 ## Environment
 
-- AEDT 2026 R1 (v261), PyAEDT 1.9.0, Python 3.10 (Ansys ships 3.10.19; use a venv from it, then `pip install pyaedt`).
+- AEDT 2026 R1 (v261), PyAEDT 1.9.0, Python 3.10 (Ansys ships 3.10.19 with pip).
   Install root here: `E:\Program Files\ANSYS Inc\v261\AnsysEM`.
-- Same on the work PC: AEDT installed, gRPC allowed on localhost (port 50051 here), then the pip line above.
+- `start.bat` and `run.ps1` install `requirements.txt` into `ansys\.venv\Lib\site-packages` (`pip install --target`)
+  when PyAEDT is not there, so the first run on a new PC needs internet access. They check only that PyAEDT is
+  present, not its version: after changing the pin, delete `ansys\.venv` to reinstall.
+- Same on the work PC: AEDT installed, gRPC allowed on localhost (port 50051 here), then `start.bat`.
 
 ## Status
 
