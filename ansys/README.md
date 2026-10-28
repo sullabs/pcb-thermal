@@ -15,8 +15,8 @@ No solve, no spreader, no other cooling solution for now.
 
 | # | Who | What |
 |---|---|---|
-| 1 | You | Altium: File > Export > Ansys EDB. Put the exported `<board>.edb` (or `<board>.aedb`) in the folder `ansys\example` (or any folder); a `.edb` is copied to `.aedb` on read |
-| 2 | You | Double-click `ansys\start.bat` (or drag a board folder onto it). It starts AEDT if needed and the page server; the browser opens http://localhost:8765. Pick the board folder at the top right, press **Read the board** (once) |
+| 1 | You | Altium: File > Export > Ansys EDB. Put the exported `<board>.edb` (or `<board>.aedb`) in a board folder anywhere; a `.edb` is copied to `.aedb` on read. Also File > Export > STEP 3D into the same folder: part heights and body sizes then come from it |
+| 2 | You | Double-click `ansys\start.bat` (or drag a board folder onto it). It starts AEDT if needed and the page server; the browser opens http://localhost:8765 on the folder opened last. **Open folder…** at the top picks any folder on the PC (Windows folder dialog); the list above it holds the folders opened before. Press **Read the board** (once) |
 | 3 | You | "What the export is missing" lists the gaps. Fill them: heights and body sizes of the parts that matter, tall parts without power, material values. Then ambient, board position, air, power (or the designer's CSV: RefDes, W, height, body X, body Y), mesh. Press **Build** |
 | 4 | You | Look at the project in AEDT. Edit there if you want. **Read AEDT** shows what is there |
 | 5 | You | Change values on the page, press **Apply changes** (about 40 s), **Generate mesh** to see the mesh without solving |
@@ -38,8 +38,9 @@ the board surface so it can touch the PCB.
 | Missing | What happens |
 |---|---|
 | Power | No heat source for that part; warning if none has power |
-| Height (EDB gives a placeholder under 0.2 mm; Altium never exports heights) | 0.2 mm used, warning says to type the real one |
-| Body size (the EDB has only the pad outline) | Pad outline used; overlapping blocks are cut back to meet. Type Body X, Y (board axes) |
+| Height (EDB gives a placeholder under 0.2 mm; Altium never exports heights) | From the board's STEP if the folder has one, else 0.2 mm and a warning to type the real one |
+| Body size (the EDB has only the pad outline) | From the STEP if there is one, else the pad outline; overlapping blocks are cut back to meet. Type Body X, Y (board axes) |
+| Part not in the STEP (no 3D model, e.g. test points) | As if there were no STEP for that part. Typed values always win over the STEP |
 | Material k, density, heat capacity (Altium exports 0) | Copper, solder or FR-4 stand-ins, shown grey on the page; typed values are sent on Apply |
 | Height but no power | A block without heat: it shapes the air flow and spreads heat |
 | Only one of Rjc, Rjb | Plain block, warning; no junction temperature |
@@ -58,8 +59,9 @@ time made one of them hang. The page's own jobs never overlap, and a hung job is
 | File | Role |
 |---|---|
 | `page.html` | The page. No build step |
-| `serve.py` | Local server for the page (stdlib only). Reads/writes the folder files, starts the scripts one at a time |
+| `serve.py` | Local server for the page (stdlib only). Reads/writes the folder files, starts the scripts one at a time. Folders opened before: `%APPDATA%\pcb-thermal\recent.json` |
 | `read_board.py` | EDB -> `board.json` (outline, stackup, parts with position, size, height). PyEDB only, about 7 s |
+| `step_parts.py` | Board STEP -> height and body size per part (`stepHMm`, `stepXMm`, `stepYMm` in `board.json`). Standard library only, under a second. Matches products named like the RefDes, else the biggest body centred on the pads. Height is from the board face the part sits on (standoff included) |
 | `setup_study.py` | `build`, `update`, `read`, `mesh` modes. Writes `state.json` (what AEDT holds) and `checks.json` |
 | `run.ps1` | Runs a script with Ansys' Python and `ansys\.venv` packages (the venv launcher itself is broken) |
 | `start.bat` | Starts AEDT (gRPC port 50051) if it is not running, then `serve.py`. If the page already runs, it just opens it |

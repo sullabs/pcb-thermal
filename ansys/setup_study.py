@@ -118,8 +118,9 @@ def main(folder: Path, mode: str = "build") -> int:
         return read_only(folder, board, project_file)
     for ref in board.get("skipped", []):
         check("warn", f"{ref}: could not be read from the EDB (no position or size), it cannot get a heat source")
-    # a block per part with power (heat source) or with only a typed height (no heat, it shapes the air flow)
-    parts = [p for p in study["parts"] if (p.get("powerW") or 0) > 0 or (p.get("heightMm") or 0) > 0]
+    # a block per part with power (heat source) or with only a height, typed or from the STEP (no heat, it shapes the air)
+    parts = [p for p in study["parts"] if (p.get("powerW") or 0) > 0 or (p.get("heightMm") or 0) > 0
+             or by_ref.get(p["refDes"], {}).get("stepHMm")]
     for p in parts:
         if p["refDes"] not in by_ref:
             check("error", f"{p['refDes']} has a power or height but is not in the EDB")
@@ -321,13 +322,13 @@ def _passive(ic, tree, board):
 
 def _footprints(parts, by_ref):
     """x0, y0, x1, y1 per block: the body size typed on the page (X and Y of the board), centred on the footprint, else
-    the EDB's size, which is the pad extents, not the package body. Close parts can overlap, and Icepak refuses to
+    the STEP's body size, else the EDB's size, which is the pad extents, not the package body. Close parts can overlap, and Icepak refuses to
     solve intersecting blocks: two that overlap are cut back to meet halfway."""
     xy = {}
     for p in parts:
         b = by_ref[p["refDes"]]
         cx, cy = b["xMinMm"] + b["lMm"] / 2, b["yMinMm"] + b["wMm"] / 2
-        lx, ly = p.get("bodyXMm") or b["lMm"], p.get("bodyYMm") or b["wMm"]
+        lx, ly = p.get("bodyXMm") or b.get("stepXMm") or b["lMm"], p.get("bodyYMm") or b.get("stepYMm") or b["wMm"]
         xy[p["refDes"]] = [cx - lx / 2, cy - ly / 2, cx + lx / 2, cy + ly / 2]
     refs = list(xy)
     for i, a in enumerate(refs):
@@ -368,8 +369,8 @@ def _blocks(ic, board, by_ref, parts, study):
     made = nets = passive = 0
     for p in parts:
         ref, b = p["refDes"], by_ref[p["refDes"]]
-        h = p.get("heightMm") or b["hMm"]     # a typed height is used as it is, only the EDB value gets the minimum
-        if not p.get("heightMm") and h < MIN_BLOCK_H_MM:
+        h = p.get("heightMm") or b.get("stepHMm") or b["hMm"]    # typed, else the STEP's, else the EDB placeholder
+        if not p.get("heightMm") and not b.get("stepHMm") and h < MIN_BLOCK_H_MM:
             check("warn", f"{ref}: EDB height {b['hMm']} mm is a placeholder, using {MIN_BLOCK_H_MM} mm. "
                           f"Type the real height.")
             h = MIN_BLOCK_H_MM

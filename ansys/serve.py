@@ -1,12 +1,13 @@
 """Local server for the page. Reads and writes files in <folder>; starts setup_study.py on request.
 
-    .\ansys\run.ps1 serve.py [folder] [port]      (default folder: ansys\example)
+    .\ansys\run.ps1 serve.py [folder] [port]      (default folder: the last one opened, else ansys\example)
     ansys\start.bat [folder]                       (the same, and starts AEDT first)
 
-Open http://localhost:8765. Nothing leaves this PC. The page can switch to <folder> or any of its sub-folders that
-holds a .edb or .aedb export.
+Open http://localhost:8765. Nothing leaves this PC. The page can open any folder on the PC (Windows folder dialog);
+it lists the folders opened before and the sub-folders of the start folder that hold a .edb or .aedb export.
 """
 import json
+import os
 import subprocess
 import webbrowser
 import sys
@@ -17,7 +18,25 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 HERE = Path(__file__).parent
-FOLDER = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else HERE / "example"
+RECENT = Path(os.environ.get("APPDATA") or HERE) / "pcb-thermal" / "recent.json"     # folders opened before, newest first
+
+
+def recent():
+    try:
+        return [d for d in json.loads(RECENT.read_text(encoding="utf-8")) if Path(d).is_dir()]
+    except (OSError, ValueError):
+        return []
+
+
+def remember(folder):
+    try:
+        RECENT.parent.mkdir(parents=True, exist_ok=True)
+        RECENT.write_text(json.dumps([str(folder), *[d for d in recent() if d != str(folder)]][:15], indent=1), encoding="utf-8")
+    except OSError:
+        pass
+
+
+FOLDER = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 and sys.argv[1] else Path((recent() or [HERE / "example"])[0])
 ROOT = FOLDER
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8765
 WHAT = {"build": "Building the project", "update": "Applying changes", "mesh": "Generating the mesh",
@@ -32,9 +51,18 @@ def jread(name):
 
 
 def boards():
-    """board folders the page can switch to: ROOT and its sub-folders that hold an export or a board.json"""
+    """board folders the page lists: the open one, those opened before, ROOT's sub-folders with an export or a board.json"""
     has = lambda d: (d / "board.json").exists() or any(x.is_dir() for p in ("*.edb", "*.aedb") for x in d.glob(p))  # noqa: E731
-    return [str(d) for d in [ROOT, *sorted(x for x in ROOT.iterdir() if x.is_dir())] if has(d)]
+    subs = [str(d) for d in [ROOT, *sorted(x for x in ROOT.iterdir() if x.is_dir())] if has(d)]
+    return list(dict.fromkeys([str(FOLDER), *recent(), *subs]))
+
+
+def pick_folder():
+    """the Windows folder dialog, in its own process (Tk wants the main thread). Empty when cancelled"""
+    code = ("import sys, tkinter as tk, tkinter.filedialog as fd; r = tk.Tk(); r.withdraw(); r.attributes('-topmost', True); "
+            "print(fd.askdirectory(parent=r, initialdir=sys.argv[1], title='Board folder (with the .edb or .aedb export)'))")
+    out = subprocess.run([sys.executable, "-c", code, str(FOLDER.parent)], capture_output=True, text=True, encoding="utf-8")
+    return out.stdout.strip()
 
 
 def run_script(script, what, *args, silent=False):
@@ -99,7 +127,17 @@ class H(BaseHTTPRequestHandler):
         else:
             self._send(404, {"error": "not found"})
 
+    def _foreign(self):
+        """a web site open in the same browser must not drive the page: allow only requests from the page itself"""
+        origin = self.headers.get("Origin")
+        if origin and origin not in (f"http://localhost:{PORT}", f"http://127.0.0.1:{PORT}"):
+            self._send(403, {"error": "forbidden"})
+            return True
+        return False
+
     def do_PUT(self):
+        if self._foreign():
+            return
         if self.path == "/api/study":
             n = int(self.headers.get("Content-Length", 0))
             study = json.loads(self.rfile.read(n))
@@ -110,15 +148,28 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         global FOLDER
+        if self._foreign():
+            return
         path, _, query = self.path.partition("?")
         q = parse_qs(query)
         mode = (q.get("mode") or ["build"])[0]
-        if path == "/api/folder":
-            want = (q.get("path") or [""])[0]
-            if job["running"] or want not in boards():     # a background read still writes to the old folder
-                return self._send(409, {"ok": False})
-            FOLDER = Path(want)
-            return self._send(200, {"ok": True})
+        if path in ("/api/folder", "/api/browse"):
+            # A real job must finish in its folder first; the page's background read of AEDT may go on, its script
+            # was given the old folder and writes only there
+            busy = lambda: job["running"] and not job["silent"]  # noqa: E731
+            if busy():
+                return self._send(409, {"ok": False, "error": "A job is running. Switch when it has finished."})
+            want = (q.get("path") or [""])[0] if path == "/api/folder" else pick_folder()
+            if not want:
+                return self._send(200, {"ok": False, "cancelled": True})
+            want = Path(want).resolve()
+            if not want.is_dir():
+                return self._send(404, {"ok": False, "error": f"{want} is not a folder."})
+            if busy():      # started while the dialog was open
+                return self._send(409, {"ok": False, "error": "A job is running. Switch when it has finished."})
+            FOLDER = want
+            remember(FOLDER)
+            return self._send(200, {"ok": True, "folder": str(FOLDER)})
         if path == "/api/read":
             ok = run_script("read_board.py", "Reading the board")
         elif path == "/api/run" and mode in WHAT:
@@ -140,6 +191,7 @@ if __name__ == "__main__":
         print(f"Port {PORT} is in use, the page is probably running already. Opening it.", flush=True)
         webbrowser.open(f"http://localhost:{PORT}")
         sys.exit(0)
+    remember(FOLDER)
     print(f"Page: http://localhost:{PORT}   folder: {FOLDER}", flush=True)
     threading.Timer(1.0, lambda: webbrowser.open(f"http://localhost:{PORT}")).start()
     server.serve_forever()

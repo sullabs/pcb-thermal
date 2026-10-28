@@ -1,6 +1,6 @@
 @echo off
 rem Starts everything for the page: AEDT (with its gRPC port, if it is not running yet), the local server, the browser.
-rem   start.bat [folder]     default: ansys\example. Drag a board folder onto this file to open that one.
+rem   start.bat [folder]     default: the folder opened last (else ansys\example). The page opens any other folder.
 rem Close this window to stop the server. AEDT stays open.
 rem Uses the newest AEDT installed (ANSYSEM_ROOT252, ANSYSEM_ROOT261, ...); set AEDT_RELEASE=252 to pick one.
 setlocal EnableDelayedExpansion
@@ -33,8 +33,6 @@ if not exist "%PY%" (
   exit /b 1
 )
 echo AEDT %AEDT_VERSION%, %ROOT%
-set "FOLDER=%~1"
-if "%FOLDER%"=="" set "FOLDER=%HERE%example"
 
 tasklist /FI "IMAGENAME eq ansysedt.exe" | find /I "ansysedt.exe" >nul
 if errorlevel 1 (
@@ -59,5 +57,12 @@ if errorlevel 1 (
     exit /b 1
   )
 )
-"%PY%" -u "%HERE%serve.py" "%FOLDER%"
+rem No folder given: serve.py opens the last one opened on the page (else ansys\example)
+rem (no parentheses here: a path like "C:\Program Files (x86)\..." would end the block early)
+if "%~1"=="" goto noarg
+"%PY%" -u "%HERE%serve.py" "%~1"
+goto done
+:noarg
+"%PY%" -u "%HERE%serve.py"
+:done
 pause
