@@ -4,8 +4,8 @@
     read_board.py calls for_board() when the board folder holds a .step or .stp next to the EDB.
 
 Walks the assembly tree, applies each placement, and boxes the solids under every product: the box of a product
-holds its own solids and those of its children. Parts are matched at the component level: the children of the board
-assembly (the assembly with the most children), each boxed whole with its sub-parts. The box comes from the vertices, the arcs of circles and ellipses
+holds its own solids and those of its children. Parts are matched at the component level, the products named like
+the RefDes (U1, C7, VR8; SolidWorks' "U1-1" too), each boxed whole with its sub-parts, never a product below them. The box comes from the vertices, the arcs of circles and ellipses
 (sampled) and the control points of splines, so a dome that bulges past its edges is boxed a little short.
 """
 import json
@@ -169,15 +169,37 @@ def boxes(path):
     return out
 
 
-def components(path):
-    """[(name, box)] of the components: the children of the assembly with the most children (the board assembly,
-    also when the board sits inside a bigger product). Each box holds the whole component with its sub-parts"""
+def refdes(name, refs):
+    """the RefDes a product is named after ("U1", also "U1-1" or "U1<1>" from SolidWorks), or None"""
+    up = {r.upper(): r for r in refs}
+    name = name.split("/")[-1].strip().upper()
+    return up.get(name) or up.get(re.sub(r"(-\d+|<\d+>)$", "", name))
+
+
+def components(path, refs=()):
+    """[(name, box)] of the components, each boxed whole with its sub-parts. The component level is the one whose
+    products are named like the RefDes in refs (U1, C7, VR8): the assembly holding most of them is the board
+    assembly, its children are the components; a RefDes-named product elsewhere counts too, the level below never.
+    Without such names: the children of the assembly with the most children"""
     nodes = tree(path)
+    named = [i for i, (name, _, _) in enumerate(nodes) if refdes(name, refs)]
     count = {}
-    for _, _, parent in nodes:
-        count[parent] = count.get(parent, 0) + 1
-    board = max((p for p in count if p is not None), key=count.get, default=None)
-    return [(name, box) for name, box, parent in nodes if parent == board]
+    for i in named or range(len(nodes)):
+        p = nodes[i][2]
+        if p is not None:
+            count[p] = count.get(p, 0) + 1
+    board = max(count, key=count.get, default=None)
+    picked = {i for i, n in enumerate(nodes) if n[2] == board and board is not None}
+
+    def inside(i):          # under a component already picked
+        while (i := nodes[i][2]) is not None:
+            if i in picked:
+                return True
+        return False
+    for i in sorted(named, key=lambda i: -i):     # parents come after children: the outer one first
+        if i not in picked and not inside(i):
+            picked.add(i)
+    return [(refdes(nodes[i][0], refs) or nodes[i][0], nodes[i][1]) for i in sorted(picked)]
 
 
 def tree(path):
@@ -266,7 +288,7 @@ def for_board(path, board):
     sits on, body size along the board axes. Only whole components count (components()), never one of their sub-parts.
     by: "name" (a component named like the RefDes) or "position" (the component on the part's pads, for exporters
     that name components after the model)"""
-    comps = components(path)
+    comps = components(path, [p["refDes"] for p in board["parts"]])
     found = {}
     for name, box in comps:
         found.setdefault(name, []).append(box)
