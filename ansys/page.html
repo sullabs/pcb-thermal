@@ -234,7 +234,7 @@
         <thead>
           <tr><th></th><th class="group n" colspan="5">Sent to AEDT</th><th class="group n" colspan="2">Junction model</th><th class="group n page" colspan="3">Page only</th><th></th></tr>
           <tr><th>RefDes</th><th class="n">Power (W)</th><th class="n">Height (mm)</th>
-          <th class="n" title="Package body size along the board X axis. Empty: the pad outline from the export">Body X (mm)</th><th class="n" title="Package body size along the board Y axis">Body Y (mm)</th><th class="n">Mesh (mm)</th>
+          <th class="n" title="Package body size along the board X axis. Empty: the pad outline from the EDB, along the part's own axes (a part turned 45 deg keeps its size)">Body X (mm)</th><th class="n" title="Package body size along the board Y axis">Body Y (mm)</th><th class="n">Mesh (mm)</th>
           <th class="n" title="Junction to case, from the datasheet">Rjc (&deg;C/W)</th><th class="n" title="Junction to board, from the datasheet">Rjb (&deg;C/W)</th>
           <th class="n page" title="Junction to ambient. Not sent to AEDT">Rja (&deg;C/W)</th><th class="n page" title="Maximum junction temperature">Tj max (&deg;C)</th>
           <th class="n page" title="Ambient + power x Rja">Tj by Rja</th><th></th></tr></thead>
@@ -414,12 +414,12 @@ function gaps() {
   const n = board.parts.length, flat = board.parts.filter(p => !(p.stepHMm > 0) && p.hMm < 0.2).length, st = board.step;
   const zero = (board.materials || []).filter(m => !(m.kWmK > 0 && m.rhoKgM3 > 0 && m.cpJkgK > 0)).map(m => m.name);
   const out = [];
-  if (st) out.push(`<li class="${flat ? "warn" : "ok"}">Heights and body sizes of ${st.parts} of ${n} parts come from <code>${esc(st.file)}</code>${st.byPosition ? ` (${st.byPosition} matched by position, not by name)` : ""}.${flat ? ` The other ${flat} have no 3D model in it and keep the placeholder height under 0.2 mm and the pad outline: type the ones that matter.` : ""} Typed values win over the STEP.</li>`);
+  if (st) out.push(`<li class="${flat ? "warn" : "ok"}">Heights of ${st.parts} of ${n} parts come from <code>${esc(st.file)}</code>${st.byPosition ? ` (${st.byPosition} matched by position, not by name)` : ""}.${flat ? ` The other ${flat} have no 3D model in it and keep the placeholder height under 0.2 mm: type the ones that matter.` : ""} Typed values win over the STEP.</li>`);
   else {
-    out.push(flat ? `<li class="warn">Heights: ${flat === n ? `all ${n}` : `${flat} of ${n}`} parts are under 0.2 mm, a placeholder. Type the height of every part that matters in Parts, also tall parts without power. Or put the board's STEP (Altium: File &gt; Export &gt; STEP 3D) in the board folder and read the board again: it gives heights and body sizes.</li>`
+    out.push(flat ? `<li class="warn">Heights: ${flat === n ? `all ${n}` : `${flat} of ${n}`} parts are under 0.2 mm, a placeholder. Type the height of every part that matters in Parts, also tall parts without power. Or put the board's STEP (Altium: File &gt; Export &gt; STEP 3D) in the board folder and read the board again: it gives the heights.</li>`
                   : `<li class="ok">Heights: every part has a height in the export.</li>`);
-    out.push(`<li class="warn">Part sizes are the pad outlines, not the package bodies. Type Body X and Y where it matters (big packages, close neighbours).</li>`);
   }
+  out.push(`<li class="warn">Part sizes are the pad outlines from the EDB, along each part's own axes, not the package bodies. Type Body X and Y where it matters (big packages, close neighbours).</li>`);
   out.push(zero.length ? `<li class="warn">Thermal values are missing for ${esc(zero.join(", "))}: the grey stand-ins below are used. Type the real ones if you have them.</li>`
                        : `<li class="ok">Every board material has thermal values.</li>`);
   out.push(`<li class="mut">Power is never in the export: type it in Parts, or load the designer's CSV.</li>`);
@@ -459,7 +459,7 @@ function drawParts() {
   $("rows").innerHTML = order.filter(r => parts[r]).map(ref => {
     const b = by[ref] || { part: "not in the EDB", lMm: 0, wMm: 0, hMm: 0 };
     return `<tr data-ref="${esc(ref)}"><td><b>${esc(ref)}</b><small>${esc(b.part)}, ${b.lMm.toFixed(1)} &times; ${b.wMm.toFixed(1)}${b.stepHMm > 0 ? ", STEP" : ""}</small></td>
-      ${cell(ref, "powerW", 0.01)}${cell(ref, "heightMm", 0.1, (b.stepHMm ?? b.hMm).toFixed(2))}${cell(ref, "bodyXMm", 0.1, (b.stepXMm ?? b.lMm).toFixed(1))}${cell(ref, "bodyYMm", 0.1, (b.stepYMm ?? b.wMm).toFixed(1))}${cell(ref, "meshMm", 0.1, "global")}
+      ${cell(ref, "powerW", 0.01)}${cell(ref, "heightMm", 0.1, (b.stepHMm ?? b.hMm).toFixed(2))}${cell(ref, "bodyXMm", 0.1, b.lMm.toFixed(1))}${cell(ref, "bodyYMm", 0.1, b.wMm.toFixed(1))}${cell(ref, "meshMm", 0.1, "global")}
       ${cell(ref, "rjcCW", 0.1)}${cell(ref, "rjbCW", 0.1)}${cell(ref, "rjaCW", 0.1, "", "page")}${cell(ref, "tjMaxC", 1, "", "page")}
       <td class="n page" data-est></td><td><button class="del" data-del="${esc(ref)}" title="Remove ${esc(ref)}. Removed from AEDT on Apply" aria-label="Remove ${esc(ref)}">&times;</button></td></tr>`;
   }).join("");
@@ -593,9 +593,9 @@ function bareBoard(opt = {}) {      // opt.hPcb: try this h of both PCB faces (u
   const out = {};
   for (const ref of order.filter(r => parts[r]?.powerW > 0 && by[r])) {
     const p = parts[ref], e = by[ref];
-    const r = { pdW: p.powerW, lMm: p.bodyXMm > 0 ? p.bodyXMm : e.stepXMm ?? e.lMm, wMm: p.bodyYMm > 0 ? p.bodyYMm : e.stepYMm ?? e.wMm,
+    const r = { pdW: p.powerW, lMm: p.bodyXMm > 0 ? p.bodyXMm : e.lMm, wMm: p.bodyYMm > 0 ? p.bodyYMm : e.wMm,
                 hMm: p.heightMm > 0 ? p.heightMm : e.stepHMm > 0 ? e.stepHMm : Math.max(e.hMm, 0.2) };
-    r.bodyFrom = p.bodyXMm > 0 || p.bodyYMm > 0 ? "typed" : e.stepXMm ? "STEP" : "pad outline"; r.hFrom = p.heightMm > 0 ? "typed" : e.stepHMm > 0 ? "STEP" : "placeholder";
+    r.bodyFrom = p.bodyXMm > 0 || p.bodyYMm > 0 ? "typed" : "footprint"; r.hFrom = p.heightMm > 0 ? "typed" : e.stepHMm > 0 ? "STEP" : "placeholder";
     const L = r.lMm, W = r.wMm, H = r.hMm, twoR = p.rjbCW > 0;
     r.rjcUsedCW = p.rjcCW > 0 ? p.rjcCW : (H * 1000) / (hc.kParts * L * W);
     r.model = twoR ? "Two-resistor" : p.rjcCW > 0 ? "Block, Rjc" : "Block, part k";

@@ -4,8 +4,9 @@
     read_board.py calls for_board() when the board folder holds a .step or .stp next to the EDB.
 
 Walks the assembly tree, applies each placement, and boxes the solids under every product: the box of a product
-holds its own solids and those of its children. Parts are matched at the component level, the products named like
-the RefDes (U1, C7, VR8; SolidWorks' "U1-1" too), each boxed whole with its sub-parts, never a product below them. The box comes from the vertices, the arcs of circles and ellipses
+holds its own solids and those of its children. The components are the products on the first level under the top
+assembly, each boxed whole with its sub-parts, never a product below them; they match a RefDes by name (U1, C7, VR8;
+SolidWorks' "U1-1" too) or by position. The box comes from the vertices, the arcs of circles and ellipses
 (sampled) and the control points of splines, so a dome that bulges past its edges is boxed a little short.
 """
 import json
@@ -164,7 +165,7 @@ def _refs(v):
 def boxes(path):
     """{product name: [xMin, yMin, zMin, xMax, yMax, zMax]} in mm, in the frame of the top assembly"""
     out = {}
-    for name, box, _ in tree(path):
+    for name, box, *_ in tree(path):
         out.setdefault(name, []).append(box)
     return out
 
@@ -177,33 +178,17 @@ def refdes(name, refs):
 
 
 def components(path, refs=()):
-    """[(name, box)] of the components, each boxed whole with its sub-parts. The component level is the one whose
-    products are named like the RefDes in refs (U1, C7, VR8): the assembly holding most of them is the board
-    assembly, its children are the components; a RefDes-named product elsewhere counts too, the level below never.
-    Without such names: the children of the assembly with the most children"""
+    """[(name, box)] of the components: the products on the first level under the top assembly, each boxed whole with
+    its sub-parts, never a product below them. Named by the RefDes in refs when the occurrence (SolidWorks: "U1-1") or
+    its product (Altium: "U1") is named like one, else by the product name (the board itself, a model name)"""
     nodes = tree(path)
-    named = [i for i, (name, _, _) in enumerate(nodes) if refdes(name, refs)]
-    count = {}
-    for i in named or range(len(nodes)):
-        p = nodes[i][2]
-        if p is not None:
-            count[p] = count.get(p, 0) + 1
-    board = max(count, key=count.get, default=None)
-    picked = {i for i, n in enumerate(nodes) if n[2] == board and board is not None}
-
-    def inside(i):          # under a component already picked
-        while (i := nodes[i][2]) is not None:
-            if i in picked:
-                return True
-        return False
-    for i in sorted(named, key=lambda i: -i):     # parents come after children: the outer one first
-        if i not in picked and not inside(i):
-            picked.add(i)
-    return [(refdes(nodes[i][0], refs) or nodes[i][0], nodes[i][1]) for i in sorted(picked)]
+    roots = {i for i, n in enumerate(nodes) if n[2] is None}
+    return [(refdes(inst, refs) or refdes(name, refs) or name, box) for name, box, parent, inst in nodes if parent in roots]
 
 
 def tree(path):
-    """[(product name, box, index of the parent in this list or None)], one per occurrence, parents after children"""
+    """[(product name, box, index of the parent in this list or None, occurrence name)], one per occurrence, parents
+    after children"""
     ents = read(path)
     scale = 1.0
     for e in ents.values():
@@ -225,7 +210,7 @@ def tree(path):
         if d in name_of_pd:
             rep_of_pd[d] = rep
     pd_of_rep = {r: d for d, r in rep_of_pd.items()}
-    children = {}           # parent rep -> [(child rep, transform child -> parent, child product def)]
+    children = {}           # parent rep -> [(child rep, transform child -> parent, child product def, occurrence name)]
     for i in by_type.get("CONTEXT_DEPENDENT_SHAPE_REPRESENTATION", []):
         rel, pds = ents[i]["CONTEXT_DEPENDENT_SHAPE_REPRESENTATION"]
         rr = ents[rel]["REPRESENTATION_RELATIONSHIP"]
@@ -233,8 +218,10 @@ def tree(path):
         child, parent = rr[2], rr[3]
         t = _mul(_placement(ents, idt[3]), _inv(_placement(ents, idt[2])))
         nauo = ents[ents[pds]["PRODUCT_DEFINITION_SHAPE"][2]]
-        child_pd = nauo["NEXT_ASSEMBLY_USAGE_OCCURRENCE"][4] if "NEXT_ASSEMBLY_USAGE_OCCURRENCE" in nauo else pd_of_rep.get(child)
-        children.setdefault(parent, []).append((child, t, child_pd))
+        nu = nauo.get("NEXT_ASSEMBLY_USAGE_OCCURRENCE")
+        child_pd = nu[4] if nu else pd_of_rep.get(child)
+        inst = (nu[1] or nu[0]) if nu and isinstance(nu[1], str) and isinstance(nu[0], str) else ""
+        children.setdefault(parent, []).append((child, t, child_pd, inst))
     # a representation may also hold its solids through a plain SHAPE_REPRESENTATION_RELATIONSHIP (no transform)
     linked = {}
     for i in by_type.get("SHAPE_REPRESENTATION_RELATIONSHIP", []):
@@ -259,20 +246,20 @@ def tree(path):
             local[rep] = pts
         return local[rep]
 
-    child_reps = {c for v in children.values() for c, _, _ in v}
+    child_reps = {c for v in children.values() for c, *_ in v}
     roots = [d for d, r in rep_of_pd.items() if r not in child_reps]
     out = []
 
-    def walk(rep, m, name):
+    def walk(rep, m, name, inst=""):
         """the points under this occurrence; adds it to out and returns its index there (None without solids)"""
         pts, kids = [_apply(m, p) for p in own_points(rep)], []
-        for child, t, pd in children.get(rep, []):
-            p, k = walk(child, _mul(m, t), name_of_pd.get(pd, ""))
+        for child, t, pd, ci in children.get(rep, []):
+            p, k = walk(child, _mul(m, t), name_of_pd.get(pd, ""), ci)
             pts += p
             kids.append(k)
         if not pts:
             return pts, None
-        out.append([name, [min(p[k] for p in pts) * scale for k in range(3)] + [max(p[k] for p in pts) * scale for k in range(3)], None])
+        out.append([name, [min(p[k] for p in pts) * scale for k in range(3)] + [max(p[k] for p in pts) * scale for k in range(3)], None, inst])
         for k in kids:
             if k is not None:
                 out[k][2] = len(out) - 1

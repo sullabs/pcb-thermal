@@ -4,10 +4,12 @@
 
 <folder> holds one <board>.aedb (or study.json names it). Altium writes <board>.edb: it is copied to <board>.aedb,
 because PyEDB and AEDT only open the .aedb name. Writes <folder>/board.json. Units in the file: mm.
-A .step or .stp of the board in <folder> gives each part it holds stepHMm, stepXMm, stepYMm (step_parts.py).
+A .step or .stp of the board in <folder> gives each part it holds stepHMm, its height (step_parts.py).
+lMm, wMm: the pad outline along the part's own axes (footprint()), the body size used on the page and in Icepak.
 Needs no AEDT session, only PyEDB (about 7 s).
 """
 import json
+import math
 import os
 import shutil
 import sys
@@ -53,6 +55,62 @@ def _copy_edb(src: Path, dst: Path):
     print(f"Copied {src.name} to {dst.name} (AEDT only opens .aedb)", flush=True)
 
 
+def footprint(c, pads):
+    """(xMin, yMin, l, w, angle) in m and degrees: the pad outline of part c along its own axes, the axes nearest the
+    board's, so a 15 x 15 part turned 45 deg is 15 x 15, not the 21.2 x 21.2 of its box on the board. Altium leaves
+    the part's rotation at 0 and turns each pin, so the angle is the commonest pad angle (mod 90 deg, within +-45).
+    pads caches the outline of each pad definition per layer"""
+    rot = float(c.rotation or 0.0)
+    corners, angles = [], {}
+    for pin in c.pins.values():
+        key = (pin.padstack_definition, c.placement_layer)
+        if key not in pads:
+            pad = pin.definition.pad_by_layer.get(c.placement_layer)
+            pads[key] = _pad_outline(pad) if pad else None
+        outline = pads[key]
+        x, y = (float(v) for v in pin.position)
+        if outline is None:          # a shape not read: its box on the board
+            (bx0, by0), (bx1, by1) = pin.bounding_box
+            corners += [(bx0, by0), (bx1, by1), (bx0, by1), (bx1, by0)]
+            continue
+        pts, round_ = outline
+        a = rot + float(pin.rotation or 0.0)
+        ca, sa = math.cos(a), math.sin(a)
+        corners += [(x + px * ca - py * sa, y + px * sa + py * ca) for px, py in pts]
+        if not round_:
+            k = round(math.degrees(a) % 90.0, 1) % 90.0
+            angles[k] = angles.get(k, 0) + 1
+    if not corners:
+        return None
+    t = max(angles, key=angles.get, default=0.0)
+    t = t - 90.0 if t > 45.0 else t
+    ct, st = math.cos(math.radians(t)), math.sin(math.radians(t))
+    local = [(px * ct + py * st, -px * st + py * ct) for px, py in corners]      # turned back by t
+    u0, u1 = min(p[0] for p in local), max(p[0] for p in local)
+    v0, v1 = min(p[1] for p in local), max(p[1] for p in local)
+    um, vm = (u0 + u1) / 2, (v0 + v1) / 2
+    cx, cy = um * ct - vm * st, um * st + vm * ct
+    return cx - (u1 - u0) / 2, cy - (v1 - v0) / 2, u1 - u0, v1 - v0, t
+
+
+def _pad_outline(pad):
+    """(points in the pin's frame, round) of a pad, or None for a shape not read"""
+    shape, v = pad.shape, [float(x) for x in (pad.parameters_values or [])]
+    if shape == "polygon" and pad.polygon_data is not None:
+        pts = [(float(p.x), float(p.y)) for p in pad.polygon_data.points]
+    elif shape == "circle" and v:
+        return [(v[0] / 2 * math.cos(i * math.pi / 4), v[0] / 2 * math.sin(i * math.pi / 4)) for i in range(8)], True
+    elif shape == "square" and v:
+        pts = [(sx * v[0] / 2, sy * v[0] / 2) for sx in (-1, 1) for sy in (-1, 1)]
+    elif shape in ("rectangle", "oval", "bullet") and len(v) >= 2:
+        pts = [(sx * v[0] / 2, sy * v[1] / 2) for sx in (-1, 1) for sy in (-1, 1)]
+    else:
+        return None
+    r, ox, oy = float(pad.rotation or 0.0), float(pad.offset_x or 0.0), float(pad.offset_y or 0.0)
+    cr, sr = math.cos(r), math.sin(r)
+    return [(ox + px * cr - py * sr, oy + px * sr + py * cr) for px, py in pts], False
+
+
 def read_board(edb_path: Path) -> dict:
     from pyedb import Edb
 
@@ -72,18 +130,21 @@ def read_board(edb_path: Path) -> dict:
             if name in used:
                 materials.append({"name": name, "layers": used[name], "kind": thermal_kind(name, (m.conductivity or 0) > 1e5),
                                   "kWmK": m.thermal_conductivity or 0, "rhoKgM3": m.mass_density or 0, "cpJkgK": m.specific_heat or 0})
-        parts, skipped = [], []
+        parts, skipped, pads = [], [], {}
         for ref, c in edb.components.instances.items():
             try:
-                bx0, by0, bx1, by1 = c.bounding_box
+                fp = footprint(c, pads)
+                if fp is None:
+                    bx0, by0, bx1, by1 = c.bounding_box
+                    fp = bx0, by0, bx1 - bx0, by1 - by0, 0.0
                 z0, z1 = sorted((c.lower_elevation, c.upper_elevation))
                 parts.append({
                     "refDes": ref,
                     "part": str(c.part_name),
                     "type": str(c.type),
                     "side": "top" if c.is_top_mounted else "bottom",   # from the stackup order, not the layer name
-                    "xMinMm": round(bx0 * M2MM, 4), "yMinMm": round(by0 * M2MM, 4),
-                    "lMm": round((bx1 - bx0) * M2MM, 4), "wMm": round((by1 - by0) * M2MM, 4),
+                    "xMinMm": round(fp[0] * M2MM, 4), "yMinMm": round(fp[1] * M2MM, 4),
+                    "lMm": round(fp[2] * M2MM, 4), "wMm": round(fp[3] * M2MM, 4), "angleDeg": round(fp[4], 1),
                     "zMinMm": round(z0 * M2MM, 4), "hMm": round((z1 - z0) * M2MM, 4),
                 })
             except Exception:
@@ -106,7 +167,7 @@ def read_board(edb_path: Path) -> dict:
 
 
 def add_step(folder: Path, board: dict):
-    """heights and body sizes from the board's STEP (Altium: File > Export > STEP 3D), the newest .step/.stp in the folder"""
+    """heights from the board's STEP (Altium: File > Export > STEP 3D), the newest .step/.stp in the folder"""
     steps = sorted((f for f in folder.iterdir() if f.suffix.lower() in (".step", ".stp")), key=lambda f: f.stat().st_mtime)
     if not steps:
         return
@@ -119,9 +180,9 @@ def add_step(folder: Path, board: dict):
     for p in board["parts"]:
         if p["refDes"] in found:
             f = found[p["refDes"]]
-            p.update(stepHMm=f["hMm"], stepXMm=f["xMm"], stepYMm=f["yMm"])
+            p["stepHMm"] = f["hMm"]      # the body size stays the EDB footprint (lMm, wMm)
     board["step"] = {"file": steps[-1].name, "parts": len(found), "byPosition": sum(f["by"] == "position" for f in found.values())}
-    print(f"{steps[-1].name}: height and body of {len(found)} of {len(board['parts'])} parts", flush=True)
+    print(f"{steps[-1].name}: height of {len(found)} of {len(board['parts'])} parts", flush=True)
 
 
 def main(folder: Path) -> Path:

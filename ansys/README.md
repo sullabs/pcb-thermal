@@ -39,7 +39,7 @@ the board surface so it can touch the PCB.
 |---|---|
 | Power | No heat source for that part; warning if none has power |
 | Height (EDB gives a placeholder under 0.2 mm; Altium never exports heights) | From the board's STEP if the folder has one, else 0.2 mm and a warning to type the real one |
-| Body size (the EDB has only the pad outline) | From the STEP if there is one, else the pad outline; overlapping blocks are cut back to meet. Type Body X, Y (board axes) |
+| Body size (the EDB has only the pad outline) | The EDB pad outline along the part's own axes (a 15 x 15 part turned 45 deg stays 15 x 15; the angle comes from the pads, Altium turns pins not parts); overlapping blocks are cut back to meet. Type Body X, Y (board axes) |
 | Part not in the STEP (no 3D model, e.g. test points) | As if there were no STEP for that part. Typed values always win over the STEP |
 | Material k, density, heat capacity (Altium exports 0) | Copper, solder or FR-4 stand-ins, shown grey on the page; typed values are sent on Apply |
 | Height but no power | A block without heat: it shapes the air flow and spreads heat |
@@ -61,7 +61,7 @@ time made one of them hang. The page's own jobs never overlap, and a hung job is
 | `page.html` | The page. No build step |
 | `serve.py` | Local server for the page (stdlib only). Reads/writes the folder files, starts the scripts one at a time. Folders opened before: `%APPDATA%\pcb-thermal\recent.json` |
 | `read_board.py` | EDB -> `board.json` (outline, stackup, parts with position, size, height). PyEDB only, about 7 s |
-| `step_parts.py` | Board STEP -> height and body size per part (`stepHMm`, `stepXMm`, `stepYMm` in `board.json`). Standard library only, under a second. Works on whole components, never on one sub-part: the products named like the RefDes (U1, C7, VR8; SolidWorks' `U1-1` too) at any depth, each with everything under it. Parts without such a product: the component centred on the pads, from the same level. Height is from the board face the part sits on (standoff included) |
+| `step_parts.py` | Board STEP -> height per part (`stepHMm` in `board.json`; the body size is the EDB footprint). Standard library only, under a second. Works on whole components, never on one sub-part: the products on the first level under the STEP's top assembly, each with everything under it, matched by name (U1, C7, VR8; SolidWorks' `U1-1` occurrence names too) or else as the component centred on the pads. Height is from the board face the part sits on (standoff included) |
 | `setup_study.py` | `build`, `update`, `read`, `mesh` modes. Writes `state.json` (what AEDT holds) and `checks.json` |
 | `run.ps1` | Runs a script with Ansys' Python and `ansys\.venv` packages (the venv launcher itself is broken) |
 | `start.bat` | Starts AEDT (gRPC port 50051) if it is not running, then `serve.py`. If the page already runs, it just opens it |
