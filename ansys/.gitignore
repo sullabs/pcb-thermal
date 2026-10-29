@@ -6,3 +6,7 @@ example/checks.json
 example/*_icepak.aedt*
 example/*.aedt*
 example/*.aedtresults/
+benchmark/runs/*.aedt*
+benchmark/runs/*.aedtresults/
+benchmark/runs/*.pyaedt/
+benchmark/*.log

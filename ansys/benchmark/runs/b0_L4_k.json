@@ -1,0 +1,44 @@
+{
+ "meshLevel": 4,
+ "plateC": 20.0,
+ "pasteMm": 0.025,
+ "standoffMm": 0.1,
+ "rows": [
+  {
+   "case": "dead_10_k0.8",
+   "powerW": 0.6,
+   "solved": true,
+   "seconds": 88,
+   "tjMaxC": 70.91,
+   "tjMeanC": 70.36,
+   "thetaMaxCW": 84.9,
+   "thetaMeanCW": 83.9,
+   "measuredCW": 82.3,
+   "errorPct": 3.1
+  },
+  {
+   "case": "dead_10_k0.9",
+   "powerW": 0.6,
+   "solved": true,
+   "seconds": 88,
+   "tjMaxC": 66.73,
+   "tjMeanC": 66.19,
+   "thetaMaxCW": 77.9,
+   "thetaMeanCW": 77.0,
+   "measuredCW": 82.3,
+   "errorPct": -5.4
+  },
+  {
+   "case": "live_10_k0.8",
+   "powerW": 1.0,
+   "solved": true,
+   "seconds": 91,
+   "tjMaxC": 70.18,
+   "tjMeanC": 68.99,
+   "thetaMaxCW": 50.2,
+   "thetaMeanCW": 49.0,
+   "measuredCW": 51.4,
+   "errorPct": -2.4
+  }
+ ]
+}

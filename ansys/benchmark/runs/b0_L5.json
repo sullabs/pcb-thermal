@@ -1,0 +1,32 @@
+{
+ "meshLevel": 5,
+ "plateC": 20.0,
+ "pasteMm": 0.025,
+ "standoffMm": 0.1,
+ "rows": [
+  {
+   "case": "dead_10",
+   "powerW": 0.6,
+   "solved": true,
+   "seconds": 91,
+   "tjMaxC": 81.3,
+   "tjMeanC": 80.7,
+   "thetaMaxCW": 102.2,
+   "thetaMeanCW": 101.2,
+   "measuredCW": 82.3,
+   "errorPct": 24.1
+  },
+  {
+   "case": "live_10",
+   "powerW": 1.0,
+   "solved": true,
+   "seconds": 94,
+   "tjMaxC": 76.67,
+   "tjMeanC": 75.43,
+   "thetaMaxCW": 56.7,
+   "thetaMeanCW": 55.4,
+   "measuredCW": 51.4,
+   "errorPct": 10.2
+  }
+ ]
+}

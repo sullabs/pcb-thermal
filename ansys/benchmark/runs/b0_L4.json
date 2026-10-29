@@ -1,0 +1,80 @@
+{
+ "meshLevel": 4,
+ "plateC": 20.0,
+ "pasteMm": 0.025,
+ "standoffMm": 0.1,
+ "rows": [
+  {
+   "case": "dead_10",
+   "powerW": 0.6,
+   "solved": true,
+   "seconds": 92,
+   "tjMaxC": 82.13,
+   "tjMeanC": 81.56,
+   "thetaMaxCW": 103.5,
+   "thetaMeanCW": 102.6,
+   "measuredCW": 82.3,
+   "errorPct": 25.8
+  },
+  {
+   "case": "dead_5",
+   "powerW": 0.6,
+   "solved": true,
+   "seconds": 87,
+   "tjMaxC": 77.38,
+   "tjMeanC": 76.8,
+   "thetaMaxCW": 95.6,
+   "thetaMeanCW": 94.7,
+   "measuredCW": 82.3,
+   "errorPct": 16.2
+  },
+  {
+   "case": "live_10",
+   "powerW": 1.0,
+   "solved": true,
+   "seconds": 88,
+   "tjMaxC": 77.32,
+   "tjMeanC": 76.11,
+   "thetaMaxCW": 57.3,
+   "thetaMeanCW": 56.1,
+   "measuredCW": 51.4,
+   "errorPct": 11.5
+  },
+  {
+   "case": "live_5",
+   "powerW": 1.0,
+   "solved": true,
+   "seconds": 91,
+   "tjMaxC": 68.94,
+   "tjMeanC": 67.72,
+   "thetaMaxCW": 48.9,
+   "thetaMeanCW": 47.7,
+   "measuredCW": 51.4,
+   "errorPct": -4.8
+  },
+  {
+   "case": "liveair_10",
+   "powerW": 1.0,
+   "solved": true,
+   "seconds": 88,
+   "tjMaxC": 117.07,
+   "tjMeanC": 115.9,
+   "thetaMaxCW": 97.1,
+   "thetaMeanCW": 95.9,
+   "measuredCW": 51.4,
+   "errorPct": 88.9
+  },
+  {
+   "case": "liveair_5",
+   "powerW": 1.0,
+   "solved": true,
+   "seconds": 92,
+   "tjMaxC": 108.96,
+   "tjMeanC": 107.78,
+   "thetaMaxCW": 89.0,
+   "thetaMeanCW": 87.8,
+   "measuredCW": 51.4,
+   "errorPct": 73.1
+  }
+ ]
+}

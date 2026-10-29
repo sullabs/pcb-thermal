@@ -16,7 +16,7 @@ No solve, no spreader, no other cooling solution for now.
 | # | Who | What |
 |---|---|---|
 | 1 | You | Altium: File > Export > Ansys EDB. Put the exported `<board>.edb` (or `<board>.aedb`) in a board folder anywhere; a `.edb` is copied to `.aedb` on read. Also File > Export > STEP 3D into the same folder: part heights and body sizes then come from it |
-| 2 | You | Double-click `ansys\start.bat` (or drag a board folder onto it). It starts AEDT if needed and the page server; the browser opens http://localhost:8765 on the folder opened last. **Open folder…** at the top picks any folder on the PC (Windows folder dialog); the list above it holds the folders opened before. Press **Read the board** (once) |
+| 2 | You | Double-click `ansys\start.bat` (or drag a board folder onto it). It starts AEDT if needed and the page server; the browser opens http://localhost:8765 on the folder opened last. **Open folder…** under the steps picks any folder on the PC (Windows folder dialog); the list above it holds the folders opened before. Press **Read the board** (once) |
 | 3 | You | "What the export is missing" lists the gaps. Fill them: heights and body sizes of the parts that matter, tall parts without power, material values. Then ambient, board position, air, power (or the designer's CSV: RefDes, W, height, body X, body Y), mesh. Press **Build** |
 | 4 | You | Look at the project in AEDT. Edit there if you want. **Read AEDT** shows what is there |
 | 5 | You | Change values on the page, press **Apply changes** (about 40 s), **Generate mesh** to see the mesh without solving |
@@ -71,7 +71,8 @@ Folder contents: `<board>.aedb` (you), `board.json`, `study.json` (page), `state
 `study.json`: `edb`, `ambientC`, `orientation` (flat-up, flat-down, vertical-long, vertical-short), `marginMm`,
 `marginAboveMm`, `radiation`, `pcbResolution`, `mesh {mode auto|manual, level, maxMm, gapElems, edgeElems}`,
 `parts[{refDes, powerW?, heightMm?, bodyXMm?, bodyYMm?, meshMm?, rjcCW?, rjbCW?, rjaCW?, tjMaxC?}]`,
-`materials {name: {kWmK?, rhoKgM3?, cpJkgK?}}`.
+`materials {name: {kWmK?, rhoKgM3?, cpJkgK?}}`, `handCheck {hTop?, hBottom?, hParts?, emissivity?, surfaceRiseK?, coverage?, kxy?, kParts?, tightC?, matched? {hPcb, run, powerW, ambientC, orientation, boardMeanC}}`
+(page only; empty means the SolidWorks template defaults 8, 5, 8 W/m²K, 0.9, 20 K, 0.6, from the stackup, 0.5, 15 K).
 
 Timings on the sample: build about 1.5 min, apply with a change 40 to 80 s, generate mesh 15 s.
 
@@ -105,4 +106,13 @@ Timings on the sample: build about 1.5 min, apply with a change 40 to 80 s, gene
 - [x] Solve button and results card (temperatures per part, board hot spot, convergence, energy balance)
 - [ ] Radiation model name for S2S (the page uses discrete ordinates); TIM and spreader (with a cooling solution), per-surface emissivity
 - [ ] Mesh cell count in the page (Generate mesh reports time only)
-- [ ] Bring over the hand calculations, thermal network analysis and network diagram from the SolidWorks route (`../PCB_Thermal.html`): the user wants them on this page too
+- [x] Hand check from the SolidWorks route (bare board network of `addin-mvp:webapp/src/calc/network.js`, Lee spreading,
+  network diagram, formula per value) on the page; same numbers as the SolidWorks calc for the same inputs. Its inputs
+  (h, emissivity, copper coverage, board k, part k) are page-only, saved in `study.json` under `handCheck`
+- [x] Hand check scope: one board node gives a fair board **average**, never hot spots (Spartan-IIE: hand 30.4 C average
+  against Icepak 33.9 C average and 49.4 C hottest). A part with under 10 % of the power and under a quarter of the
+  biggest part's gets no Tj: it is heated by its neighbours, which only Icepak shows
+- [x] "Match to the last Icepak run": fits the h of both PCB faces so the hand board average equals Icepak's. Allowed
+  only from a converged run with a closed energy balance and the same power and ambient as the page. While matched the
+  board average no longer checks that run (compare with textbook h first); a warning shows when power moves over 30 %,
+  ambient over 5 K or the board position changes from the matched run. Saved as `handCheck.matched`
