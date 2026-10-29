@@ -178,17 +178,17 @@ def refdes(name, refs):
 
 
 def components(path, refs=()):
-    """[(name, box)] of the components: the products on the first level under the top assembly, each boxed whole with
+    """[(name, box + [outline])] of the components: the products on the first level under the top assembly, each boxed whole with
     its sub-parts, never a product below them. Named by the RefDes in refs when the occurrence (SolidWorks: "U1-1") or
     its product (Altium: "U1") is named like one, else by the product name (the board itself, a model name)"""
     nodes = tree(path)
     roots = {i for i, n in enumerate(nodes) if n[2] is None}
-    return [(refdes(inst, refs) or refdes(name, refs) or name, box) for name, box, parent, inst in nodes if parent in roots]
+    return [(refdes(inst, refs) or refdes(name, refs) or name, box + [hull]) for name, box, parent, inst, hull in nodes if parent in roots]
 
 
 def tree(path):
-    """[(product name, box, index of the parent in this list or None, occurrence name)], one per occurrence, parents
-    after children"""
+    """[(product name, box, index of the parent in this list or None, occurrence name, outline)], one per occurrence,
+    parents after children; outline: the convex hull of the body seen from above, [(x, y)] in mm"""
     ents = read(path)
     scale = 1.0
     for e in ents.values():
@@ -259,7 +259,8 @@ def tree(path):
             kids.append(k)
         if not pts:
             return pts, None
-        out.append([name, [min(p[k] for p in pts) * scale for k in range(3)] + [max(p[k] for p in pts) * scale for k in range(3)], None, inst])
+        out.append([name, [min(p[k] for p in pts) * scale for k in range(3)] + [max(p[k] for p in pts) * scale for k in range(3)], None, inst,
+                    [(x * scale, y * scale) for x, y in _hull(pts)]])
         for k in kids:
             if k is not None:
                 out[k][2] = len(out) - 1
@@ -270,11 +271,38 @@ def tree(path):
     return [tuple(n) for n in out]
 
 
-def for_board(path, board):
+def _hull(pts):
+    """the convex hull of the points seen from above (monotone chain), [(x, y)]"""
+    ps = sorted({(round(p[0], 6), round(p[1], 6)) for p in pts})
+    if len(ps) < 3:
+        return ps
+    cross = lambda o, a, b: (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])  # noqa: E731
+    lo, hi = [], []
+    for p in ps:
+        while len(lo) >= 2 and cross(lo[-2], lo[-1], p) <= 0:
+            lo.pop()
+        lo.append(p)
+    for p in reversed(ps):
+        while len(hi) >= 2 and cross(hi[-2], hi[-1], p) <= 0:
+            hi.pop()
+        hi.append(p)
+    return lo[:-1] + hi[:-1]
+
+
+def size_at(outline, deg):
+    """(x, y) size of an outline along axes turned deg from the board's"""
+    c, s = math.cos(math.radians(deg)), math.sin(math.radians(deg))
+    u = [x * c + y * s for x, y in outline]
+    v = [-x * s + y * c for x, y in outline]
+    return max(u) - min(u), max(v) - min(v)
+
+
+def for_board(path, board, unmatched=None):
     """{RefDes: {hMm, xMm, yMm, by}} for the parts of board.json found in the STEP: height above the board face the part
-    sits on, body size along the board axes. Only whole components count (components()), never one of their sub-parts.
-    by: "name" (a component named like the RefDes) or "position" (the component on the part's pads, for exporters
-    that name components after the model)"""
+    sits on, body size along the part's own axes (angleDeg of board.json, from its pads). Only whole components count (components()), never one of their sub-parts.
+    by: "name" (a component named like the RefDes, its body over its pads) or "position" (the component centred on the
+    part's pads, for exporters that name components after the model). unmatched, a list, gets the components that are
+    no part's: {name, xMm, yMm, hMm, atMm (centre, EDB frame), why}; the board itself is left out"""
     comps = components(path, [p["refDes"] for p in board["parts"]])
     found = {}
     for name, box in comps:
@@ -287,7 +315,11 @@ def for_board(path, board):
            median(edb[r]["yMinMm"] + edb[r]["wMm"] / 2 - centre(b)[1] for r, b in named.items())] if named else [0.0, 0.0]
     near = lambda p, b, grow: (p["xMinMm"] - grow <= centre(b)[0] + off[0] <= p["xMinMm"] + p["lMm"] + grow and  # noqa: E731
                                p["yMinMm"] - grow <= centre(b)[1] + off[1] <= p["yMinMm"] + p["wMm"] + grow)
-    hits = {r: (b, "name") for r, b in named.items() if near(edb[r], b, 2.0)}    # a name far from its pads is someone else's
+    over = lambda p, b: (b[0] + off[0] <= p["xMinMm"] + p["lMm"] + 1.0 and p["xMinMm"] - 1.0 <= b[3] + off[0] and  # noqa: E731
+                         b[1] + off[1] <= p["yMinMm"] + p["wMm"] + 1.0 and p["yMinMm"] - 1.0 <= b[4] + off[1])
+    # a name whose body is nowhere over its pads is someone else's; one over them counts even off centre (a connector
+    # that hangs over the board edge)
+    hits = {r: (b, "name") for r, b in named.items() if over(edb[r], b)}
     o = board["outlineMm"]
     half = (o["xMax"] - o["xMin"]) * (o["yMax"] - o["yMin"]) / 2      # bigger than that is the board itself
     free = [b for _, b in comps if (b[3] - b[0]) * (b[4] - b[1]) < half and not any(b is h for h, _ in hits.values())]
@@ -299,6 +331,23 @@ def for_board(path, board):
                 b = min(fit, key=lambda b: math.dist(centre(b), pc))
                 hits[r] = (b, "position")
                 free.remove(b)
+    if unmatched is not None:
+        for name, b in comps:
+            if (b[3] - b[0]) * (b[4] - b[1]) >= half or any(b is h for h, _ in hits.values()):
+                continue
+            c = (centre(b)[0] + off[0], centre(b)[1] + off[1])
+            if found.get(name) and len(found[name]) > 1:
+                why = f"{len(found[name])} components are named {name}"
+            elif name in edb:
+                p = edb[name]
+                d = math.dist(c, (p["xMinMm"] + p["lMm"] / 2, p["yMinMm"] + p["wMm"] / 2))
+                why = f"named {name}, but its body is {d:.1f} mm from the centre of its pads and not over them"
+            else:
+                inside = [r for r, p in edb.items() if near(p, b, 0.5)]
+                why = (f"centred on the pads of {', '.join(inside)}, which already have a body" if inside else
+                       f"no part named {name}, and no part's pads under its centre")
+            unmatched.append({"name": name, "xMm": round(b[3] - b[0], 2), "yMm": round(b[4] - b[1], 2),
+                              "hMm": round(b[5] - b[2], 2), "atMm": [round(c[0], 2), round(c[1], 2)], "why": why})
     # the face a part sits on: the commonest body bottom of the top-side parts; the bottom face is a board thickness lower
     tops = [round(b[2], 2) for r, (b, _) in hits.items() if edb[r]["side"] == "top"]
     top = max(set(tops), key=tops.count) if tops else max(b[2] for b, _ in hits.values()) if hits else 0.0
@@ -310,7 +359,8 @@ def for_board(path, board):
             h = b[5] - top                   # standoff included: the block stands on the board
         elif edb[r]["side"] == "bottom" and -0.05 <= bottom - b[5] <= 0.5:
             h = bottom - b[2]
-        out[r] = {"hMm": round(h, 3), "xMm": round(b[3] - b[0], 3), "yMm": round(b[4] - b[1], 3), "by": by}
+        x, y = size_at(b[6], edb[r].get("angleDeg") or 0.0)
+        out[r] = {"hMm": round(h, 3), "xMm": round(x, 3), "yMm": round(y, 3), "by": by}
     return out
 
 
@@ -318,6 +368,9 @@ if __name__ == "__main__":
     if len(sys.argv) not in (2, 3):
         raise SystemExit(__doc__ + "\n    python ansys/step_parts.py <board.step> <board.json>   heights and bodies per RefDes")
     if len(sys.argv) == 3:
-        print(json.dumps(for_board(sys.argv[1], json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))), indent=1))
+        left = []
+        print(json.dumps(for_board(sys.argv[1], json.loads(Path(sys.argv[2]).read_text(encoding="utf-8")), left), indent=1))
+        for u in left:
+            print(f"not used: {u['name']} ({u['xMm']} x {u['yMm']} x {u['hMm']} mm at {u['atMm']}): {u['why']}", file=sys.stderr)
     else:
         print(json.dumps({k: [[round(x, 3) for x in b] for b in v] for k, v in boxes(sys.argv[1]).items()}, indent=1))

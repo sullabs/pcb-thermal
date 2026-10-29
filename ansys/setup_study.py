@@ -322,13 +322,13 @@ def _passive(ic, tree, board):
 
 def _footprints(parts, by_ref):
     """x0, y0, x1, y1 per block: the body size typed on the page (X and Y of the board), centred on the footprint, else
-    the EDB footprint (the pad outline along the part's own axes, read_board.footprint()). Close parts can overlap, and Icepak refuses to
+    the STEP's body size along the part's own axes, else the EDB's size, which is the pad extents, not the package body. Close parts can overlap, and Icepak refuses to
     solve intersecting blocks: two that overlap are cut back to meet halfway."""
     xy = {}
     for p in parts:
         b = by_ref[p["refDes"]]
         cx, cy = b["xMinMm"] + b["lMm"] / 2, b["yMinMm"] + b["wMm"] / 2
-        lx, ly = p.get("bodyXMm") or b["lMm"], p.get("bodyYMm") or b["wMm"]
+        lx, ly = p.get("bodyXMm") or b.get("stepXMm") or b["lMm"], p.get("bodyYMm") or b.get("stepYMm") or b["wMm"]
         xy[p["refDes"]] = [cx - lx / 2, cy - ly / 2, cx + lx / 2, cy + ly / 2]
     refs = list(xy)
     for i, a in enumerate(refs):

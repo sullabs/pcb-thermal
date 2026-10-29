@@ -4,8 +4,8 @@
 
 <folder> holds one <board>.aedb (or study.json names it). Altium writes <board>.edb: it is copied to <board>.aedb,
 because PyEDB and AEDT only open the .aedb name. Writes <folder>/board.json. Units in the file: mm.
-A .step or .stp of the board in <folder> gives each part it holds stepHMm, its height (step_parts.py).
-lMm, wMm: the pad outline along the part's own axes (footprint()), the body size used on the page and in Icepak.
+A .step or .stp of the board in <folder> gives each part it holds stepHMm, stepXMm, stepYMm (step_parts.py),
+the body measured along the part's own axes (angleDeg). lMm, wMm: the pad outline along those axes (footprint()).
 Needs no AEDT session, only PyEDB (about 7 s).
 """
 import json
@@ -167,22 +167,26 @@ def read_board(edb_path: Path) -> dict:
 
 
 def add_step(folder: Path, board: dict):
-    """heights from the board's STEP (Altium: File > Export > STEP 3D), the newest .step/.stp in the folder"""
+    """heights and body sizes from the board's STEP (Altium: File > Export > STEP 3D), the newest .step/.stp in the folder"""
     steps = sorted((f for f in folder.iterdir() if f.suffix.lower() in (".step", ".stp")), key=lambda f: f.stat().st_mtime)
     if not steps:
         return
     import step_parts
     try:
-        found = step_parts.for_board(steps[-1], board)
+        left = []
+        found = step_parts.for_board(steps[-1], board, left)
     except Exception as ex:  # noqa: BLE001  a STEP the reader does not follow must not stop the board read
         print(f"[warn] {steps[-1].name} could not be read ({type(ex).__name__}: {ex}); heights stay empty", flush=True)
         return
     for p in board["parts"]:
         if p["refDes"] in found:
             f = found[p["refDes"]]
-            p["stepHMm"] = f["hMm"]      # the body size stays the EDB footprint (lMm, wMm)
-    board["step"] = {"file": steps[-1].name, "parts": len(found), "byPosition": sum(f["by"] == "position" for f in found.values())}
-    print(f"{steps[-1].name}: height of {len(found)} of {len(board['parts'])} parts", flush=True)
+            p.update(stepHMm=f["hMm"], stepXMm=f["xMm"], stepYMm=f["yMm"])
+    board["step"] = {"file": steps[-1].name, "parts": len(found), "byPosition": sum(f["by"] == "position" for f in found.values()),
+                     "unmatched": left}
+    print(f"{steps[-1].name}: height and body of {len(found)} of {len(board['parts'])} parts", flush=True)
+    for u in left:
+        print(f"  not used: {u['name']} ({u['xMm']} x {u['yMm']} x {u['hMm']} mm at {u['atMm']}): {u['why']}", flush=True)
 
 
 def main(folder: Path) -> Path:
