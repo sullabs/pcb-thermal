@@ -1,11 +1,12 @@
 """Read an Ansys EDB (.aedb) and write board.json for the page.
 
     python ansys/read_board.py <folder>
+    python ansys/read_board.py <folder> --step     only the heights and bodies again, from the STEP into board.json
 
 <folder> holds one <board>.aedb (or study.json names it). Altium writes <board>.edb: it is copied to <board>.aedb,
 because PyEDB and AEDT only open the .aedb name. Writes <folder>/board.json. Units in the file: mm.
-A .step or .stp of the board in <folder> gives each part it holds stepHMm, stepXMm, stepYMm (step_parts.py),
-the body measured along the part's own axes (angleDeg). lMm, wMm: the pad outline along those axes (footprint()).
+A .step or .stp of the board in <folder> gives each part it holds stepHMm, stepXMm, stepYMm, stepAngleDeg (step_parts.py),
+the body measured along the part's own axes: angleDeg, or the body's own angle when it sits clearly turned from that. lMm, wMm: the pad outline along those axes (footprint()).
 Needs no AEDT session, only PyEDB (about 7 s).
 """
 import json
@@ -170,6 +171,7 @@ def add_step(folder: Path, board: dict):
     """heights and body sizes from the board's STEP (Altium: File > Export > STEP 3D), the newest .step/.stp in the folder"""
     steps = sorted((f for f in folder.iterdir() if f.suffix.lower() in (".step", ".stp")), key=lambda f: f.stat().st_mtime)
     if not steps:
+        print("No .step or .stp in the folder: heights stay the EDB's placeholders", flush=True)
         return
     import step_parts
     try:
@@ -181,7 +183,7 @@ def add_step(folder: Path, board: dict):
     for p in board["parts"]:
         if p["refDes"] in found:
             f = found[p["refDes"]]
-            p.update(stepHMm=f["hMm"], stepXMm=f["xMm"], stepYMm=f["yMm"])
+            p.update(stepHMm=f["hMm"], stepXMm=f["xMm"], stepYMm=f["yMm"], stepAngleDeg=f["aDeg"])
     board["step"] = {"file": steps[-1].name, "parts": len(found), "byPosition": sum(f["by"] == "position" for f in found.values()), **rep}
     print(f"{steps[-1].name}: {rep['components']} components besides the board, {len(found)} of them matched to a part"
           f" (the EDB has {len(board['parts'])} parts, many without a 3D body: test points, fiducials, holes)", flush=True)
@@ -189,6 +191,21 @@ def add_step(folder: Path, board: dict):
         print(f"  away from its pads: {a['refDes']} body at {a['atMm']}, pads at {a['padsMm']} ({a['distMm']} mm)", flush=True)
     for u in rep["unmatched"]:
         print(f"  not used: {u['name']} ({u['xMm']} x {u['yMm']} x {u['hMm']} mm at {u['atMm']}): {u['why']}", flush=True)
+
+
+def step_only(folder: Path) -> Path:
+    """the STEP again, without PyEDB: a new STEP export, or a fix in this reader, without reading the EDB again"""
+    out = folder / "board.json"
+    if not out.exists():
+        raise SystemExit("No board.json yet: read the board first")
+    board = json.loads(out.read_text(encoding="utf-8"))
+    board.pop("step", None)
+    for p in board["parts"]:
+        for k in ("stepHMm", "stepXMm", "stepYMm", "stepAngleDeg"):
+            p.pop(k, None)
+    add_step(folder, board)
+    out.write_text(json.dumps(board, indent=1), encoding="utf-8")
+    return out
 
 
 def main(folder: Path) -> Path:
@@ -201,6 +218,6 @@ def main(folder: Path) -> Path:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
+    if len(sys.argv) not in (2, 3) or sys.argv[2:] not in ([], ["--step"]):
         raise SystemExit(__doc__)
-    print(main(Path(sys.argv[1]).resolve()))
+    print((step_only if sys.argv[2:] else main)(Path(sys.argv[1]).resolve()))

@@ -297,9 +297,20 @@ def size_at(outline, deg):
     return max(u) - min(u), max(v) - min(v)
 
 
+def body_angle(outline, hint):
+    """angle of the part's own axes in degrees, within +-45: hint (from its pads) unless the body's smallest enclosing
+    rectangle is clearly turned from it, as when the EDB carries no rotation for the part"""
+    area = lambda a: math.prod(size_at(outline, a))  # noqa: E731
+    sides = [((math.degrees(math.atan2(q[1] - p[1], q[0] - p[0])) + 45.0) % 90.0) - 45.0
+             for p, q in zip(outline, outline[1:] + outline[:1]) if p != q]
+    best = min(sides, key=area, default=hint)
+    return round(best, 1) if area(best) < 0.95 * area(hint) else hint
+
+
 def for_board(path, board, report=None):
-    """{RefDes: {hMm, xMm, yMm, by}} for the parts of board.json found in the STEP: height above the board face the part
-    sits on, body size along the part's own axes (angleDeg of board.json, from its pads). Only whole components count (components()), never one of their sub-parts.
+    """{RefDes: {hMm, xMm, yMm, aDeg, by}} for the parts of board.json found in the STEP: height above the board face the
+    part sits on, body size along the part's own axes turned aDeg (angleDeg of board.json, from its pads, unless the body
+    itself sits clearly turned from that: body_angle()). Only whole components count (components()), never one of their sub-parts.
     by: "name" (the one component named like the RefDes, wherever it sits) or "position" (the component centred on the
     part's pads, for exporters that name components after the model). report, a dict, gets
       components: how many components the STEP holds, the board itself left out
@@ -366,8 +377,9 @@ def for_board(path, board, report=None):
             h = b[5] - top                   # standoff included: the block stands on the board
         elif edb[r]["side"] == "bottom" and -0.05 <= bottom - b[5] <= 0.5:
             h = bottom - b[2]
-        x, y = size_at(b[6], edb[r].get("angleDeg") or 0.0)
-        out[r] = {"hMm": round(h, 3), "xMm": round(x, 3), "yMm": round(y, 3), "by": by}
+        a = body_angle(b[6], edb[r].get("angleDeg") or 0.0)
+        x, y = size_at(b[6], a)
+        out[r] = {"hMm": round(h, 3), "xMm": round(x, 3), "yMm": round(y, 3), "aDeg": a, "by": by}
     return out
 
 

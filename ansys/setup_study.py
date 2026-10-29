@@ -13,6 +13,7 @@ Input  : <folder>/<board>.aedb (or Altium's <board>.edb), <folder>/study.json (w
 Output : <folder>/board.json, state.json, checks.json, <board>_icepak.aedt
 """
 import json
+import math
 import os
 import re
 import subprocess
@@ -321,21 +322,33 @@ def _passive(ic, tree, board):
 
 
 def _footprints(parts, by_ref):
-    """x0, y0, x1, y1 per block: the body size typed on the page (X and Y of the board), centred on the footprint, else
-    the STEP's body size along the part's own axes, else the EDB's size, which is the pad extents, not the package body. Close parts can overlap, and Icepak refuses to
-    solve intersecting blocks: two that overlap are cut back to meet halfway."""
-    xy = {}
+    """(cx, cy, l, w, angle) per block: the body size typed on the page, else the STEP's, else the EDB's, which is the
+    pad extents, not the package body; l and w along the part's own axes, turned angle degrees from the board's (the
+    STEP body's angle, else the pads'). Close parts can overlap, and Icepak refuses to solve intersecting blocks: two
+    turned the same way that overlap are cut back to meet halfway; two turned differently only get a warning."""
+    rect, turn = {}, {}
     for p in parts:
         b = by_ref[p["refDes"]]
+        t = b.get("stepAngleDeg", b.get("angleDeg")) or 0.0
         cx, cy = b["xMinMm"] + b["lMm"] / 2, b["yMinMm"] + b["wMm"] / 2
         lx, ly = p.get("bodyXMm") or b.get("stepXMm") or b["lMm"], p.get("bodyYMm") or b.get("stepYMm") or b["wMm"]
-        xy[p["refDes"]] = [cx - lx / 2, cy - ly / 2, cx + lx / 2, cy + ly / 2]
-    refs = list(xy)
+        u, v = _turn(cx, cy, -t)                     # the centre in the part's own frame
+        rect[p["refDes"]], turn[p["refDes"]] = [u - lx / 2, v - ly / 2, u + lx / 2, v + ly / 2], t
+    refs = list(rect)
     for i, a in enumerate(refs):
         for c in refs[i + 1:]:
             if by_ref[a]["side"] != by_ref[c]["side"]:
                 continue
-            A, C = xy[a], xy[c]
+            if abs(turn[a] - turn[c]) > 0.5:
+                if _crossing(_corners(rect[a], turn[a]), _corners(rect[c], turn[c])):
+                    check("warn", f"{a} and {c}: bodies overlap and are turned differently ({turn[a]:g} and {turn[c]:g} deg). "
+                                  f"Type smaller Body X or Y for one of them, or Icepak may refuse to solve")
+                continue
+            A, C = rect[a], rect[c]
+            if turn[c] != turn[a]:                   # within half a degree: C seen in A's frame
+                u, v = _turn(*_turn((C[0] + C[2]) / 2, (C[1] + C[3]) / 2, turn[c]), -turn[a])
+                C[:] = [u - (C[2] - C[0]) / 2, v - (C[3] - C[1]) / 2, u + (C[2] - C[0]) / 2, v + (C[3] - C[1]) / 2]
+                turn[c] = turn[a]
             ox, oy = min(A[2], C[2]) - max(A[0], C[0]), min(A[3], C[3]) - max(A[1], C[1])
             if ox <= 0 or oy <= 0:
                 continue
@@ -343,7 +356,32 @@ def _footprints(parts, by_ref):
             lo, hi = (A, C) if A[k] + A[k + 2] <= C[k] + C[k + 2] else (C, A)
             lo[k + 2] = hi[k] = (max(A[k], C[k]) + min(A[k + 2], C[k + 2])) / 2
             check("warn", f"{a} and {c}: footprints overlap by {min(ox, oy):.2f} mm, both blocks cut back to meet")
-    return xy
+    out = {}
+    for r, (u0, v0, u1, v1) in rect.items():
+        cx, cy = _turn((u0 + u1) / 2, (v0 + v1) / 2, turn[r])
+        out[r] = (cx, cy, u1 - u0, v1 - v0, turn[r])
+    return out
+
+
+def _turn(x, y, deg):
+    c, s = math.cos(math.radians(deg)), math.sin(math.radians(deg))
+    return x * c - y * s, x * s + y * c
+
+
+def _corners(r, deg):
+    """the four corners on the board of a rectangle [u0, v0, u1, v1] in a frame turned deg"""
+    return [_turn(u, v, deg) for u, v in ((r[0], r[1]), (r[2], r[1]), (r[2], r[3]), (r[0], r[3]))]
+
+
+def _crossing(P, Q):
+    """two convex outlines overlap: no side of either separates them"""
+    for poly in (P, Q):
+        for (x0, y0), (x1, y1) in zip(poly, poly[1:] + poly[:1]):
+            nx, ny = y0 - y1, x1 - x0
+            a, b = [nx * x + ny * y for x, y in P], [nx * x + ny * y for x, y in Q]
+            if max(a) <= min(b) + 1e-9 or max(b) <= min(a) + 1e-9:
+                return False
+    return True
 
 
 def _blocks(ic, board, by_ref, parts, study):
@@ -375,8 +413,9 @@ def _blocks(ic, board, by_ref, parts, study):
                           f"Type the real height.")
             h = MIN_BLOCK_H_MM
         z = zhi if b["side"] == "top" else zlo - h      # the part sits on the board surface, so a network can touch it
-        x0, y0, x1, y1 = xy[ref]
-        box = [x0, y0, z, x1, y1, z + h]
+        cx, cy, l, w, t = xy[ref]
+        xs, ys = zip(*_corners([-l / 2, -w / 2, l / 2, w / 2], t))
+        box = [cx + min(xs), cy + min(ys), z, cx + max(xs), cy + max(ys), z + h]     # what AEDT reports as its bounding box
         kind = _kind(p) if (p.get("powerW") or 0) > 0 else "Passive"
         cur = tree.get(f"P_{ref}")
         ok = ref in objects and (cur is None if kind == "Passive" else cur is not None and cur["type"] == kind)
@@ -397,11 +436,13 @@ def _blocks(ic, board, by_ref, parts, study):
             continue
         if cur is not None or ref in objects:
             _delete_block(ic, ref)
-        obj = ic.modeler.create_box(box[:3], [box[3] - box[0], box[4] - box[1], box[5] - box[2]],
-                                    name=ref, material=PKG if m else "Ceramic_material")
+        obj = ic.modeler.create_box([-l / 2, -w / 2, z], [l, w, h], name=ref, material=PKG if m else "Ceramic_material")
         if not obj:
             check("error", f"{ref}: block not created")
             continue
+        if abs(t) > 0.05 and not obj.rotate("Z", t):          # made at the origin, turned there, then moved onto its pads
+            check("warn", f"{ref}: block not turned by {t:g} deg, left square to the board")
+        obj.move([cx, cy, 0])
         if kind == "Passive":
             made += 1
             passive += 1

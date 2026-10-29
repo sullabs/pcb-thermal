@@ -171,7 +171,7 @@ class H(BaseHTTPRequestHandler):
             remember(FOLDER)
             return self._send(200, {"ok": True, "folder": str(FOLDER)})
         if path == "/api/read":
-            ok = run_script("read_board.py", "Reading the board")
+            ok = run_script("read_board.py", "Reading the heights from the STEP", "--step") if "step" in q else                 run_script("read_board.py", "Reading the board")
         elif path == "/api/run" and mode in WHAT:
             ok = run_script("setup_study.py", WHAT[mode], mode, silent="silent" in q)
         else:

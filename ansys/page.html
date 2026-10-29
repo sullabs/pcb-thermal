@@ -27,7 +27,7 @@
   :focus-visible { outline:2px solid var(--act); outline-offset:2px; }
 
   /* ---- shell: rail on the left, sections on the right ---- */
-  .shell { max-width:1280px; margin:0 auto; padding:0 20px 110px; display:grid; grid-template-columns:210px minmax(0,1fr); gap:28px; }
+  .shell { margin:0 auto; padding:0 24px 110px; display:grid; grid-template-columns:210px minmax(0,1fr); gap:28px; }
   header.top { grid-column:1 / -1; display:flex; gap:20px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; padding:26px 0 18px; border-bottom:2px solid var(--ink); margin-bottom:6px; }
   header.top h1 { font:600 32px/1.1 var(--disp); letter-spacing:-.01em; margin:0; font-stretch:condensed; }
   header.top .sub { color:var(--mut); font-size:13.5px; margin:6px 0 0; word-break:break-all; }
@@ -100,7 +100,7 @@
 
   /* ---- action bar ---- */
   .bar { position:fixed; left:0; right:0; bottom:0; background:var(--card); border-top:1px solid var(--line); padding:10px 20px; z-index:5; }
-  .bar > div { max-width:1280px; margin:0 auto; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .bar > div { margin:0 auto; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
   .bar .sep { width:1px; align-self:stretch; background:var(--line); margin:0 4px; }
   #status { font-size:14px; }
   .busy::before { content:""; display:inline-block; width:10px; height:10px; margin-right:8px; border-radius:50%; border:2px solid var(--act); border-right-color:transparent; animation:spin .9s linear infinite; vertical-align:-1px; }
@@ -144,6 +144,20 @@
   table.formulas tr.hit td { background:var(--dirty); transition:background .6s; }
   table.formulas tr.sub td { border-bottom:none; padding-top:14px; color:var(--ink); font:600 13.5px var(--disp); }
 
+  /* ---- hover help, hidden notes ---- */
+  .tip { position:fixed; z-index:20; max-width:360px; background:var(--card); color:var(--ink); border:1px solid var(--act); border-radius:6px; padding:8px 11px; font-size:13.5px; line-height:1.45; box-shadow:0 10px 28px -10px rgb(10 20 30 / .45); pointer-events:none; }
+  .tip b { display:block; font:600 13.5px var(--disp); margin-bottom:2px; }
+  .tipped { cursor:help; }
+  header.top .facts { margin-left:auto; }
+  header.top .tools { display:flex; gap:8px; align-items:center; }
+  button.x[aria-pressed="false"] { color:var(--mut); }
+  ul.checks li .hide { margin-left:8px; padding:0 8px; min-height:24px; font-size:12.5px; color:var(--mut); vertical-align:1px; }
+  details.hidden-notes { margin-top:8px; font-size:13.5px; color:var(--mut); }
+  details.hidden-notes summary { cursor:pointer; }
+  details.hidden-notes li { opacity:.8; }
+  .stepread { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+  .stepread .hint { margin:0; }
+
   @media (max-width:860px) {
     .shell { grid-template-columns:1fr; gap:0; padding:0 16px 150px; }
     nav.rail { position:static; padding:10px 0 0; }
@@ -164,6 +178,7 @@
       <div><dt>Lowest margin, hand check</dt><dd id="fMargin">n/a</dd></div>
       <div><dt>Icepak hottest</dt><dd id="fIce">not solved</dd></div>
     </dl>
+    <div class="tools"><button class="x" id="helpBtn" aria-pressed="true" data-tip="Turns these explanations on or off. The page remembers it.">Hover help: on</button></div>
   </header>
 
   <nav class="rail" id="rail" hidden aria-label="Steps">
@@ -194,6 +209,8 @@
     <section class="step" id="s-gaps">
       <h2><span class="n">1</span> What the export is missing</h2>
       <ul class="plain checks" id="gaps"></ul>
+      <details class="hidden-notes" id="gapsHidden" hidden><summary></summary><ul class="plain checks" id="gapsHiddenList"></ul></details>
+      <div class="stepread"><button class="x" id="stepBtn" data-tip="Reads the heights and body sizes again from the .step or .stp in the board folder, without reading the EDB. Use it after a new STEP export. Takes a few seconds; typed values stay.">Read heights from the STEP</button><span class="hint" id="stepNote"></span></div>
       <h3>Board materials</h3>
       <div class="scroll"><table>
         <thead><tr><th>Material</th><th>Layers</th><th>In the export (k / density / heat capacity)</th><th class="n">k (W/m&middot;K)</th><th class="n">Density (kg/m&sup3;)</th><th class="n">Heat capacity (J/kg&middot;K)</th></tr></thead>
@@ -228,6 +245,7 @@
         <button id="addBtn">Add</button>
         <label>Designer's list (CSV: RefDes, W, then optional height, body X, body Y in mm)<input type="file" id="csv" accept=".csv,.txt"></label>
         <span class="grow"></span>
+        <button class="x" id="stepBtn2" data-tip="Reads the heights and body sizes again from the board's STEP, without reading the EDB. Typed values stay.">Read heights from the STEP</button>
       </div>
       <datalist id="refs"></datalist>
       <div class="scroll"><table>
@@ -410,24 +428,40 @@ function sync(s) {
 
 /* ---- what the export lacks, and the board materials ---- */
 let gapCount = 0;
+let hiddenNotes = {};      // note key -> signature of its text when hidden; a note whose text changes comes back
+const sig = s => { let h = 5381; for (const c of s) h = (h * 33 ^ c.charCodeAt(0)) >>> 0; return h.toString(36); };
 function gaps() {
   const n = board.parts.length, flat = board.parts.filter(p => !(p.stepHMm > 0) && p.hMm < 0.2).length, st = board.step;
-  const zero = (board.materials || []).filter(m => !(m.kWmK > 0 && m.rhoKgM3 > 0 && m.cpJkgK > 0)).map(m => m.name);
-  const out = [];
-  if (st) out.push(`<li class="${flat ? "warn" : "ok"}"><code>${esc(st.file)}</code> holds ${st.components ?? st.parts} components besides the board; ${st.parts} of them give a height and body size to a part${st.byPosition ? ` (${st.byPosition} matched by position, not by name)` : ""}.${flat ? ` The other ${flat} of the ${n} parts in the EDB have no 3D body in it (test points, fiducials, holes, parts without a model) and keep the placeholder height under 0.2 mm and the pad outline: type the ones that matter.` : ""} Typed values win over the STEP.</li>`);
+  readMats();
+  const has = (m, f, i) => (i ? m[f] > 0 : m[f] > 0.01) || mats[m.name]?.[f] > 0;      // in the export, or typed here
+  const zero = (board.materials || []).filter(m => !MAT_F.every((f, i) => has(m, f, i))).map(m => m.name);
+  const notes = [];          // [key, level, html]
+  if (st) notes.push(["step", flat ? "warn" : "ok", `<code>${esc(st.file)}</code> holds ${st.components ?? st.parts} components besides the board; ${st.parts} of them give a height and body size to a part${st.byPosition ? ` (${st.byPosition} matched by position, not by name)` : ""}.${flat ? ` The other ${flat} of the ${n} parts in the EDB have no 3D body in it (test points, fiducials, holes, parts without a model) and keep the placeholder height under 0.2 mm and the pad outline: type the ones that matter.` : ""} Typed values win over the STEP.`]);
   else {
-    out.push(flat ? `<li class="warn">Heights: ${flat === n ? `all ${n}` : `${flat} of ${n}`} parts are under 0.2 mm, a placeholder. Type the height of every part that matters in Parts, also tall parts without power. Or put the board's STEP (Altium: File &gt; Export &gt; STEP 3D) in the board folder and read the board again: it gives heights and body sizes.</li>`
-                  : `<li class="ok">Heights: every part has a height in the export.</li>`);
-    out.push(`<li class="warn">Part sizes are the pad outlines, not the package bodies. Type Body X and Y where it matters (big packages, close neighbours).</li>`);
+    notes.push(flat ? ["heights", "warn", `Heights: ${flat === n ? `all ${n}` : `${flat} of ${n}`} parts are under 0.2 mm, a placeholder. Type the height of every part that matters in Parts, also tall parts without power. Or put the board's STEP (Altium: File &gt; Export &gt; STEP 3D) in the board folder and press <b>Read heights from the STEP</b>: it gives heights and body sizes.`]
+                    : ["heights", "ok", "Heights: every part has a height in the export."]);
+    notes.push(["outline", "warn", "Part sizes are the pad outlines, not the package bodies. Type Body X and Y where it matters (big packages, close neighbours)."]);
   }
-  if (st?.away?.length) out.push(`<li class="warn">${st.away.length} parts sit elsewhere in the STEP than their pads in the EDB; their height and body size are used anyway: ${st.away.map(a => `<b>${esc(a.refDes)}</b> ${a.distMm} mm (body at ${a.atMm[0]}, ${a.atMm[1]}, pads at ${a.padsMm[0]}, ${a.padsMm[1]})`).join("; ")}. Check that the STEP and the EDB are from the same revision of the layout.</li>`);
-  if (st?.unmatched?.length) out.push(`<li class="warn">${st.unmatched.length} components in the STEP went to no part: ${st.unmatched.map(u => `<b>${esc(u.name)}</b> (${u.xMm} × ${u.yMm} × ${u.hMm} mm at ${u.atMm[0]}, ${u.atMm[1]}): ${esc(u.why)}`).join("; ")}.</li>`);
-  out.push(zero.length ? `<li class="warn">Thermal values are missing for ${esc(zero.join(", "))}: the grey stand-ins below are used. Type the real ones if you have them.</li>`
-                       : `<li class="ok">Every board material has thermal values.</li>`);
-  out.push(`<li class="mut">Power is never in the export: type it in Parts, or load the designer's CSV.</li>`);
-  if (board.skipped?.length) out.push(`<li class="warn">${board.skipped.length} parts have no position or size in the export: ${esc(board.skipped.join(", "))}.</li>`);
-  $("gaps").innerHTML = out.join("");
-  gapCount = out.filter(x => x.startsWith('<li class="warn')).length;
+  if (st?.away?.length) notes.push(["away", "warn", `${st.away.length} parts sit elsewhere in the STEP than their pads in the EDB; their height and body size are used anyway: ${st.away.map(a => `<b>${esc(a.refDes)}</b> ${a.distMm} mm (body at ${a.atMm[0]}, ${a.atMm[1]}, pads at ${a.padsMm[0]}, ${a.padsMm[1]})`).join("; ")}. Check that the STEP and the EDB are from the same revision of the layout.`]);
+  if (st?.unmatched?.length) notes.push(["unmatched", "warn", `${st.unmatched.length} components in the STEP went to no part: ${st.unmatched.map(u => `<b>${esc(u.name)}</b> (${u.xMm} × ${u.yMm} × ${u.hMm} mm at ${u.atMm[0]}, ${u.atMm[1]}): ${esc(u.why)}`).join("; ")}.`]);
+  notes.push(zero.length ? ["materials", "warn", `Thermal values are missing for ${esc(zero.join(", "))}: the grey stand-ins below are used. Type the real ones if you have them.`]
+                         : ["materials", "ok", "Every board material has thermal values, from the export or typed below."]);
+  notes.push(["power", "mut", "Power is never in the export: type it in Parts, or load the designer's CSV."]);
+  if (board.skipped?.length) notes.push(["skipped", "warn", `${board.skipped.length} parts have no position or size in the export: ${esc(board.skipped.join(", "))}.`]);
+  const off = ([k, lvl, h]) => lvl !== "ok" && hiddenNotes[k] === sig(h);
+  const shown = notes.filter(x => !off(x)), hid = notes.filter(off);
+  $("gaps").innerHTML = shown.map(([k, lvl, h]) => `<li class="${lvl}">${h}${lvl === "ok" ? "" : `<button class="x hide" data-hide="${k}" data-tip="Moves this note to the hidden list below and stops counting it. It comes back by itself when its text changes, after a new export.">Hide</button>`}</li>`).join("");
+  $("gapsHidden").hidden = !hid.length;
+  $("gapsHidden").querySelector("summary").textContent = `${hid.length} hidden note${hid.length > 1 ? "s" : ""}`;
+  $("gapsHiddenList").innerHTML = hid.map(([k, lvl, h]) => `<li class="${lvl}">${h}<button class="x hide" data-show="${k}">Show</button></li>`).join("");
+  gapCount = shown.filter(([, lvl]) => lvl === "warn").length;
+  gapNotes = Object.fromEntries(notes.map(([k, , h]) => [k, sig(h)]));
+}
+let gapNotes = {};
+function toggleNote(e) {
+  const k = e.target.dataset.hide, s = e.target.dataset.show;
+  if (k) hiddenNotes[k] = gapNotes[k]; else if (s) delete hiddenNotes[s]; else return;
+  gaps(); rail(); saveHcSoon();
 }
 function readMats() {
   for (const tr of $("mats").children) {
@@ -460,7 +494,7 @@ function drawParts() {
   const cell = (ref, f, step, ph, cls = "") => `<td class="n ${cls}"><input type="number" data-f="${f}" min="0" step="${step}" placeholder="${ph ?? ""}" value="${parts[ref][f] ?? ""}" aria-label="${esc(ref)} ${f}"></td>`;
   $("rows").innerHTML = order.filter(r => parts[r]).map(ref => {
     const b = by[ref] || { part: "not in the EDB", lMm: 0, wMm: 0, hMm: 0 };
-    return `<tr data-ref="${esc(ref)}"><td><b>${esc(ref)}</b><small>${esc(b.part)}, ${b.lMm.toFixed(1)} &times; ${b.wMm.toFixed(1)}${b.stepHMm > 0 ? ", STEP" : ""}</small></td>
+    return `<tr data-ref="${esc(ref)}"><td><b>${esc(ref)}</b><small>${esc(b.part)}, ${b.lMm.toFixed(1)} &times; ${b.wMm.toFixed(1)}${b.stepHMm > 0 ? ", STEP" : ""}${Math.abs(b.stepAngleDeg ?? b.angleDeg ?? 0) >= 0.1 ? `, turned ${+(b.stepAngleDeg ?? b.angleDeg).toFixed(1)}&deg;` : ""}</small></td>
       ${cell(ref, "powerW", 0.01)}${cell(ref, "heightMm", 0.1, (b.stepHMm ?? b.hMm).toFixed(2))}${cell(ref, "bodyXMm", 0.1, (b.stepXMm ?? b.lMm).toFixed(1))}${cell(ref, "bodyYMm", 0.1, (b.stepYMm ?? b.wMm).toFixed(1))}${cell(ref, "meshMm", 0.1, "global")}
       ${cell(ref, "rjcCW", 0.1)}${cell(ref, "rjbCW", 0.1)}${cell(ref, "rjaCW", 0.1, "", "page")}${cell(ref, "tjMaxC", 1, "", "page")}
       <td class="n page" data-est></td><td><button class="del" data-del="${esc(ref)}" title="Remove ${esc(ref)}. Removed from AEDT on Apply" aria-label="Remove ${esc(ref)}">&times;</button></td></tr>`;
@@ -513,6 +547,7 @@ function markDirty() {
   $("applyBtn").textContent = n > 0 ? `Apply ${n} change${n > 1 ? "s" : ""}` : "Apply changes";
   notes();
   handCheck();
+  gaps();
   rail();
 }
 function notes() {
@@ -793,7 +828,8 @@ function matchUi(b) {
     : chk.ok ? `Fits the PCB h so the hand board average equals Icepak's ${f1(results.boardMeanC)} °C. Compare first: the textbook check is the independent one.` : chk.why;
   for (const k of ["hTop", "hBottom"]) {
     const e = $("hcIn").querySelector(`[data-hc="${k}"]`);
-    e.disabled = !!hcMatched; e.title = hcMatched ? "Not used while h is matched to a run" : "";
+    e.disabled = !!hcMatched;
+    if (hcMatched) e.dataset.tip = "Not used while h is matched to a run"; else delete e.dataset.tip;
   }
   const drift = [];
   if (hcMatched) {
@@ -953,6 +989,7 @@ function initForm() {          // first load: the page's last values, then AEDT 
   for (const [name, v] of Object.entries(study.materials || {})) mats[name] = { ...v };
   for (const e of document.querySelectorAll("[data-hc]")) e.value = study.handCheck?.[e.dataset.hc] ?? "";
   hcMatched = study.handCheck?.matched ?? null;
+  hiddenNotes = { ...(study.hiddenNotes || {}) };
   drawParts(); drawMats();
 }
 
@@ -968,6 +1005,7 @@ function collect() {
     parts: order.filter(r => parts[r]).map(r => ({ refDes: r, ...Object.fromEntries(Object.entries(parts[r]).filter(([, v]) => v !== undefined)) })),
     materials: Object.fromEntries(typed),
     handCheck: { ...readHc(), ...(hcMatched ? { matched: hcMatched } : {}) },
+    hiddenNotes,
   };
 }
 async function run(mode) {
@@ -997,6 +1035,28 @@ $("readBtn").onclick = async () => {
   reading = "started";
   const t = setInterval(async () => { await refresh(); if (board || reading === "done") clearInterval(t); }, 2000);
 };
+let stepReading = false;
+async function readStep() {          // the STEP only, into board.json; the page follows when the job ends
+  if (job.running && !job.silent) { alert("Another job is running. Try again in a moment."); return; }
+  const r = await api("/api/read?step=1", { method: "POST" });
+  if (!r.ok) { alert("Another job is running. Try again in a moment."); return; }
+  stepReading = true; stepButtons();
+  const t = setInterval(async () => {
+    await refresh();
+    if (job.running && !job.silent) return;
+    clearInterval(t); stepReading = false; stepButtons();
+    const lines = (job.log || "").trim().split(/\r?\n/).filter(l => l && !/board\.json$|^pip_system_certs/.test(l));   // not the file path, not Ansys' Python noise
+    const head = lines.find(l => /\.(step|stp)\b|\[warn\]|\[error\]|Error/i.test(l)) || lines[0] || "";
+    $("stepNote").innerHTML = esc(head) + (lines.length > 1 ? ` <span class="mut">(${lines.length - 1} more line${lines.length > 2 ? "s" : ""} in Last run)</span>` : "");
+  }, 700);
+}
+function stepButtons() {
+  for (const id of ["stepBtn", "stepBtn2"]) { $(id).disabled = stepReading; $(id).textContent = stepReading ? "Reading the STEP…" : "Read heights from the STEP"; }
+}
+$("stepBtn").onclick = readStep;
+$("stepBtn2").onclick = readStep;
+$("gaps").onclick = toggleNote;
+$("gapsHiddenList").onclick = toggleNote;
 $("rereadBtn").onclick = async () => {
   const r = await api("/api/read", { method: "POST" });
   if (!r.ok) alert("Another job is running. Try again in a moment.");
@@ -1042,6 +1102,95 @@ $("csv").onchange = async e => {
   if (miss.length) alert("Not in the board: " + miss.join(", "));
   e.target.value = "";
 };
+/* ---- hover help: what a field, a column or a button means. Off with the switch at the top; the page remembers ---- */
+const TERMS = {
+  ambientC: ["Ambient", "Temperature of the air far from the board, in °C. Every result is this plus the rise the power causes."],
+  orientation: ["Board position", "How the board sits relative to gravity. Warm air rises, so a standing board cools differently from a flat one, and parts down traps heat under the board."],
+  margin: ["Air around", "Distance from the board to the walls of the air box on every side, in mm. Too small and the walls cramp the flow; 50 mm is usually enough for natural convection."],
+  above: ["Extra air above", "More air on the side away from gravity, where the warm plume rises. Added to Air around."],
+  radiation: ["Radiation", "Heat leaving the surfaces as infrared, besides convection. With natural convection it carries a large share, often a third to a half: leave it on unless you compare with a run without it."],
+  level: ["Mesh level", "1 is coarse and fast, 5 fine and slow. 3 is a good start; compare two levels to see if the answer still moves."],
+  maxMm: ["Largest element", "The biggest cell allowed in the air and the board, in mm. Smaller is more accurate and slower."],
+  gapElems: ["Cells in gaps", "How many cells across the narrow gap between two objects. More resolves the air between close parts better."],
+  edgeElems: ["Cells on edges", "How many cells along the edges of small objects."],
+  pcbRes: ["PCB mapping", "How finely Icepak maps the copper of each layer onto the board's conductivity. Higher follows the traces and planes more closely; it needs Build to change."],
+  mm: ["Mesh", "Automatic lets Icepak size the cells by a level; Manual sets the largest cell yourself."],
+  powerW: ["Power", "Heat the part gives off, in W. Not in the export: from the designer or the datasheet. Without power a part is a block that only shapes the air."],
+  heightMm: ["Height", "Height of the part above the board, in mm. The grey number is from the STEP (or a placeholder under 0.2 mm when the STEP has no body for it); a typed value wins."],
+  bodyXMm: ["Body X", "Package body size along the part's own X axis (the one nearest the board's X), in mm. The grey number is the STEP body, else the pad outline. A part shown as turned keeps its real size (15 × 15 at 45° stays 15 × 15) and its block is built turned in AEDT. A typed value wins."],
+  bodyYMm: ["Body Y", "Package body size along the part's own Y axis, in mm. Same sources and turn as Body X."],
+  meshMm: ["Mesh", "A finer largest cell for this part only, in mm. Empty uses the global mesh."],
+  rjcCW: ["Rjc", "Junction to case resistance from the datasheet, in °C/W. With Rjb it makes a two-resistor junction model in AEDT; alone it sets the block's conductivity."],
+  rjbCW: ["Rjb", "Junction to board resistance from the datasheet, in °C/W. With Rjc it makes a two-resistor junction model."],
+  rjaCW: ["Rja", "Junction to ambient from the datasheet, in °C/W. Measured on the JEDEC test board, not yours: only a rough check. Stays on the page."],
+  tjMaxC: ["Tj max", "Highest junction temperature the part allows, from the datasheet, in °C. Margins and statuses are against it."],
+  est: ["Tj by Rja", "Ambient + power × Rja: the datasheet's quick estimate, for comparison only."],
+  kWmK: ["k", "Thermal conductivity of the material, in W/m·K. Copper about 400, FR-4 about 0.3. Grey is the stand-in used when the export has none."],
+  rhoKgM3: ["Density", "In kg/m³. Matters only for transient runs; steady state ignores it."],
+  cpJkgK: ["Heat capacity", "In J/kg·K. Matters only for transient runs; steady state ignores it."],
+  addRef: ["Add a part", "Type a RefDes from the board (the list suggests them) and press Enter. Only the parts you add get power or a block; the rest is plain PCB."],
+  csv: ["Designer's list", "A CSV with RefDes, power in W, then optional height, body X and body Y in mm. Adds or updates those parts."],
+};
+const TH_TERMS = { "Power (W)": "powerW", "Height (mm)": "heightMm", "Body X (mm)": "bodyXMm", "Body Y (mm)": "bodyYMm", "Mesh (mm)": "meshMm",
+  "Rjc (°C/W)": "rjcCW", "Rjb (°C/W)": "rjbCW", "Rja (°C/W)": "rjaCW", "Tj max (°C)": "tjMaxC", "Tj by Rja": "est",
+  "k (W/m·K)": "kWmK", "Density (kg/m³)": "rhoKgM3", "Heat capacity (J/kg·K)": "cpJkgK",
+  "R top (°C/W)": ["R top", "Resistance from the junction out through the top of the part to the air: the block itself plus convection and radiation from its surface."],
+  "R board (°C/W)": ["R board", "Resistance from the junction down into the board and out through the board's faces to the air."],
+  "Into board (W)": ["Into board", "The share of the part's power that goes down into the board rather than out of its top."],
+  "Tj hand (°C)": ["Tj hand", "Junction temperature from the hand network: ambient + power through the two paths in parallel."],
+  "Margin (K)": ["Margin", "Tj max minus the hand Tj. Below the Tight value of the inputs above, the part is Tight; below zero it fails."],
+  "Ambient to Tj max": ["Ambient to Tj max", "Where the hand Tj sits between the ambient (left) and Tj max (the end of the bar)."],
+  "Hand − Icepak": ["Hand − Icepak", "Hand Tj minus the hottest Icepak point of the part. Expect a few degrees above zero: Icepak reads the body, not the junction."],
+  "Status": ["Status", "OK within the margin you set, Tight below it, FAIL over Tj max. Grey when the part has no Tj max typed."],
+  "In the export (k / density / heat capacity)": ["In the export", "What the EDB carries for this material. Altium exports 0, so the grey stand-ins are used until you type real values."],
+};
+let tipsOn = true;
+try { tipsOn = localStorage.getItem("pcbThermalTips") !== "off"; } catch { /* storage blocked: tips stay on */ }
+const tipBox = Object.assign(document.createElement("div"), { className: "tip", hidden: true });
+tipBox.setAttribute("role", "tooltip");
+document.body.appendChild(tipBox);
+function untitle(root) {        // native title boxes would double the help: move them to data-tip
+  for (const e of root.querySelectorAll ? root.querySelectorAll("[title]") : []) { e.dataset.tip = e.getAttribute("title"); e.removeAttribute("title"); }
+}
+untitle(document);
+new MutationObserver(ms => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1) untitle(n.parentNode || n); })
+  .observe(document.body, { childList: true, subtree: true });
+const name = e => (e.dataset.tipTitle || [...e.childNodes].filter(c => c.nodeType === 3 || c.tagName === "B").map(c => c.textContent).join(" ").replace(/\s+/g, " ").trim() || e.textContent.trim()).slice(0, 60);
+function tipFor(t) {
+  if (!t || !t.closest) return null;
+  const tip = t.closest("[data-tip]");
+  if (tip) return [name(tip), tip.dataset.tip];
+  const th = t.closest("th"), key = th ? TH_TERMS[th.textContent.trim()] : null;
+  if (key) return Array.isArray(key) ? key : TERMS[key];
+  if (t.closest("td[data-est]")) return TERMS.est;
+  const box = t.closest("label") || t.closest("td");
+  const inp = t.matches("input,select") ? t : box && box.querySelector("input,select");
+  if (!inp) return null;
+  return TERMS[inp.dataset.f] || TERMS[inp.id] || TERMS[inp.name] || null;
+}
+function showTip(e) {
+  if (!tipsOn) return;
+  const hit = tipFor(e.target);
+  if (!hit) { tipBox.hidden = true; return; }
+  const host = e.target.closest("[data-tip],th,label,td,input,select,button") || e.target, r = host.getBoundingClientRect();
+  tipBox.innerHTML = `<b>${esc(hit[0])}</b>${esc(hit[1])}`; tipBox.hidden = false;
+  const h = tipBox.offsetHeight;
+  tipBox.style.left = Math.max(8, Math.min(r.left, innerWidth - tipBox.offsetWidth - 8)) + "px";
+  tipBox.style.top = (r.bottom + 6 + h < innerHeight - 8 ? r.bottom + 6 : Math.max(8, r.top - h - 6)) + "px";
+}
+document.addEventListener("mouseover", showTip);
+document.addEventListener("focusin", showTip);
+document.addEventListener("mouseout", e => { if (!tipFor(e.relatedTarget)) tipBox.hidden = true; });
+document.addEventListener("focusout", () => { tipBox.hidden = true; });
+document.addEventListener("keydown", e => { if (e.key === "Escape") tipBox.hidden = true; });
+document.addEventListener("scroll", () => { tipBox.hidden = true; }, true);
+function helpSwitch() {
+  $("helpBtn").textContent = `Hover help: ${tipsOn ? "on" : "off"}`; $("helpBtn").setAttribute("aria-pressed", tipsOn);
+  if (!tipsOn) tipBox.hidden = true;
+}
+$("helpBtn").onclick = () => { tipsOn = !tipsOn; try { localStorage.setItem("pcbThermalTips", tipsOn ? "on" : "off"); } catch { /* not kept */ } helpSwitch(); };
+helpSwitch();
+
 // the rail follows the section in view
 const io = new IntersectionObserver(es => {
   for (const x of es) if (x.isIntersecting) for (const a of $("rail").querySelectorAll("a")) a.classList.toggle("here", a.getAttribute("href") === "#" + x.target.id);
