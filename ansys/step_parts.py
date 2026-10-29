@@ -297,12 +297,15 @@ def size_at(outline, deg):
     return max(u) - min(u), max(v) - min(v)
 
 
-def for_board(path, board, unmatched=None):
+def for_board(path, board, report=None):
     """{RefDes: {hMm, xMm, yMm, by}} for the parts of board.json found in the STEP: height above the board face the part
     sits on, body size along the part's own axes (angleDeg of board.json, from its pads). Only whole components count (components()), never one of their sub-parts.
-    by: "name" (a component named like the RefDes, its body over its pads) or "position" (the component centred on the
-    part's pads, for exporters that name components after the model). unmatched, a list, gets the components that are
-    no part's: {name, xMm, yMm, hMm, atMm (centre, EDB frame), why}; the board itself is left out"""
+    by: "name" (the one component named like the RefDes, wherever it sits) or "position" (the component centred on the
+    part's pads, for exporters that name components after the model). report, a dict, gets
+      components: how many components the STEP holds, the board itself left out
+      unmatched: the components that are no part's, [{name, xMm, yMm, hMm, atMm (centre, EDB frame), why}]
+      away: the parts matched by name whose body is not over their pads (a STEP from another revision of the layout,
+            or a 3D model off its footprint), [{refDes, distMm, atMm (body centre), padsMm (pad centre)}]"""
     comps = components(path, [p["refDes"] for p in board["parts"]])
     found = {}
     for name, box in comps:
@@ -317,9 +320,16 @@ def for_board(path, board, unmatched=None):
                                p["yMinMm"] - grow <= centre(b)[1] + off[1] <= p["yMinMm"] + p["wMm"] + grow)
     over = lambda p, b: (b[0] + off[0] <= p["xMinMm"] + p["lMm"] + 1.0 and p["xMinMm"] - 1.0 <= b[3] + off[0] and  # noqa: E731
                          b[1] + off[1] <= p["yMinMm"] + p["wMm"] + 1.0 and p["yMinMm"] - 1.0 <= b[4] + off[1])
-    # a name whose body is nowhere over its pads is someone else's; one over them counts even off centre (a connector
-    # that hangs over the board edge)
-    hits = {r: (b, "name") for r, b in named.items() if over(edb[r], b)}
+    # a RefDes is unique: its body counts wherever it sits, only its height and size are used, the place is the EDB's
+    hits = {r: (b, "name") for r, b in named.items()}
+    unmatched, away = [], []
+    if report is not None:
+        for r, b in named.items():
+            p = edb[r]
+            if not over(p, b) and not near(p, b, 2.0):
+                c, pc = (centre(b)[0] + off[0], centre(b)[1] + off[1]), (p["xMinMm"] + p["lMm"] / 2, p["yMinMm"] + p["wMm"] / 2)
+                away.append({"refDes": r, "distMm": round(math.dist(c, pc), 1), "atMm": [round(v, 2) for v in c],
+                             "padsMm": [round(v, 2) for v in pc]})
     o = board["outlineMm"]
     half = (o["xMax"] - o["xMin"]) * (o["yMax"] - o["yMin"]) / 2      # bigger than that is the board itself
     free = [b for _, b in comps if (b[3] - b[0]) * (b[4] - b[1]) < half and not any(b is h for h, _ in hits.values())]
@@ -331,17 +341,14 @@ def for_board(path, board, unmatched=None):
                 b = min(fit, key=lambda b: math.dist(centre(b), pc))
                 hits[r] = (b, "position")
                 free.remove(b)
-    if unmatched is not None:
+    if report is not None:
+        report.update(components=sum((b[3] - b[0]) * (b[4] - b[1]) < half for _, b in comps), unmatched=unmatched, away=away)
         for name, b in comps:
             if (b[3] - b[0]) * (b[4] - b[1]) >= half or any(b is h for h, _ in hits.values()):
                 continue
             c = (centre(b)[0] + off[0], centre(b)[1] + off[1])
             if found.get(name) and len(found[name]) > 1:
                 why = f"{len(found[name])} components are named {name}"
-            elif name in edb:
-                p = edb[name]
-                d = math.dist(c, (p["xMinMm"] + p["lMm"] / 2, p["yMinMm"] + p["wMm"] / 2))
-                why = f"named {name}, but its body is {d:.1f} mm from the centre of its pads and not over them"
             else:
                 inside = [r for r, p in edb.items() if near(p, b, 0.5)]
                 why = (f"centred on the pads of {', '.join(inside)}, which already have a body" if inside else
@@ -368,9 +375,12 @@ if __name__ == "__main__":
     if len(sys.argv) not in (2, 3):
         raise SystemExit(__doc__ + "\n    python ansys/step_parts.py <board.step> <board.json>   heights and bodies per RefDes")
     if len(sys.argv) == 3:
-        left = []
-        print(json.dumps(for_board(sys.argv[1], json.loads(Path(sys.argv[2]).read_text(encoding="utf-8")), left), indent=1))
-        for u in left:
+        rep = {}
+        print(json.dumps(for_board(sys.argv[1], json.loads(Path(sys.argv[2]).read_text(encoding="utf-8")), rep), indent=1))
+        print(f"{rep['components']} components in the STEP", file=sys.stderr)
+        for a in rep["away"]:
+            print(f"away from its pads: {a['refDes']} body at {a['atMm']}, pads at {a['padsMm']} ({a['distMm']} mm)", file=sys.stderr)
+        for u in rep["unmatched"]:
             print(f"not used: {u['name']} ({u['xMm']} x {u['yMm']} x {u['hMm']} mm at {u['atMm']}): {u['why']}", file=sys.stderr)
     else:
         print(json.dumps({k: [[round(x, 3) for x in b] for b in v] for k, v in boxes(sys.argv[1]).items()}, indent=1))

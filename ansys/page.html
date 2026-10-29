@@ -414,12 +414,13 @@ function gaps() {
   const n = board.parts.length, flat = board.parts.filter(p => !(p.stepHMm > 0) && p.hMm < 0.2).length, st = board.step;
   const zero = (board.materials || []).filter(m => !(m.kWmK > 0 && m.rhoKgM3 > 0 && m.cpJkgK > 0)).map(m => m.name);
   const out = [];
-  if (st) out.push(`<li class="${flat ? "warn" : "ok"}">Heights and body sizes of ${st.parts} of ${n} parts come from <code>${esc(st.file)}</code>${st.byPosition ? ` (${st.byPosition} matched by position, not by name)` : ""}.${flat ? ` The other ${flat} have no 3D model in it and keep the placeholder height under 0.2 mm and the pad outline: type the ones that matter.` : ""} Typed values win over the STEP.</li>`);
+  if (st) out.push(`<li class="${flat ? "warn" : "ok"}"><code>${esc(st.file)}</code> holds ${st.components ?? st.parts} components besides the board; ${st.parts} of them give a height and body size to a part${st.byPosition ? ` (${st.byPosition} matched by position, not by name)` : ""}.${flat ? ` The other ${flat} of the ${n} parts in the EDB have no 3D body in it (test points, fiducials, holes, parts without a model) and keep the placeholder height under 0.2 mm and the pad outline: type the ones that matter.` : ""} Typed values win over the STEP.</li>`);
   else {
     out.push(flat ? `<li class="warn">Heights: ${flat === n ? `all ${n}` : `${flat} of ${n}`} parts are under 0.2 mm, a placeholder. Type the height of every part that matters in Parts, also tall parts without power. Or put the board's STEP (Altium: File &gt; Export &gt; STEP 3D) in the board folder and read the board again: it gives heights and body sizes.</li>`
                   : `<li class="ok">Heights: every part has a height in the export.</li>`);
     out.push(`<li class="warn">Part sizes are the pad outlines, not the package bodies. Type Body X and Y where it matters (big packages, close neighbours).</li>`);
   }
+  if (st?.away?.length) out.push(`<li class="warn">${st.away.length} parts sit elsewhere in the STEP than their pads in the EDB; their height and body size are used anyway: ${st.away.map(a => `<b>${esc(a.refDes)}</b> ${a.distMm} mm (body at ${a.atMm[0]}, ${a.atMm[1]}, pads at ${a.padsMm[0]}, ${a.padsMm[1]})`).join("; ")}. Check that the STEP and the EDB are from the same revision of the layout.</li>`);
   if (st?.unmatched?.length) out.push(`<li class="warn">${st.unmatched.length} components in the STEP went to no part: ${st.unmatched.map(u => `<b>${esc(u.name)}</b> (${u.xMm} × ${u.yMm} × ${u.hMm} mm at ${u.atMm[0]}, ${u.atMm[1]}): ${esc(u.why)}`).join("; ")}.</li>`);
   out.push(zero.length ? `<li class="warn">Thermal values are missing for ${esc(zero.join(", "))}: the grey stand-ins below are used. Type the real ones if you have them.</li>`
                        : `<li class="ok">Every board material has thermal values.</li>`);

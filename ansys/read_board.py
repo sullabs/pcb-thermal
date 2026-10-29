@@ -173,8 +173,8 @@ def add_step(folder: Path, board: dict):
         return
     import step_parts
     try:
-        left = []
-        found = step_parts.for_board(steps[-1], board, left)
+        rep = {}
+        found = step_parts.for_board(steps[-1], board, rep)
     except Exception as ex:  # noqa: BLE001  a STEP the reader does not follow must not stop the board read
         print(f"[warn] {steps[-1].name} could not be read ({type(ex).__name__}: {ex}); heights stay empty", flush=True)
         return
@@ -182,10 +182,12 @@ def add_step(folder: Path, board: dict):
         if p["refDes"] in found:
             f = found[p["refDes"]]
             p.update(stepHMm=f["hMm"], stepXMm=f["xMm"], stepYMm=f["yMm"])
-    board["step"] = {"file": steps[-1].name, "parts": len(found), "byPosition": sum(f["by"] == "position" for f in found.values()),
-                     "unmatched": left}
-    print(f"{steps[-1].name}: height and body of {len(found)} of {len(board['parts'])} parts", flush=True)
-    for u in left:
+    board["step"] = {"file": steps[-1].name, "parts": len(found), "byPosition": sum(f["by"] == "position" for f in found.values()), **rep}
+    print(f"{steps[-1].name}: {rep['components']} components besides the board, {len(found)} of them matched to a part"
+          f" (the EDB has {len(board['parts'])} parts, many without a 3D body: test points, fiducials, holes)", flush=True)
+    for a in rep["away"]:
+        print(f"  away from its pads: {a['refDes']} body at {a['atMm']}, pads at {a['padsMm']} ({a['distMm']} mm)", flush=True)
+    for u in rep["unmatched"]:
         print(f"  not used: {u['name']} ({u['xMm']} x {u['yMm']} x {u['hMm']} mm at {u['atMm']}): {u['why']}", flush=True)
 
 
