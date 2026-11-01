@@ -1,17 +1,22 @@
 """Build or edit the Icepak study from <folder>/study.json. No solve.
 
-    python ansys/setup_study.py <folder> [build|update|read|mesh|solve]
+    python ansys/setup_study.py <folder> [build|update|read|open|mesh|solve|meshcheck]
 
 build  : new AEDT project from the EDB: PCB, power blocks, air, environment, setup, mesh (about 40 s)
 update : the same settings applied to the project that is already built (fast); AEDT edits to the things the
          page owns (power, ambient, air, mesh) are overwritten, everything else is left alone
 read   : only read the project into state.json, as it is in AEDT now (never starts AEDT or opens a project)
+open   : start AEDT if needed, open the built project and read it into state.json. Changes nothing
 mesh   : generate the mesh and report how long it took
 solve  : solve the setup (opens the project, never changes it) and write results.json: temperature per heat source
+meshcheck: solve with a finer mesh, then with the page's mesh again, and write meshcheck.json with both results.
+         The project ends as it was, with the page's mesh and its solution in results.json
 
 Input  : <folder>/<board>.aedb (or Altium's <board>.edb), <folder>/study.json (written by the page)
-Output : <folder>/board.json, state.json, checks.json, <board>_icepak.aedt
+Output : <folder>/board.json, state.json, checks.json, <board>_icepak.aedt; built.json (what Build used that only Build
+         can change), meshed.json (the meshSig of state.json when the mesh was last generated, by mesh or a solve)
 """
+import hashlib
 import json
 import math
 import os
@@ -33,17 +38,23 @@ MIN_BLOCK_H_MM = 0.2   # EDB heights below this are placeholders; the page value
 DESIGN = "Icepak"
 SETUP = "Study"
 PKG = "pkg_material"
+RJC_MAT = "rjc_"         # rjc_<refdes>: the material of a block with Rjc and no Rjb, its k gives Rjc through the height
 # exists while a build/update/mesh/solve talks to the AEDT on PORT, for any board folder; mode read leaves AEDT alone then
 BUSY = Path(tempfile.gettempdir()) / f"pcb_thermal_aedt_{PORT}.busy"
 
-# gravity points down. edit_design_settings code: 0 -X, 1 -Y, 2 -Z, 3 +X, 4 +Y, 5 +Z (read back from AEDT)
+# study["orientation"] is the direction gravity points in the board's axes: the page turns the board from flat, parts up,
+# about its X or Y axis in 90 degree steps, which always puts gravity on one of the six axis directions.
+# edit_design_settings code: 0 -X, 1 -Y, 2 -Z, 3 +X, 4 +Y, 5 +Z (read back from AEDT)
 # fields: gravity code, label, text, index of the air face opposite to gravity in [+X, -X, +Y, -Y, +Z, -Z]
 ORIENTATION = {
-    "flat-up": (2, "-Z", "parts face up", 4),
-    "flat-down": (5, "+Z", "parts face down", 5),
-    "vertical-long": (1, "-Y", "board standing, long edge down", 2),
-    "vertical-short": (0, "-X", "board standing, short edge down", 0),
+    "-Z": (2, "-Z", "flat, parts face up", 4),
+    "+Z": (5, "+Z", "flat, parts face down", 5),
+    "-Y": (1, "-Y", "standing on its -Y edge", 2),
+    "+Y": (4, "+Y", "standing on its +Y edge", 3),
+    "-X": (0, "-X", "standing on its -X edge", 0),
+    "+X": (3, "+X", "standing on its +X edge", 1),
 }
+OLD_ORIENTATION = {"flat-up": "-Z", "flat-down": "+Z", "vertical-long": "-Y", "vertical-short": "-X"}   # study.json before the turn control
 
 checks = []
 
@@ -73,7 +84,9 @@ def load_study(folder: Path) -> dict:
     if not f.exists():
         check("warn", "No study.json yet: defaults used, no heat sources")
     s.setdefault("ambientC", 25)
-    s.setdefault("orientation", "flat-up")
+    s["orientation"] = OLD_ORIENTATION.get(s.get("orientation"), s.get("orientation"))
+    if s["orientation"] not in ORIENTATION:
+        s["orientation"] = "-Z"
     s.setdefault("marginMm", 50)
     s.setdefault("marginAboveMm", 50)
     s.setdefault("radiation", True)
@@ -99,10 +112,27 @@ def connect():
         return Desktop(version=VERSION, new_desktop=True, port=PORT, non_graphical=False)
 
 
+def _quiet_history():
+    """PyAEDT 1.9 reads an object's history (ic.mesh does, for the air region and each mesh region) and copies its
+    "Command" onto a child node with SetPropValue. AEDT refuses, Command is read only, and logs "Script macro error:
+    Command is read only" each time: every 15 s from the page's read. The node's properties are read fresh from AEDT
+    on every access, so the copy never did anything: skip only that write."""
+    from ansys.aedt.core.modeler.cad.elements_3d import BinaryTreeNode
+    if getattr(BinaryTreeNode.update_property, "_quiet", False):
+        return
+    orig = BinaryTreeNode.update_property
+
+    def update_property(self, prop_name, prop_value):
+        return False if prop_name == "Command" else orig(self, prop_name, prop_value)
+    update_property._quiet = True
+    BinaryTreeNode.update_property = update_property
+
+
 def main(folder: Path, mode: str = "build") -> int:
     from ansys.aedt.core import Hfss3dLayout, Icepak
     from ansys.aedt.core.generic.settings import settings
     settings.enable_screen_logs = False
+    _quiet_history()
 
     study = load_study(folder)
     if mode == "build" or not (folder / "board.json").exists():
@@ -144,6 +174,8 @@ def main(folder: Path, mode: str = "build") -> int:
                 raise RuntimeError("No built project yet. Press Build first.")
             ic = step("open project", lambda: Icepak(project=str(project_file), design=DESIGN, version=VERSION,
                                                     new_desktop=False, port=PORT), fatal=True)
+        if mode == "open":
+            check("ok", f"Opened {project_file.name} in AEDT")
         if mode == "update":
             step("materials", lambda: _thermal_defaults(ic, study))
         if mode in ("build", "update"):
@@ -151,12 +183,20 @@ def main(folder: Path, mode: str = "build") -> int:
             step("save project", lambda: ic.save_project())
             check("ok", f"Saved {project_file.name}")
         if mode == "mesh":
-            _mesh_now(ic)
+            meshed = _mesh_now(ic)
         if mode == "solve":
             step("solve", lambda: _solve(ic, folder, board, powered, study["ambientC"]), fatal=True)
-        state = None if mode == "solve" else step("read back", lambda: read_state(ic, board))   # right after a solve AEDT cannot be read
+        if mode == "meshcheck":
+            step("mesh check", lambda: _mesh_check(ic, folder, board, parts, powered, study), fatal=True)
+        state = None if mode in ("solve", "meshcheck") else step("read back", lambda: read_state(ic, board))   # right after a solve AEDT cannot be read
         if state:
             (folder / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
+        if mode == "mesh" and meshed and state:
+            _meshed(folder, state["meshSig"], "generated")
+        elif mode in ("solve", "meshcheck") and not any(c["level"] == "error" for c in checks):
+            old = json.loads((folder / "state.json").read_text(encoding="utf-8")) if (folder / "state.json").exists() else {}
+            if old.get("meshSig"):      # AEDT cannot be read right after a solve: the last read, as Solve needs Apply first
+                _meshed(folder, old["meshSig"], "solved")
     except BaseException as ex:  # noqa: BLE001
         import traceback
         traceback.print_exc()
@@ -204,7 +244,7 @@ def _thermal_defaults(app, study):
     typed = {k.lower(): v for k, v in study.get("materials", {}).items()}
     fixed, own = {}, set()
     for name, m in app.materials.material_keys.items():
-        if name == PKG:     # the blocks' own material, set by _blocks
+        if name == PKG or name.startswith(RJC_MAT):     # the blocks' own materials, set by _blocks
             continue
         try:
             t = typed.get(name.lower(), {})
@@ -247,6 +287,10 @@ def _build(Hfss3dLayout, Icepak, desktop, folder, board, study):
                        f"imported twice, so the solver will refuse to start. Icepak's PCB import cannot take this board. "
                        f"Export one zone only, or model it in AEDT.")
     ic.save_project(str(folder / f"{board['name']}_icepak.aedt"))
+    (folder / "meshed.json").unlink(missing_ok=True)
+    (folder / "built.json").write_text(json.dumps({"schema": "pcb-thermal-ansys/built", "at": time.strftime("%Y-%m-%d %H:%M"),
+                                                   "edb": board["edb"], "pcbResolution": int(study["pcbResolution"])}, indent=1),
+                                       encoding="utf-8")
     return ic
 
 
@@ -305,10 +349,40 @@ def _kind(p):
     rjc, rjb = p.get("rjcCW") or 0, p.get("rjbCW") or 0
     if rjc > 0 and rjb > 0:
         return "Network"
-    if rjc > 0 or rjb > 0:
-        check("warn", f"{p['refDes']}: only one of Rjc and Rjb is given. A junction model needs both, so a plain block "
-                      f"is used and no junction temperature is computed.")
+    if rjb > 0:
+        check("warn", f"{p['refDes']}: Rjb without Rjc. A junction model needs both, so a plain block of the package "
+                      f"material is used and Rjb is not in AEDT.")
     return "Solid Block"
+
+
+def _rjc_k(rjc, l, w, h):
+    """k (W/m.K) of a block l x w x h mm whose resistance from the top face to the bottom face is rjc C/W"""
+    return h * 1000 / (rjc * l * w)
+
+
+def _block_rjc(ic, obj, h):
+    """Rjc of a block of its own rjc_ material, back from AEDT: H / (k x footprint), the footprint as volume / H
+    (a turned block's bounding box is not its footprint)"""
+    try:
+        k = float(ic.materials.material_keys[obj.material_name.lower()].thermal_conductivity.value)
+        return round(h * h * 1000 / (k * obj.volume), 6) if k > 0 and obj.volume > 0 else None
+    except BaseException:  # noqa: BLE001  material or volume not readable
+        return None
+
+
+def _rjc_material(ic, ref, k):
+    """the block's own material rjc_<ref> with conductivity k; returns its name, or None when it cannot be made"""
+    name = f"{RJC_MAT}{ref}".lower()
+    m = ic.materials.material_keys.get(name)
+    if not m:
+        m = ic.materials.add_material(name)
+        if not m:
+            return None
+        m.mass_density = 2000
+        m.specific_heat = 1000
+    if abs(float(m.thermal_conductivity.value) - k) > 1e-9 * max(1, k):     # a changed material voids the solution
+        m.thermal_conductivity = k
+    return name
 
 
 def _same(a, b):
@@ -417,6 +491,9 @@ def _blocks(ic, board, by_ref, parts, study):
         xs, ys = zip(*_corners([-l / 2, -w / 2, l / 2, w / 2], t))
         box = [cx + min(xs), cy + min(ys), z, cx + max(xs), cy + max(ys), z + h]     # what AEDT reports as its bounding box
         kind = _kind(p) if (p.get("powerW") or 0) > 0 else "Passive"
+        # Rjc without Rjb: the block conducts Rjc from top to bottom, as the hand check's "Block, Rjc"
+        own = _rjc_material(ic, ref, _rjc_k(p["rjcCW"], l, w, h)) if kind == "Solid Block" and (p.get("rjcCW") or 0) > 0 else None
+        mat = own or (PKG if m else "Ceramic_material")
         cur = tree.get(f"P_{ref}")
         ok = ref in objects and (cur is None if kind == "Passive" else cur is not None and cur["type"] == kind)
         if ok:
@@ -427,6 +504,8 @@ def _blocks(ic, board, by_ref, parts, study):
             made += 1
             passive += 1
             continue
+        if ok and kind != "Network" and ic.modeler[ref].material_name.lower() != mat.lower():
+            ic.modeler[ref].material_name = mat
         if ok:
             if not _same(cur["power"], p["powerW"]):
                 prop = "Total Power" if kind == "Solid Block" else "Internal: Properties/Power"
@@ -436,7 +515,7 @@ def _blocks(ic, board, by_ref, parts, study):
             continue
         if cur is not None or ref in objects:
             _delete_block(ic, ref)
-        obj = ic.modeler.create_box([-l / 2, -w / 2, z], [l, w, h], name=ref, material=PKG if m else "Ceramic_material")
+        obj = ic.modeler.create_box([-l / 2, -w / 2, z], [l, w, h], name=ref, material=mat)
         if not obj:
             check("error", f"{ref}: block not created")
             continue
@@ -575,6 +654,17 @@ def _mesh_now(ic):
     t = time.time()
     ok = ic.mesh.generate_mesh(SETUP)
     check("ok" if ok else "error", f"Mesh generated in {time.time() - t:.0f} s" if ok else "Mesh generation failed")
+    return ok
+
+
+def _meshed(folder, sig, how):
+    (folder / "meshed.json").write_text(json.dumps({"schema": "pcb-thermal-ansys/meshed", "sig": sig, "how": how,
+                                                    "at": time.strftime("%H:%M")}, indent=1), encoding="utf-8")
+
+
+def _mesh_sig(geo, mesh, pad):
+    """what the mesh depends on that the page can change: block boxes, air box, mesh settings"""
+    return hashlib.sha1(json.dumps([geo, mesh, pad], sort_keys=True).encode()).hexdigest()[:16]
 
 
 # ---------------------------------------------------------------- solve
@@ -698,7 +788,8 @@ def _convergence(ic):
     return {"ok": bool(known) and all(i["ok"] for i in known), "read": len(known), "items": items}
 
 
-def _solve(ic, folder, board, powered, ambient):
+def _solve(ic, folder, board, powered, ambient, write=True):
+    """solve and read the results; written to results.json unless `write` is False. Returns them, None if it failed"""
     step("junction blocks hollow", lambda: _hollow(ic))
     powered = _sources(ic, powered)     # from here on the heat sources are the ones in AEDT, with AEDT's power
     step("temperature monitors", lambda: _monitors(ic, powered, board))
@@ -707,7 +798,7 @@ def _solve(ic, folder, board, powered, ambient):
     secs = time.time() - t
     if not ok:
         check("error", "Solve failed or was stopped. Open AEDT and read the message window.")
-        return
+        return None
     check("ok", f"Solved in {secs:.0f} s")
     conv = _convergence(ic)
     if not conv["read"]:
@@ -742,12 +833,61 @@ def _solve(ic, folder, board, powered, ambient):
     others = [v for v in (_fmax(ic, o) for o in rest) if v is not None]
     seen = [v for v in [board] + others + [r["tempC"] for r in rows] if v is not None]
     anywhere = max(seen) if seen else None
-    (folder / "results.json").write_text(json.dumps({
-        "schema": "pcb-thermal-ansys/results", "solvedAt": time.strftime("%H:%M:%S"), "seconds": round(secs),
-        "ambientC": ambient, "converged": conv, "balance": bal, "boardC": board, "boardMeanC": board_mean, "hottestC": anywhere,
-        "parts": rows}, indent=1), encoding="utf-8")
+    res = {"schema": "pcb-thermal-ansys/results", "solvedAt": time.strftime("%H:%M:%S"), "seconds": round(secs),
+           "ambientC": ambient, "converged": conv, "balance": bal, "boardC": board, "boardMeanC": board_mean, "hottestC": anywhere,
+           "parts": rows}
+    if write:
+        (folder / "results.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
     step("save project", lambda: ic.save_project())
-    check("ok", f"Board hottest {board} C, board average {board_mean} C, hottest measured {anywhere} C; results.json written")
+    check("ok", f"Board hottest {board} C, board average {board_mean} C, hottest measured {anywhere} C"
+                + ("; results.json written" if write else ""))
+    return res
+
+
+# ---------------------------------------------------------------- mesh check
+
+FINER = 2 / 3     # a finer mesh: every largest element times this, or one automatic level up
+
+
+def _mesh_text(m):
+    return f"largest element {m['maxMm']} mm" if m.get("mode") == "manual" else f"automatic level {int(m.get('level', 3))}"
+
+
+def _finer(study, parts):
+    """the study and parts with a finer global mesh and finer local meshes; None at automatic level 5, the finest"""
+    m = dict(study["mesh"])
+    if m.get("mode") == "manual":
+        m["maxMm"] = round(m["maxMm"] * FINER, 3)
+    elif int(m.get("level", 3)) >= 5:
+        return None, None
+    else:
+        m["level"] = int(m.get("level", 3)) + 1
+    fine_parts = [{**p, "meshMm": round(p["meshMm"] * FINER, 3)} if p.get("meshMm") else p for p in parts]
+    return {**study, "mesh": m}, fine_parts
+
+
+def _mesh_check(ic, folder, board, parts, powered, study):
+    """the finer mesh first, the page's mesh last: AEDT and results.json end with the page's mesh and its solution"""
+    fine, fine_parts = _finer(study, parts)
+    if not fine:
+        check("error", "The mesh is already at automatic level 5, the finest. Switch to Manual to check a finer one.")
+        return
+    local = lambda ps: {p["refDes"]: p["meshMm"] for p in ps if p.get("meshMm")}  # noqa: E731
+    check("ok", f"Mesh check 1 of 2: the finer mesh, {_mesh_text(fine['mesh'])}")
+    _mesh(ic, fine_parts, fine)
+    b = _solve(ic, folder, board, powered, study["ambientC"], write=False)
+    check("ok", f"Mesh check 2 of 2: your mesh, {_mesh_text(study['mesh'])}")
+    _mesh(ic, parts, study)
+    a = _solve(ic, folder, board, powered, study["ambientC"]) if b else None
+    if not (a and b):
+        check("error", "Mesh check stopped: a solve failed")
+        return
+    (folder / "meshcheck.json").write_text(json.dumps({
+        "schema": "pcb-thermal-ansys/meshcheck", "at": time.strftime("%Y-%m-%d %H:%M"), "ambientC": study["ambientC"],
+        "yours": {"mesh": study["mesh"], "local": local(parts), "text": _mesh_text(study["mesh"]), "result": a},
+        "finer": {"mesh": fine["mesh"], "local": local(fine_parts), "text": _mesh_text(fine["mesh"]), "result": b},
+    }, indent=1), encoding="utf-8")
+    check("ok", "Mesh check done: meshcheck.json written")
 
 
 def _board_mean(ic, layers):
@@ -797,16 +937,22 @@ def read_state(ic, board):
     names = set(ic.modeler.object_names)
     setup = next((x for x in ic.setups if x.name == SETUP), None)
     _, tree = thermal(ic)
-    blocks, other = [], []
+    blocks, other, geo = [], [], []
     for n, d in tree.items():
         if n.startswith("P_") and n[2:] in names and d["type"] in ("Solid Block", "Network"):
-            bb = ic.modeler[n[2:]].bounding_box
+            o = ic.modeler[n[2:]]
+            bb = o.bounding_box
+            geo.append([n[2:], [round(v, 3) for v in bb]])
+            rjc = d["rjc"]
+            if d["type"] == "Solid Block" and o.material_name.lower().startswith(RJC_MAT):
+                rjc = _block_rjc(ic, o, bb[5] - bb[2])
             blocks.append({"refDes": n[2:], "kind": d["type"], "powerW": d["power"] or 0,
-                           "heightMm": round(bb[5] - bb[2], 4), "rjcCW": d["rjc"], "rjbCW": d["rjb"]})
+                           "heightMm": round(bb[5] - bb[2], 4), "rjcCW": rjc, "rjbCW": d["rjb"]})
         elif d["type"] != "Opening":
             other.append({"name": n, "type": d["type"], "powerW": d["power"]})
     for o in _passive(ic, tree, board):
         bb = ic.modeler[o].bounding_box
+        geo.append([o, [round(v, 3) for v in bb]])
         blocks.append({"refDes": o, "kind": "Passive", "powerW": 0, "heightMm": round(bb[5] - bb[2], 4), "rjcCW": None, "rjbCW": None})
     reg, pad = air_pad(ic, board, tree)
     keys = ic.materials.material_keys
@@ -814,6 +960,12 @@ def read_state(ic, board):
             for b in board.get("materials", []) for m in [keys.get(b["name"].lower())] if m]
     gm = ic.mesh.global_mesh_region
     local = [{"refDes": r, "maxMm": v} for r, v in local_mesh(ic).items()]
+    mesh = {"manual": bool(gm.manual_settings),
+            "level": _get(gm.settings, "MeshRegionResolution"),
+            "maxMm": num(_get(gm.settings, "MaxElementSizeX")),
+            "gapElems": num(_get(gm.settings, "MinElementsInGap")),
+            "edgeElems": num(_get(gm.settings, "MinElementsOnEdge")),
+            "local": local}
     return {
         "schema": "pcb-thermal-ansys/state",
         "open": True,
@@ -830,12 +982,8 @@ def read_state(ic, board):
         "blocks": blocks,
         "materials": mats,
         "other": other,
-        "mesh": {"manual": bool(gm.manual_settings),
-                 "level": _get(gm.settings, "MeshRegionResolution"),
-                 "maxMm": num(_get(gm.settings, "MaxElementSizeX")),
-                 "gapElems": num(_get(gm.settings, "MinElementsInGap")),
-                 "edgeElems": num(_get(gm.settings, "MinElementsOnEdge")),
-                 "local": local},
+        "mesh": mesh,
+        "meshSig": _mesh_sig(sorted(geo), {**mesh, "level": str(mesh["level"])}, pad),
         "objects": len(names),
         "openings": [n for n, d in tree.items() if d["type"] == "Opening"],
     }

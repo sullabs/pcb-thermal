@@ -62,16 +62,19 @@ time made one of them hang. The page's own jobs never overlap, and a hung job is
 | `serve.py` | Local server for the page (stdlib only). Reads/writes the folder files, starts the scripts one at a time. Folders opened before: `%APPDATA%\pcb-thermal\recent.json` |
 | `read_board.py` | EDB -> `board.json` (outline, stackup, parts with position, size, height). PyEDB only, about 7 s. `--step` reads only the STEP again into `board.json` (the page's **Read heights from the STEP**) |
 | `step_parts.py` | Board STEP -> height and body size per part (`stepHMm`, `stepXMm`, `stepYMm`, `stepAngleDeg` in `board.json`; the body measured along the part's own axes: the pads' `angleDeg`, or the body's own angle when it sits clearly turned from that. `setup_study.py` builds the block turned by that angle). Standard library only, under a second. Works on whole components, never on one sub-part: the products on the first level under the STEP's top assembly, each with everything under it, matched by name (U1, C7, VR8; SolidWorks' `U1-1` occurrence names too) or else as the component centred on the pads. Height is from the board face the part sits on (standoff included) |
-| `setup_study.py` | `build`, `update`, `read`, `mesh` modes. Writes `state.json` (what AEDT holds) and `checks.json` |
+| `setup_study.py` | `build`, `update`, `read`, `mesh`, `solve`, `meshcheck` modes. Writes `state.json` (what AEDT holds) and `checks.json`; `solve` writes `results.json`; `meshcheck` solves with a finer mesh (one automatic level up, or every largest element and local mesh x 2/3), then with the page's mesh again, and writes both to `meshcheck.json` |
 | `run.ps1` | Runs a script with Ansys' Python and `ansys\.venv` packages (the venv launcher itself is broken) |
 | `start.bat` | Starts AEDT (gRPC port 50051) if it is not running, then `serve.py`. If the page already runs, it just opens it |
 | `make_offline.ps1` | Writes `dist\pcb-thermal` (+ zip) to install on a PC without internet |
 
-Folder contents: `<board>.aedb` (you), `board.json`, `study.json` (page), `state.json`, `checks.json`, `<board>_icepak.aedt`.
-`study.json`: `edb`, `ambientC`, `orientation` (flat-up, flat-down, vertical-long, vertical-short), `marginMm`,
+Folder contents: `<board>.aedb` (you), `board.json`, `study.json` (page), `state.json`, `checks.json`, `<board>_icepak.aedt`,
+`results.json` (Solve), `meshcheck.json` (Check the mesh), `built.json` (when and with which PCB mapping Build ran),
+`meshed.json` (the mesh signature of the last Generate mesh or solve).
+`study.json`: `edb`, `ambientC`, `orientation` (the direction gravity points in the board's axes: -Z flat parts up, +Z flat parts down, ±X or ±Y standing on that edge; the page sets it by turning the board about its X or Y axis in 90° steps; the old names flat-up, flat-down, vertical-long, vertical-short still load), `marginMm`,
 `marginAboveMm`, `radiation`, `pcbResolution`, `mesh {mode auto|manual, level, maxMm, gapElems, edgeElems}`,
-`parts[{refDes, powerW?, heightMm?, bodyXMm?, bodyYMm?, meshMm?, rjcCW?, rjbCW?, rjaCW?, tjMaxC?}]`,
-`materials {name: {kWmK?, rhoKgM3?, cpJkgK?}}`, `handCheck {hTop?, hBottom?, hParts?, emissivity?, surfaceRiseK?, coverage?, kxy?, kParts?, tightC?, matched? {hPcb, run, powerW, ambientC, orientation, boardMeanC}}`
+`parts[{refDes, powerW?, heightMm?, bodyXMm?, bodyYMm?, meshMm?, rjcCW?, rjbCW?, rjaCW?, tjMaxC?, cls?, vinV?, iinA?, voutV?, ioutA?, efficiency?, rOhm?, pdMeasuredW?}]`
+(`powerW` is Pd, the heat given off; `cls` to `pdMeasuredW` are page only and give it as the SolidWorks register),
+`materials {name: {kWmK?, rhoKgM3?, cpJkgK?}}`, `handCheck {hTop?, hBottom?, hParts?, emissivity?, surfaceRiseK?, coverage?, kxy?, kParts?, critMargin?, critDensity?, critShare?, watchMargin?, watchDensity?, watchShare?, matched? {hPcb, run, powerW, ambientC, orientation, boardMeanC}}`
 (page only; empty means the SolidWorks template defaults 8, 5, 8 W/m²K, 0.9, 20 K, 0.6, from the stackup, 0.5, 15 K).
 
 Timings on the sample: build about 1.5 min, apply with a change 40 to 80 s, generate mesh 15 s.
@@ -103,15 +106,32 @@ Timings on the sample: build about 1.5 min, apply with a change 40 to 80 s, gene
 - [x] Real Altium exports: Bluetooth Sentinel and Spartan-IIE (AD examples), built and solved
 - [x] Missing heights, body sizes and material values filled from the page (Altium exports none of them)
 - [x] Rjc/Rjb junction model, Rja/Tj max hand check, AEDT as source of truth (auto read), missing-data fallbacks
+- [x] Rjc without Rjb: a solid block of its own material `rjc_<refdes>`, k = H / (Rjc x L x W), so it conducts Rjc from
+  top to bottom as the hand check's "Block, Rjc"; read back from AEDT as H / (k x volume / H). Rjb without Rjc stays on
+  the page only (a junction model needs both); the hand check still uses it as the SolidWorks route does
 - [x] Solve button and results card (temperatures per part, board hot spot, convergence, energy balance)
 - [ ] Radiation model name for S2S (the page uses discrete ordinates); TIM and spreader (with a cooling solution), per-surface emissivity
 - [ ] Mesh cell count in the page (Generate mesh reports time only)
+- [x] Minimal page: Settings holds the hand check values, flag limits, air box (air around, extra above), cells in gaps
+  and on edges, PCB mapping and hover help; the Settings button turns yellow when one of them is not yet in AEDT. The
+  explanations are hover help on the step and table headings, not text on the page
+- [x] Questions before a job: Build on a built project (Build again and overwrite, Open the built one, Cancel); Apply
+  lists what cannot reach AEDT (Rjb without Rjc, Rjc/Rjb without Pd, parts with nothing to make, PCB mapping); Generate mesh
+  with changes not applied, or when the mesh of these settings is already there. **Open in AEDT** opens the built project
+  (mode `open`, starts AEDT if needed, changes nothing). Not yet run in AEDT
+- [x] Check the mesh button (Mesh step): fine when the finer mesh moves no temperature (parts, board hottest, board average)
+  by more than 1 K or 5 % of its rise, fair up to 3 K, else go finer. Warns when a run is not converged or the energy
+  balance is off by more than 2 %, and when the mesh or power on the page changed since the check. Not yet run in AEDT
 - [x] Hand check from the SolidWorks route (bare board network of `addin-mvp:webapp/src/calc/network.js`, Lee spreading,
   network diagram, formula per value) on the page; same numbers as the SolidWorks calc for the same inputs. Its inputs
   (h, emissivity, copper coverage, board k, part k) are page-only, saved in `study.json` under `handCheck`
 - [x] Hand check scope: one board node gives a fair board **average**, never hot spots (Spartan-IIE: hand 30.4 C average
-  against Icepak 33.9 C average and 49.4 C hottest). A part with under 10 % of the power and under a quarter of the
-  biggest part's gets no Tj: it is heated by its neighbours, which only Icepak shows
+  against Icepak 33.9 C average and 49.4 C hottest). Every part with power gets a hand Tj, small ones too. A small part
+  near hot neighbours can be warmer in Icepak than by hand, because one board node does not see its neighbours
+- [x] Pd from the circuit as the SolidWorks register: class, Vin, Iin, Vout, Iout, efficiency, R, Pd measured per part
+  (one load per part). The Pd it gives fills Power and goes to AEDT and the hand check; without it Pd is typed
+- [x] Flag limits as the SolidWorks register: CRITICAL / Watch / Minor from the hand margin, power density over the body
+  footprint and share of the total power. Shown in the hand check and on the Parts table; the CRITICAL margin sets Tight
 - [x] "Match to the last Icepak run": fits the h of both PCB faces so the hand board average equals Icepak's. Allowed
   only from a converged run with a closed energy balance and the same power and ambient as the page. While matched the
   board average no longer checks that run (compare with textbook h first); a warning shows when power moves over 30 %,

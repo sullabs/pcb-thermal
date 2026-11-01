@@ -40,7 +40,7 @@ FOLDER = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 and sys.argv[1] else P
 ROOT = FOLDER
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8765
 WHAT = {"build": "Building the project", "update": "Applying changes", "mesh": "Generating the mesh",
-        "read": "Reading AEDT", "solve": "Solving"}
+        "read": "Reading AEDT", "solve": "Solving", "meshcheck": "Checking the mesh (two solves)", "open": "Opening the project"}
 job = {"running": False, "what": "", "log": "", "silent": False}
 lock = threading.Lock()
 
@@ -48,6 +48,13 @@ lock = threading.Lock()
 def jread(name):
     p = FOLDER / name
     return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+
+
+def project_file():
+    """name of the built project in the folder, None if there is none: Build replaces it"""
+    b = jread("board.json")
+    name = b and f"{b['name']}_icepak.aedt"
+    return name if name and (FOLDER / name).exists() else None
 
 
 def boards():
@@ -84,7 +91,7 @@ def run_script(script, what, *args, silent=False):
         try:
             proc = subprocess.Popen([sys.executable, "-u", str(HERE / script), str(FOLDER), *args], stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
-            limit = 60 if silent else 3600 if args[:1] == ("solve",) else 900
+            limit = 60 if silent else 3600 if args[:1] == ("solve",) else 7200 if args[:1] == ("meshcheck",) else 900
             timer = threading.Timer(limit, lambda: (killed.set(), proc.kill()))    # a hung gRPC call must not block the page
             timer.start()
             for line in proc.stdout:
@@ -123,7 +130,7 @@ class H(BaseHTTPRequestHandler):
             self._send(200, (HERE / "page.html").read_bytes(), "text/html; charset=utf-8")
         elif self.path == "/api/state":
             self._send(200, {"folder": str(FOLDER), "boards": boards(), "board": jread("board.json"), "study": jread("study.json"),
-                             "checks": jread("checks.json"), "results": jread("results.json"), "state": jread("state.json"), "job": job})
+                             "checks": jread("checks.json"), "results": jread("results.json"), "meshcheck": jread("meshcheck.json"), "built": jread("built.json"), "meshed": jread("meshed.json"), "projectFile": project_file(), "state": jread("state.json"), "job": job})
         else:
             self._send(404, {"error": "not found"})
 
