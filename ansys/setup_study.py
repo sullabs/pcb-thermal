@@ -802,9 +802,11 @@ def _convergence(ic):
         try:
             x, y = _history(ic, "Residual." + q, "Residual")
             val = y[-1]
-            used = max(used or 0, int(x[-1]))
+            if len(y) > 1:      # one point is the final value only: no iteration count, no plot
+                used = max(used or 0, int(x[-1]))
             lim = num(setup.props.get(f"Convergence Criteria - {crit}")) if setup else None
-            items.append({"name": q, "value": val, "limit": lim, "ok": lim is None or val <= lim, "history": _thin(x, y)})
+            items.append({"name": q, "value": val, "limit": lim, "ok": lim is None or val <= lim,
+                          **({"history": _thin(x, y)} if len(y) > 1 else {})})
         except BaseException:  # noqa: BLE001
             items.append({"name": q, "value": None, "limit": None, "ok": None})
     known = [i for i in items if i["ok"] is not None]
@@ -814,14 +816,32 @@ def _convergence(ic):
             "hitMax": bool(used and most and used >= most)}
 
 
+HISTORY_NOTE = []    # why a history per iteration could not be read, said once in the checks
+
+
 def _history(ic, expr, category):
-    """a quantity per iteration: (iterations, values)"""
-    sd = ic.post.get_solution_data(expressions=[expr], setup_sweep_name=f"{SETUP} : SteadyState", report_category=category)
-    x, y = sd.get_expression_data(sd.expressions[0])[:2]
-    y = [float(v) for v in y]
-    x = [float(v) for v in x]
-    if len(set(x)) < len(x):    # the sweep AEDT returns is not the iteration (all 0 on 2026-11-02): count the points
+    """a quantity per iteration: (iterations, values). The default call gave only the final value (one point at 0)
+    on 2026-11-02, so ask for the Iteration sweep first. One point back means no history: callers check len > 1"""
+    sweep = f"{SETUP} : SteadyState"
+    x = y = []
+    for kw in ({"primary_sweep_variable": "Iteration", "variations": {"Iteration": ["All"]}}, {}):
+        try:
+            sd = ic.post.get_solution_data(expressions=[expr], setup_sweep_name=sweep, report_category=category, **kw)
+            x, y = [[float(v) for v in a] for a in sd.get_expression_data(sd.expressions[0])[:2]]
+        except BaseException:  # noqa: BLE001  try the next way
+            continue
+        if len(y) > 1:
+            break
+    if not y:
+        raise RuntimeError(f"{expr}: no data")
+    if len(y) > 1 and len(set(x)) < len(x):    # a sweep that is not the iteration: count the points
         x = [float(i) for i in range(1, len(y) + 1)]
+    if len(y) < 2 and not HISTORY_NOTE:
+        try:    # name the sweeps AEDT has, so the next fix can ask for the right one
+            r = ic.oreportsetup.GetSolutionDataPerVariation(category, sweep, [], [], expr)[0]
+            HISTORY_NOTE.append(", ".join(f"{n} ({len(list(r.GetSweepValues(n)))} values)" for n in r.GetSweepNames()) or "none")
+        except BaseException as ex:  # noqa: BLE001
+            HISTORY_NOTE.append(f"not read: {type(ex).__name__}")
     return x, y
 
 
@@ -844,7 +864,10 @@ def _monitor_health(ic, powered):
     for p in powered:
         try:
             x, y = _history(ic, f"T_{p['refDes']}.Temperature", "Monitor")
-            tail = y[int(len(y) * 0.9)] if len(y) > 1 else y[-1]
+            if len(y) < 2:      # the final value only: whether it settled cannot be told
+                out.append({"refDes": p["refDes"], "driftK": None, "ok": None})
+                continue
+            tail = y[int(len(y) * 0.9)]
             drift = round(abs(y[-1] - tail), 3)
             out.append({"refDes": p["refDes"], "driftK": drift, "ok": drift <= DRIFT_K, "history": _thin(x, y)})
         except BaseException:  # noqa: BLE001  one missing monitor must not stop the others
@@ -919,7 +942,8 @@ def _solve(ic, folder, board, powered, study, parts, write=True, label="Solve"):
         check("warn", "Convergence could not be read. The result files may be stale (AEDT was killed or crashed earlier). "
                       "Press Solve again; if it stays, check the residuals in AEDT before trusting the numbers.")
     elif conv["ok"]:
-        check("ok", f"Converged: all residuals are below the setup limits, after {conv['iterations']} of {conv['maxIterations']} iterations")
+        check("ok", "Converged: all residuals are below the setup limits"
+                    + (f", after {conv['iterations']} of {conv['maxIterations']} iterations" if conv["iterations"] else ""))
     else:
         bad = ", ".join(i["name"] for i in conv["items"] if i["ok"] is False)
         used = f"; it used all {conv['iterations']} iterations: raise Iterations max" if conv["hitMax"] else ""
@@ -933,6 +957,9 @@ def _solve(ic, folder, board, powered, study, parts, write=True, label="Solve"):
         most = max(m["driftK"] for m in mon if m["ok"])
         check("ok", f"Temperatures settled: every monitor moved {most} K or less over the last 10 % of the iterations "
                     f"(limit {DRIFT_K} K)")
+    if HISTORY_NOTE:
+        check("warn", f"History per iteration not read: AEDT gave only the final values, so the iterations used and "
+                      f"whether the temperatures settled are unknown. Sweeps AEDT has: {HISTORY_NOTE[0]}")
     prof = step("solver profile", lambda: _profile(ic, t))
     if prof:
         check("ok" if (prof["status"] or "").startswith("Normal") else "warn",
