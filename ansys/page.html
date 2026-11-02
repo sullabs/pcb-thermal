@@ -71,6 +71,16 @@
   input.idle { opacity:.45; }
   input[readonly] { background:var(--soft); }
   td.warn { color:var(--warn); }
+  td.chg { font-weight:700; color:var(--act); }
+  .plots { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:14px; margin:12px 0; }
+  .plots figure { margin:0; } .plots figcaption { font-size:12.5px; color:var(--mut); margin-bottom:4px; }
+  svg.plot { width:100%; height:auto; display:block; background:var(--soft); border-radius:6px; }
+  svg.plot .pg { stroke:var(--line); stroke-width:1; } svg.plot .pa { stroke:var(--mut); stroke-width:1; }
+  svg.plot .pt { fill:var(--mut); font-size:11px; font-family:var(--mono); }
+  .plots .keys { display:flex; flex-wrap:wrap; gap:4px 12px; font-size:12px; margin-top:4px; }
+  .plots .keys i { display:inline-block; width:12px; height:3px; margin-right:5px; vertical-align:middle; border-radius:2px; }
+  #runs td input.note { width:160px; text-align:left; padding:4px 6px; min-height:32px; }
+  #runs td button { min-height:32px; padding:2px 8px; }
   label.dirty { border-radius:5px; padding:2px 6px; }
   button { font:inherit; font-size:14.5px; border:1px solid var(--line); background:var(--soft); color:var(--ink); border-radius:5px; padding:7px 14px; cursor:pointer; min-height:38px; }
   button:hover:not(:disabled) { border-color:var(--wire); }
@@ -256,6 +266,7 @@
       <li><a href="#s-hand"><span>Hand check<small id="rHand"></small></span><i class="dot" id="dHand"></i></a></li>
       <li><a href="#s-aedt"><span>In AEDT<small id="rAedt"></small></span><i class="dot" id="dAedt"></i></a></li>
       <li><a href="#s-result"><span>Result<small id="rRes"></small></span><i class="dot" id="dRes"></i></a></li>
+      <li><a href="#s-runs"><span>Runs<small id="rRuns"></small></span><i class="dot ok"></i></a></li>
       <li><a href="#s-run"><span>Last run<small id="rRun"></small></span><i class="dot" id="dRun"></i></a></li>
     </ol>
     <div class="pick"><label>Board folder<select id="folderSel"></select></label><button id="browseBtn" title="Any folder on this PC with the .edb or .aedb export">Open folder&hellip;</button></div>
@@ -340,6 +351,11 @@
           <input type="number" id="maxMm" data-k="mesh.maxMm" step="0.5" min="0.05"> mm</label>
       </div>
       <div class="row" style="margin-top:10px">
+        <label class="inline">Iterations max <input type="number" id="iterations" data-k="iterations" step="50" min="10"></label>
+        <label class="inline">Flow limit <input type="number" id="flowLimit" data-k="flowLimit" step="any" min="0"></label>
+        <label class="inline">Energy limit <input type="number" id="energyLimit" data-k="energyLimit" step="any" min="0"></label>
+      </div>
+      <div class="row" style="margin-top:10px">
         <button id="mcBtn" data-tip="Solves twice: first with a finer mesh (one automatic level up, or every largest element and local mesh × 2/3), then with yours. Then it compares the temperatures. AEDT ends with your mesh and its result. Takes about three times one solve. Apply your changes first. Fine when the finer mesh moves no temperature by more than 1 K or 5 % of its rise.">Check the mesh</button>
       </div>
       <div id="mcOut"></div>
@@ -373,8 +389,13 @@
       <div id="result"><span class="mut">Not solved yet. Press Solve.</span></div>
     </section>
 
+    <section class="step" id="s-runs">
+      <h2 data-tip="Every Solve and every mesh check solve is kept in the runs folder next to the project, with the settings it ran with. Newest first. A bold setting changed from the run below it. AEDT itself keeps only the last solution."><span class="n">8</span> Runs <span class="mut" id="runsN"></span></h2>
+      <div id="runs"><span class="mut">No run kept yet. Each Solve adds one.</span></div>
+    </section>
+
     <section class="step" id="s-run">
-      <h2><span class="n">8</span> Last run</h2>
+      <h2><span class="n">9</span> Last run</h2>
       <div id="checks"><span class="mut">Not run yet.</span></div>
       <pre id="log" hidden></pre>
     </section>
@@ -424,7 +445,7 @@ let srv = {};       // the last /api/state: projectFile, built (what Build used)
 let pendingN = 0;   // changes on the page not yet in AEDT    // ref -> loadPower() of the part, from the last readRows()
 const MAT_F = ["kWmK", "rhoKgM3", "cpJkgK"];                            // board materials, sent to AEDT
 const STANDIN = { copper: [400, 8933, 385], solder: [48, 8000, 167], "FR-4": [0.3, 1900, 1100] };   // as setup_study.py
-const SCALARS = ["ambientC", "orientation", "marginMm", "marginAboveMm", "radiation", "mesh.mode", "mesh.level", "mesh.maxMm", "mesh.gapElems", "mesh.edgeElems"];
+const SCALARS = ["ambientC", "orientation", "marginMm", "marginAboveMm", "radiation", "mesh.mode", "mesh.level", "mesh.maxMm", "mesh.gapElems", "mesh.edgeElems", "iterations", "flowLimit", "energyLimit"];
 let parts = {};   // ref -> {powerW, heightMm, bodyXMm, bodyYMm, meshMm, rjcCW, rjbCW, rjaCW, tjMaxC}
 let order = [];   // rows in the order they were added
 let mats = {};    // material name -> {kWmK, rhoKgM3, cpJkgK}
@@ -484,7 +505,9 @@ function drawPos() {
     <path class="air" d="M18 52 V18 M12 26 L18 16 L24 26" /><text class="at" x="26" y="14">warm air</text>`;
 }
 
-const same = (a, b) => (a == null || a === "") && (b == null || b === "") || (typeof a === "number" && typeof b === "number" ? Math.abs(a - b) < 1e-6 : a === b);
+// numbers: 1e-6 apart is the same; below 1e-3 (the solver limits, 1e-7 against 1e-8) the 1e-6 is relative
+const tol = (a, b) => { const m = Math.max(Math.abs(a), Math.abs(b)); return m < 1e-3 ? 1e-6 * m : 1e-6; };
+const same = (a, b) => (a == null || a === "") && (b == null || b === "") || (typeof a === "number" && typeof b === "number" ? Math.abs(a - b) <= tol(a, b) : a === b);
 
 /* ---- what AEDT says, in the shape of the form ---- */
 function derive(s) {
@@ -495,7 +518,11 @@ function derive(s) {
     const side = Math.min(...s.padMm);
     d.marginMm = side; d.marginAboveMm = Math.max(0, +(s.padMm[UP[d.orientation]] - side).toFixed(1));
   }
-  if (s.setup) d.radiation = s.setup.radiation !== "Off";
+  if (s.setup) {
+    d.radiation = s.setup.radiation !== "Off";
+    const n = v => isNum(parseFloat(v)) ? parseFloat(v) : undefined;
+    d.iterations = n(s.setup.iterations); d.flowLimit = n(s.setup.flowLimit); d.energyLimit = n(s.setup.energyLimit);
+  }
   d["mesh.mode"] = s.mesh.manual ? "manual" : "auto";
   if (s.mesh.manual) { d["mesh.maxMm"] = s.mesh.maxMm; d["mesh.gapElems"] = s.mesh.gapElems; d["mesh.edgeElems"] = s.mesh.edgeElems; }
   else if (s.mesh.level) d["mesh.level"] = s.mesh.level;
@@ -1097,7 +1124,7 @@ function renderAedt() {
       <dt>Ambient</dt><dd>${s.ambientC} &deg;C${s.radiationC != null ? `, radiation surround ${s.radiationC} &deg;C` : ""}</dd>
       <dt>Gravity</dt><dd>${esc(s.gravity)} (${UP[s.gravity] !== undefined ? posText(s.gravity) : "other"})</dd>
       <dt>Air box</dt><dd>${s.airMm ? s.airMm.join(" &times; ") + " mm" : "none"}; ${s.openings.length ? "open faces" : "no opening"}</dd>
-      <dt>Setup</dt><dd>${s.setup ? esc(s.setup.name) + ", " + esc(s.setup.flow) + ", radiation " + esc(s.setup.radiation) + ", " + s.setup.iterations + " iterations" : "none"}</dd>
+      <dt>Setup</dt><dd>${s.setup ? esc(s.setup.name) + ", " + esc(s.setup.flow) + ", radiation " + esc(s.setup.radiation) + ", " + s.setup.iterations + " iterations, limits flow " + (s.setup.flowLimit ?? "?") + ", energy " + (s.setup.energyLimit ?? "?") : "none"}</dd>
       <dt>Mesh</dt><dd>${mesh}</dd></dl>
     ${s.blocks.length ? `<div class="scroll"><table><thead><tr><th>Heat source</th><th>Kind</th><th class="n">Power</th><th class="n">Height</th><th class="n">Rjc</th><th class="n">Rjb</th><th class="n">Local mesh</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="mut">No heat sources in AEDT.</p>'}
     ${other ? `<p class="hint">Other thermal items in AEDT, not managed by this page: ${other}</p>` : ""}`;
@@ -1166,14 +1193,106 @@ function renderResult(r) {
       <td class="n">${isNum(h) ? f(h) : ""}</td></tr>`;
   }).join("");
   const c = r.converged, bad = c && c.items.filter(i => i.ok === false).map(i => i.name).join(", ");
+  const used = c?.iterations ? ` after ${c.iterations} of ${c.maxIterations ?? "?"} iterations` : "";
   const conv = !c ? "" : !c.read ? '<li class="warn">Convergence could not be read. Check the residuals in AEDT.</li>'
-    : c.ok ? '<li class="ok">Converged: residuals are below the setup limits.</li>'
-    : `<li class="error">Not converged (${esc(bad)}). Do not trust these numbers. Raise the iterations or refine the mesh.</li>`;
+    : c.ok ? `<li class="ok">Converged: residuals are below the setup limits${used}.</li>`
+    : `<li class="error">Not converged (${esc(bad)})${used}${c.hitMax ? ": it used them all, raise Iterations max" : ""}. Do not trust these numbers. Raise the iterations or refine the mesh.</li>`;
+  const mon = r.monitors || [], moving = mon.filter(m => m.ok === false);
+  const settle = !mon.length ? "" : moving.length
+    ? `<li class="error">Temperatures still moving over the last 10 % of the iterations: ${moving.map(m => `${esc(m.refDes)} ${m.driftK} K`).join(", ")}. Do not trust these numbers yet.</li>`
+    : mon.some(m => m.ok) ? `<li class="ok">Temperatures settled: every monitor moved ${Math.max(...mon.filter(m => m.ok).map(m => m.driftK))} K or less over the last 10 % of the iterations.</li>` : "";
+  const pf = r.profile;
+  const prof = !pf ? "" : `<li class="${(pf.status || "").startsWith("Normal") ? "ok" : "warn"}">Mesh ${pf.cells != null ? pf.cells.toLocaleString("en") + " cells" : "size not read"}${pf.nodes != null ? ", " + pf.nodes.toLocaleString("en") + " nodes" : ""}. Solver ${esc(pf.status || "status not read")}, ${esc(pf.memory || "?")} memory, ${pf.cores ?? "?"} cores.</li>`;
+  const plots = (c?.items || []).some(i => i.history) || mon.some(m => m.history) ? `<div class="plots">
+      ${(c?.items || []).some(i => i.history) ? `<figure><figcaption>Residuals per iteration (log scale). Dashed: the limits.</figcaption>${lineSvg(c.items.filter(i => i.history).map(i => ({ name: i.name, pts: i.history, limit: i.limit })), true)}</figure>` : ""}
+      ${mon.some(m => m.history) ? `<figure><figcaption>Heat source temperature per iteration (&deg;C). Flat at the end means settled.</figcaption>${lineSvg(mon.filter(m => m.history).map(m => ({ name: m.refDes, pts: m.history })), false)}</figure>` : ""}
+    </div>` : "";
   const b = r.balance, split = b && b.radiationW != null ? `, ${b.convectionW} W convection, ${b.radiationW} W radiation` : "";
-  const bal = !b ? "" : b.radiation ? `<li class="warn">Energy balance not checked: radiation is on, and the monitors count only convection (${b.outW} W of ${b.inW} W). Solve again to check it.</li>` : `<li class="${Math.abs(b.errorPct) <= 1 ? "ok" : "error"}">Energy balance: ${b.inW} W in, ${b.outW} W out (${split.slice(2)}${split ? ", " : ""}${b.errorPct > 0 ? "+" : ""}${b.errorPct} %).${Math.abs(b.errorPct) <= 1 ? "" : " Not balanced: do not trust these numbers."}</li>`;
-  $("result").innerHTML = `<ul class="plain checks">${conv}${bal}</ul><dl class="kv" style="margin-top:10px"><dt>Board hottest</dt><dd>${f(r.boardC)}</dd><dt>Board average</dt><dd>${f(r.boardMeanC)}</dd><dt>Hottest measured</dt><dd>${f(r.hottestC)}</dd><dt>Ambient</dt><dd>${r.ambientC} &deg;C</dd></dl>
+  const bal = !b ? "" : b.radiation ? `<li class="warn">Energy balance not checked: radiation is on, and the monitors count only convection (${b.outW} W of ${b.inW} W). Solve again to check it.</li>` : `<li class="${Math.abs(b.errorPct) <= 1 ? "ok" : "error"}">Energy balance: ${b.inW} W in, ${b.outW} W out (${split.slice(2)}${split ? ", " : ""}${b.errorPct > 0 ? "+" : ""}${b.errorPct} %).${b.refFixW ? ` Corrected by ${b.refFixW} W for the solver's 25 &deg;C air reference (AEDT reports ${b.rawOutW} W out).` : ""}${Math.abs(b.errorPct) <= 1 ? "" : " Not balanced: do not trust these numbers."}</li>`;
+  $("result").innerHTML = `<ul class="plain checks">${conv}${settle}${bal}${prof}</ul>${plots}<dl class="kv" style="margin-top:10px"><dt>Board hottest</dt><dd>${f(r.boardC)}</dd><dt>Board average</dt><dd>${f(r.boardMeanC)}</dd><dt>Hottest measured</dt><dd>${f(r.hottestC)}</dd><dt>Ambient</dt><dd>${r.ambientC} &deg;C</dd></dl>
     <div class="scroll"><table><thead><tr><th>Heat source</th><th class="n">Power</th><th class="n">Icepak</th><th class="n">Tj max</th><th class="n">Margin</th><th class="n">Hand check Tj</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
+
+/* ---- a small line plot of histories per iteration: [{name, pts: [[x, y]], limit?}] ---- */
+const PLOT_C = ["--cold", "--hot", "--ok", "--mild", "--act", "--wire", "--err", "--warn"];
+function lineSvg(series, log) {
+  const W = 520, H = 220, L = 54, R = 10, T = 10, B = 30;
+  const tf = v => log ? Math.log10(Math.max(v, 1e-30)) : v;
+  const xs = series.flatMap(s => s.pts.map(p => p[0])), ys = series.flatMap(s => [...s.pts.map(p => tf(p[1])), ...(s.limit ? [tf(s.limit)] : [])]);
+  if (!xs.length) return "";
+  const x0 = Math.min(...xs), x1 = Math.max(...xs) || 1;
+  let y0 = Math.min(...ys), y1 = Math.max(...ys);
+  if (log) { y0 = Math.floor(y0); y1 = Math.ceil(y1); } else { const pad = (y1 - y0) * 0.05 || 0.5; y0 -= pad; y1 += pad; }
+  if (y1 === y0) y1 = y0 + 1;
+  const px = x => L + (x - x0) / (x1 - x0 || 1) * (W - L - R), py = y => T + (1 - (y - y0) / (y1 - y0)) * (H - T - B);
+  const ticks = log ? Array.from({ length: y1 - y0 + 1 }, (_, i) => y0 + i).filter((_, i, a) => a.length <= 8 || i % 2 === 0)
+    : Array.from({ length: 5 }, (_, i) => y0 + (y1 - y0) * i / 4);
+  const grid = ticks.map(t => `<line x1="${L}" x2="${W - R}" y1="${py(t)}" y2="${py(t)}" class="pg"/><text x="${L - 6}" y="${py(t) + 4}" text-anchor="end" class="pt">${log ? "1e" + t : t.toFixed(1)}</text>`).join("");
+  const lines = series.map((s, i) => {
+    const col = `var(${PLOT_C[i % PLOT_C.length]})`;
+    const d = s.pts.map((p, j) => `${j ? "L" : "M"}${px(p[0]).toFixed(1)} ${py(tf(p[1])).toFixed(1)}`).join("");
+    const lim = s.limit ? `<line x1="${L}" x2="${W - R}" y1="${py(tf(s.limit))}" y2="${py(tf(s.limit))}" stroke="${col}" stroke-dasharray="4 4" stroke-width="1" opacity=".7"/>` : "";
+    return `<path d="${d}" fill="none" stroke="${col}" stroke-width="1.6"/>${lim}`;
+  }).join("");
+  const keys = series.map((s, i) => `<span><i style="background:var(${PLOT_C[i % PLOT_C.length]})"></i>${esc(s.name)}</span>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" class="plot" role="img">${grid}
+    <line x1="${L}" x2="${W - R}" y1="${H - B}" y2="${H - B}" class="pa"/><text x="${L}" y="${H - 8}" class="pt">${x0}</text>
+    <text x="${W - R}" y="${H - 8}" text-anchor="end" class="pt">${x1} iterations</text>${lines}</svg><div class="keys">${keys}</div>`;
+}
+
+/* ---- kept runs: one row per solve, to compare what a change did ---- */
+let runsSig = null;
+function renderRuns(list) {
+  list = list || [];
+  $("runsN").textContent = list.length ? `${list.length} kept` : "";
+  $("rRuns").textContent = list.length ? `${list.length} kept` : "none yet";
+  const sig = JSON.stringify(list.map(r => [r.id, r.note]));
+  if (sig === runsSig || $("runs").contains(document.activeElement)) return;     // do not redraw under a note being typed
+  runsSig = sig;
+  if (!list.length) { $("runs").innerHTML = '<span class="mut">No run kept yet. Each Solve adds one.</span>'; return; }
+  const refs = [...new Set(list.flatMap(r => (r.result?.parts || []).map(p => p.refDes)))];
+  const meshT = s => !s?.mesh ? "" : s.mesh.mode === "manual" ? `manual ${s.mesh.maxMm} mm` : `level ${s.mesh.level}`;
+  const local = s => Object.entries(s?.localMm || {}).map(([r, v]) => `${r} ${v}`).join(", ");
+  const SET = [["Mesh", meshT], ["Local mesh", local], ["Iter.", s => s?.iterations ?? ""], ["Flow", s => s?.flowLimit ?? ""],
+    ["Energy", s => s?.energyLimit ?? ""], ["Radiation", s => s?.radiation ? (s.radiation === "Off" ? "off" : "on") : ""],
+    ["Ambient", s => s?.ambientC ?? ""], ["Gravity", s => s?.orientation ?? ""], ["Pd (W)", s => s?.totalW ?? ""]];
+  const f = v => v == null ? "" : v.toFixed(1);
+  const rows = list.map((r, i) => {
+    const s = r.settings || {}, older = list[i + 1]?.settings, res = r.result || {}, c = res.converged, b = res.balance;
+    const set = SET.map(([, get]) => { const v = String(get(s)); return `<td class="n${older && v !== String(get(older)) ? " chg" : ""}">${esc(v)}</td>`; }).join("");
+    const conv = !c ? "" : !c.read ? '<td class="warn">not read</td>' : c.ok ? '<td class="ok">yes</td>' : '<td class="error">no</td>';
+    const bal = !b || b.errorPct == null || b.radiation ? "<td></td>" : `<td class="n ${Math.abs(b.errorPct) <= 1 ? "ok" : "error"}">${b.errorPct > 0 ? "+" : ""}${b.errorPct} %</td>`;
+    const used = c?.iterations ? `<td class="n${c.hitMax ? " error" : ""}">${c.iterations}${c.maxIterations ? " / " + c.maxIterations : ""}</td>` : "<td></td>";
+    const ds = (res.monitors || []).filter(m => m.driftK != null), drift = ds.length ? Math.max(...ds.map(m => m.driftK)) : null;
+    const settled = drift == null ? "<td></td>" : `<td class="n ${ds.every(m => m.ok) ? "ok" : "error"}">${drift} K</td>`;
+    const cells = `<td class="n">${res.profile?.cells != null ? res.profile.cells.toLocaleString("en") : ""}</td>`;
+    const temps = refs.map(ref => `<td class="n">${f((res.parts || []).find(p => p.refDes === ref)?.tempC)}</td>`).join("");
+    return `<tr data-run="${esc(r.id)}"><td>${esc(r.at)}</td><td>${esc(r.label)}</td><td><input class="note" value="${esc(r.note || "")}" placeholder="what you changed"></td>
+      ${set}${conv}${used}${settled}${bal}${cells}<td class="n">${f(res.boardC)}</td><td class="n">${f(res.boardMeanC)}</td>${temps}
+      <td><button data-rm title="Remove this run from the table and delete its file">Remove</button></td></tr>`;
+  }).join("");
+  $("runs").innerHTML = `<div class="scroll"><table><thead><tr><th>When</th><th>What</th><th>Note</th>${SET.map(([h]) => `<th class="n">${h}</th>`).join("")}
+    <th>Converged</th><th class="n" title="Iterations the solver used, of the most allowed. Red: it used them all and stopped there, not converged.">Iterations used</th>
+    <th class="n" title="The most any heat source temperature still moved over the last 10 % of the iterations. Red: more than 0.1 K, not settled.">Still moving</th>
+    <th class="n">Balance</th><th class="n" title="Mesh cells, from the solver profile.">Cells</th><th class="n">Board hottest (&deg;C)</th><th class="n">Board average (&deg;C)</th>
+    ${refs.map(r => `<th class="n">${esc(r)} (&deg;C)</th>`).join("")}<th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+$("runs").addEventListener("change", async e => {
+  const tr = e.target.closest("tr[data-run]");
+  if (!tr || !e.target.matches("input.note")) return;
+  await api("/api/runnote?id=" + encodeURIComponent(tr.dataset.run), { method: "PUT", body: JSON.stringify({ note: e.target.value }) });
+  e.target.blur(); runsSig = null; refresh();
+});
+$("runs").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches("input.note")) e.target.blur(); });
+$("runs").addEventListener("click", async e => {
+  const tr = e.target.closest("tr[data-run]");
+  if (!tr || !e.target.matches("[data-rm]")) return;
+  const v = await ask("Remove this run?", `<p>The run from ${esc(tr.cells[0].textContent)} leaves the table, and its file <code>runs\\${esc(tr.dataset.run)}.json</code> is deleted.</p>`,
+    [["rm", "Remove"], [...CANCEL, true]]);
+  if (v !== "rm") return;
+  await api("/api/runremove?id=" + encodeURIComponent(tr.dataset.run), { method: "POST" });
+  runsSig = null; refresh();
+});
 
 /* ---- jobs and refresh ---- */
 let lastChecks = null;
@@ -1230,11 +1349,11 @@ async function refresh() {
   built = !!(state && state.schema);
   const stamp = state && (state.readAt || "") + "|" + (state.open);
   if (state && state.schema && state.open !== false && stamp !== lastRead) { lastRead = stamp; sync(state); }
-  renderJob(st); renderAedt(); results = st.results; meshCheck = st.meshcheck; markDirty(); renderResult(st.results);
+  renderJob(st); renderAedt(); results = st.results; meshCheck = st.meshcheck; markDirty(); renderResult(st.results); renderRuns(st.runs);
 }
 
 function initForm() {          // first load: the page's last values, then AEDT takes over
-  const d = { ambientC: 25, orientation: "-Z", marginMm: 50, marginAboveMm: 50, radiation: true, "mesh.mode": "auto", "mesh.level": 3, "mesh.maxMm": 3, "mesh.gapElems": 3, "mesh.edgeElems": 2 };
+  const d = { ambientC: 25, orientation: "-Z", marginMm: 50, marginAboveMm: 50, radiation: true, "mesh.mode": "auto", "mesh.level": 3, "mesh.maxMm": 3, "mesh.gapElems": 3, "mesh.edgeElems": 2, iterations: 300 };
   const m = study.mesh || {}, flat = { ...d, ...study, "mesh.mode": m.mode ?? d["mesh.mode"], "mesh.level": m.level ?? 3, "mesh.maxMm": m.maxMm ?? 3, "mesh.gapElems": m.gapElems ?? 3, "mesh.edgeElems": m.edgeElems ?? 2 };
   for (const k of SCALARS) setS(k, flat[k]);
   for (const p of study.parts || []) { parts[p.refDes] = { ...p }; order.push(p.refDes); }
@@ -1252,7 +1371,7 @@ function collect() {
   return {
     schema: "pcb-thermal-ansys/study", edb: board.edb,
     ambientC: getS("ambientC"), orientation: getS("orientation"), marginMm: getS("marginMm"), marginAboveMm: getS("marginAboveMm"),
-    radiation: getS("radiation"), pcbResolution: parseInt($("pcbRes").value, 10), iterations: state?.setup?.iterations ?? study.iterations ?? 300, packageK: study.packageK ?? 1,
+    radiation: getS("radiation"), pcbResolution: parseInt($("pcbRes").value, 10), iterations: getS("iterations") ?? 300, flowLimit: getS("flowLimit"), energyLimit: getS("energyLimit"), packageK: study.packageK ?? 1,
     mesh: { mode, level: getS("mesh.level"), maxMm: getS("mesh.maxMm"), gapElems: getS("mesh.gapElems"), edgeElems: getS("mesh.edgeElems") },
     parts: order.filter(r => parts[r]).map(r => ({ refDes: r, ...Object.fromEntries(Object.entries(parts[r]).filter(([, v]) => v !== undefined)) })),
     materials: Object.fromEntries(typed),
@@ -1449,6 +1568,9 @@ const TERMS = {
   maxMm: ["Largest element", "The biggest cell allowed in the air and the board, in mm. Smaller is more accurate and slower."],
   gapElems: ["Cells in gaps", "How many cells across the narrow gap between two objects. More resolves the air between close parts better."],
   edgeElems: ["Cells on edges", "How many cells along the edges of small objects."],
+  iterations: ["Iterations max", "The solver stops here even if it has not converged. More helps only when the last run used them all (see the residual plot in AEDT); if it stopped earlier, tighten the limits instead. Needs Apply."],
+  flowLimit: ["Flow limit", "The solve counts as converged when the continuity and velocity residuals are below this. AEDT default 0.001. 0.0001 gives a closer energy balance and takes longer. Empty keeps the value in AEDT. Needs Apply."],
+  energyLimit: ["Energy limit", "The solve counts as converged when the energy residual is below this. AEDT default 1e-7. Try 1e-8 when the energy balance is off by more than 1 %. Empty keeps the value in AEDT. Needs Apply."],
   pcbRes: ["PCB mapping", "How finely Icepak maps the copper of each layer onto the board's conductivity. Higher follows the traces and planes more closely; it needs Build to change."],
   mm: ["Mesh", "Automatic lets Icepak size the cells by a level; Manual sets the largest cell yourself."],
   powerW: ["Pd", "Power loss: the heat the part gives off, in W. Not the power it takes in from the rail, and not the datasheet's maximum. Not in the export: type it, or fill Pd from the circuit below and it is calculated there and locked here. Without Pd a part is a block that only shapes the air."],

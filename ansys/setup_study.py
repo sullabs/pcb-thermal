@@ -100,7 +100,7 @@ def load_study(folder: Path) -> dict:
 
 def num(text, default=None):
     """'1.5W' or '30cel' or '2mm' -> 1.5, 30, 2"""
-    m = re.match(r"\s*(-?[\d.]+(?:e-?\d+)?)", str(text))
+    m = re.match(r"\s*(-?[\d.]+(?:[eE][-+]?\d+)?)", str(text))
     return float(m.group(1)) if m else default
 
 
@@ -185,7 +185,7 @@ def main(folder: Path, mode: str = "build") -> int:
         if mode == "mesh":
             meshed = _mesh_now(ic)
         if mode == "solve":
-            step("solve", lambda: _solve(ic, folder, board, powered, study["ambientC"]), fatal=True)
+            step("solve", lambda: _solve(ic, folder, board, powered, study, parts), fatal=True)
         if mode == "meshcheck":
             step("mesh check", lambda: _mesh_check(ic, folder, board, parts, powered, study), fatal=True)
         state = None if mode in ("solve", "meshcheck") else step("read back", lambda: read_state(ic, board))   # right after a solve AEDT cannot be read
@@ -580,15 +580,20 @@ def _setup(ic, study):
     if not s:
         check("error", "Setup not created")
         return
-    for k, v in (("Flow Regime", "Laminar"), ("Include Flow", True), ("Include Gravity", True),
-                 ("Convergence Criteria - Max Iterations", int(study["iterations"]))):
+    want = [("Flow Regime", "Laminar"), ("Include Flow", True), ("Include Gravity", True),
+            ("Convergence Criteria - Max Iterations", int(study["iterations"]))]
+    for k, f in (("Convergence Criteria - Flow", "flowLimit"), ("Convergence Criteria - Energy", "energyLimit")):
+        if (study.get(f) or 0) > 0:      # left out: AEDT keeps its own limit
+            want.append((k, f"{study[f]:g}"))
+    for k, v in want:
         if k in s.props:
             s.props[k] = v
     was = str(s.props.get("Radiation Model", "Off"))
     s.props["Radiation Model"] = "Discrete Ordinates Model" if study["radiation"] else "Off"
     s.update()
     check("ok", f"Setup '{SETUP}': laminar natural convection, radiation "
-                f"{'on (discrete ordinates)' if study['radiation'] else 'off'}, {study['iterations']} iterations max")
+                f"{'on (discrete ordinates)' if study['radiation'] else 'off'}, {study['iterations']} iterations max, "
+                f"limits flow {s.props.get('Convergence Criteria - Flow')}, energy {s.props.get('Convergence Criteria - Energy')}")
     if existed and was != s.props["Radiation Model"]:
         # the next solve would restart from the old case file, which keeps the old radiation model
         if step("clear old solution", lambda: ic.cleanup_solution()):
@@ -750,22 +755,38 @@ def _temp(ic, ref, hollow):
         return None
 
 
-def _balance(ic, total_w):
+ENTHALPY_REF_C = 25.0   # the solver counts the heat the air carries from 298.15 K, whatever the ambient
+AIR_CP = 1006.43        # J/(kg K), Icepak's air
+
+
+def _balance(ic, total_w, ambient):
     """heat out through the Open_air faces against the power put in, from AEDT's Fields Summary.
-    Face monitors count only convection; the summary also has the radiation that leaves through the opening."""
+    Face monitors count only convection; the summary also has the radiation that leaves through the opening.
+    The convective flow is counted from 25 C, not from the ambient: air that comes in and goes out in slightly
+    different amounts (the leftover mass flow of a converged run) then adds mass flow x cp x (ambient - 25 C), several %
+    at 55 C ambient and nothing at 25 C. That part is taken off, so the balance checks the physics."""
     for n in [n for n in ic.get_oo_name(ic.odesign, "Monitor") if n.startswith("Q_")]:
         ic.monitor.delete_monitor(n)    # the heat flow face monitors older versions made
     fs = ic.post.create_field_summary()
     qs = {"outW": "HeatFlowRate", "radiationW": "RadiationFlow", "convectionW": "ConvectiveHeatFlow"}
-    for q in qs.values():
+    for q in [*qs.values(), "MassFlowRate"]:
         fs.add_calculation("Boundary", "Surface", "Open_air", q)
     data = fs.get_field_summary_data(setup=f"{SETUP} : SteadyState")
-    got = {}
-    for name, total in zip(data["Quantity"], data["Total"]):    # "HeatFlowRate[W]" -> "3.30061"
+    got, mass = {}, None
+    for name, total in zip(data["Quantity"], data["Total"]):    # "HeatFlowRate[W]" -> "3.30061", signed along the face normals
         q, unit = name.rstrip("]").split("[")
-        got[q] = abs(float(total)) / (1000.0 if unit == "mW" else 1.0)
-    bal = {k: round(got[q], 4) for k, q in qs.items()}
-    return {"inW": round(total_w, 4), **bal, "errorPct": round(100 * (bal["outW"] - total_w) / total_w, 2)}
+        if q == "MassFlowRate":
+            u = unit.lower().replace("_per_", "/")
+            scale = 1.0 if u.startswith("kg") else 1e-3 if u.startswith("g") else None
+            mass = float(total) * scale if scale else None
+        else:
+            got[q] = float(total) / (1000.0 if unit == "mW" else 1.0)
+    fix = mass * AIR_CP * (ambient - ENTHALPY_REF_C) if mass is not None else 0.0   # same sign convention as the heat flows
+    raw_conv, raw_out = got["ConvectiveHeatFlow"], got["HeatFlowRate"]
+    bal = {"outW": round(abs(raw_out - fix), 4), "radiationW": round(abs(got["RadiationFlow"]), 4),
+           "convectionW": round(abs(raw_conv - fix), 4)}
+    return {"inW": round(total_w, 4), **bal, "errorPct": round(100 * (bal["outW"] - total_w) / total_w, 2),
+            "rawOutW": round(abs(raw_out), 4), "netMassKgS": mass, "refFixW": round(abs(fix), 4) if mass is not None else None}
 
 
 def _convergence(ic):
@@ -774,25 +795,104 @@ def _convergence(ic):
     limit = {"Continuity": "Flow", "XVelocity": "Flow", "YVelocity": "Flow", "ZVelocity": "Flow", "Energy": "Energy"}
     if setup and str(setup.props.get("Radiation Model", "Off")) != "Off":
         limit["DOIntensity"] = "Discrete Ordinates"
-    items = []
+    items, used = [], None
     for q, crit in limit.items():
         try:
-            sd = ic.post.get_solution_data(expressions=["Residual." + q], setup_sweep_name=f"{SETUP} : SteadyState",
-                                           report_category="Residual")
-            val = float(sd.get_expression_data(sd.expressions[0])[1][-1])
+            x, y = _history(ic, "Residual." + q, "Residual")
+            val = y[-1]
+            used = max(used or 0, int(x[-1]))
             lim = num(setup.props.get(f"Convergence Criteria - {crit}")) if setup else None
-            items.append({"name": q, "value": val, "limit": lim, "ok": lim is None or val <= lim})
+            items.append({"name": q, "value": val, "limit": lim, "ok": lim is None or val <= lim, "history": _thin(x, y)})
         except BaseException:  # noqa: BLE001
             items.append({"name": q, "value": None, "limit": None, "ok": None})
     known = [i for i in items if i["ok"] is not None]
-    return {"ok": bool(known) and all(i["ok"] for i in known), "read": len(known), "items": items}
+    most = num(setup.props.get("Convergence Criteria - Max Iterations")) if setup else None
+    return {"ok": bool(known) and all(i["ok"] for i in known), "read": len(known), "items": items,
+            "iterations": used, "maxIterations": int(most) if most else None,
+            "hitMax": bool(used and most and used >= most)}
 
 
-def _solve(ic, folder, board, powered, ambient, write=True):
-    """solve and read the results; written to results.json unless `write` is False. Returns them, None if it failed"""
+def _history(ic, expr, category):
+    """a quantity per iteration: (iterations, values)"""
+    sd = ic.post.get_solution_data(expressions=[expr], setup_sweep_name=f"{SETUP} : SteadyState", report_category=category)
+    x, y = sd.get_expression_data(sd.expressions[0])[:2]
+    return [float(v) for v in x], [float(v) for v in y]
+
+
+def _thin(x, y, most=200):
+    """at most `most` points of a history, the last one always kept: enough for a plot in the page or a report"""
+    k = max(1, -(-len(x) // most))
+    idx = list(range(0, len(x), k))
+    if idx[-1] != len(x) - 1:
+        idx.append(len(x) - 1)
+    return [[x[i], y[i]] for i in idx]
+
+
+DRIFT_K = 0.1     # a monitor that still moves more than this over the last 10 % of the iterations is not settled
+
+
+def _monitor_health(ic, powered):
+    """each heat source's temperature monitor per iteration, and how far it still moved over the last 10 %.
+    Residuals under their limits do not prove the temperatures stopped moving; this does"""
+    out = []
+    for p in powered:
+        try:
+            x, y = _history(ic, f"T_{p['refDes']}.Temperature", "Monitor")
+            tail = y[int(len(y) * 0.9)] if len(y) > 1 else y[-1]
+            drift = round(abs(y[-1] - tail), 3)
+            out.append({"refDes": p["refDes"], "driftK": drift, "ok": drift <= DRIFT_K, "history": _thin(x, y)})
+        except BaseException:  # noqa: BLE001  one missing monitor must not stop the others
+            out.append({"refDes": p["refDes"], "driftK": None, "ok": None})
+    return out
+
+
+def _profile(ic, since):
+    """mesh size, memory, cores and end status from the solver profile AEDT writes next to the project.
+    Only a profile written by this solve (after `since`) counts"""
+    files = [f for f in Path(ic.results_directory).rglob("*.profile") if f.stat().st_mtime >= since - 5]
+    if not files:
+        return None
+    txt = max(files, key=lambda f: f.stat().st_mtime).read_text(encoding="utf-8", errors="replace")
+    grab = lambda pat: (re.search(pat, txt) or [None, None])[1]  # noqa: E731
+    cells, nodes = grab(r"Total Cells\\?',\s*(\d+)"), grab(r"Total Nodes\\?',\s*(\d+)")
+    return {"cells": int(cells) if cells else None, "nodes": int(nodes) if nodes else None,
+            "memory": grab(r"'ComEngine Memory',\s*'([^']+)'"), "elapsed": grab(r"'Elapsed Time',\s*'([^']+)'"),
+            "cores": int(grab(r"Cores\\?',\s*(\d+)") or 0) or None, "status": grab(r"Status\\?',\s*\\?'([^'\\]+)")}
+
+
+def _setup_now(ic):
+    """the setup values the solve will use, as AEDT holds them. Read before the solve: after it AEDT cannot be read"""
+    s = next((x for x in ic.setups if x.name == SETUP), None)
+    if not s:
+        return {}
+    p = s.props
+    return {"iterations": num(p.get("Convergence Criteria - Max Iterations")), "flowLimit": num(p.get("Convergence Criteria - Flow")),
+            "energyLimit": num(p.get("Convergence Criteria - Energy")), "radiation": str(p.get("Radiation Model", "Off"))}
+
+
+def _keep_run(folder, res, study, parts, powered, setup, label):
+    """every solve also goes to runs/<date-time>.json with the settings it ran with, so the page can compare runs.
+    results.json stays the last solve only"""
+    runs = folder / "runs"
+    runs.mkdir(exist_ok=True)
+    rid = time.strftime("%Y%m%d-%H%M%S")
+    (runs / f"{rid}.json").write_text(json.dumps({
+        "schema": "pcb-thermal-ansys/run", "at": time.strftime("%Y-%m-%d %H:%M"), "label": label, "note": "",
+        "settings": {"ambientC": study["ambientC"], "orientation": study["orientation"], "pcbResolution": study["pcbResolution"],
+                     "mesh": study["mesh"], "localMm": {p["refDes"]: p["meshMm"] for p in parts if p.get("meshMm")},
+                     **setup, "totalW": round(sum(p["powerW"] for p in powered), 4)},
+        "result": res}, indent=1), encoding="utf-8")
+    return rid
+
+
+def _solve(ic, folder, board, powered, study, parts, write=True, label="Solve"):
+    """solve and read the results; written to results.json unless `write` is False, and always kept in runs/.
+    Returns them, None if it failed"""
+    ambient = study["ambientC"]
     step("junction blocks hollow", lambda: _hollow(ic))
     powered = _sources(ic, powered)     # from here on the heat sources are the ones in AEDT, with AEDT's power
     step("temperature monitors", lambda: _monitors(ic, powered, board))
+    setup = step("setup values", lambda: _setup_now(ic)) or {}
     t = time.time()
     ok = ic.analyze_setup(SETUP)
     secs = time.time() - t
@@ -805,17 +905,36 @@ def _solve(ic, folder, board, powered, ambient, write=True):
         check("warn", "Convergence could not be read. The result files may be stale (AEDT was killed or crashed earlier). "
                       "Press Solve again; if it stays, check the residuals in AEDT before trusting the numbers.")
     elif conv["ok"]:
-        check("ok", "Converged: all residuals are below the setup limits")
+        check("ok", f"Converged: all residuals are below the setup limits, after {conv['iterations']} of {conv['maxIterations']} iterations")
     else:
         bad = ", ".join(i["name"] for i in conv["items"] if i["ok"] is False)
-        check("warn", f"NOT converged ({bad}). Raise the iterations or refine the mesh before trusting the numbers.")
+        used = f"; it used all {conv['iterations']} iterations: raise Iterations max" if conv["hitMax"] else ""
+        check("warn", f"NOT converged ({bad}){used}. Raise the iterations or refine the mesh before trusting the numbers.")
+    mon = step("monitor histories", lambda: _monitor_health(ic, powered)) or []
+    moving = [f"{m['refDes']} {m['driftK']} K" for m in mon if m["ok"] is False]
+    if moving:
+        check("warn", f"Temperatures still moving over the last 10 % of the iterations: {', '.join(moving)} "
+                      f"(more than {DRIFT_K} K). Tighten the limits or raise the iterations.")
+    elif any(m["ok"] for m in mon):
+        check("ok", f"Temperatures settled: every monitor moved {DRIFT_K} K or less over the last 10 % of the iterations")
+    prof = step("solver profile", lambda: _profile(ic, t))
+    if prof:
+        check("ok" if (prof["status"] or "").startswith("Normal") else "warn",
+              f"Mesh {prof['cells']:,} cells, {prof['nodes']:,} nodes; solver memory {prof['memory']}, {prof['cores']} cores, "
+              f"{prof['status'] or 'status not read'}" if prof["cells"] and prof["nodes"] else
+              f"Solver profile read, but no mesh size in it; status {prof['status'] or 'not read'}")
     total_w = sum(p["powerW"] for p in powered)
-    bal = step("energy balance", lambda: _balance(ic, total_w)) if total_w > 0 else None
+    bal = step("energy balance", lambda: _balance(ic, total_w, ambient)) if total_w > 0 else None
     if bal:
         e = abs(bal["errorPct"])
         check("ok" if e <= 1 else "warn", f"Energy balance: {bal['inW']} W in, {bal['outW']} W out "
               f"({bal['convectionW']} W convection, {bal['radiationW']} W radiation, {bal['errorPct']:+.2f} %)"
+              + (f"; {bal['refFixW']} W of the {ambient - ENTHALPY_REF_C:g} K air reference taken off ({bal['rawOutW']} W as AEDT reports it)"
+                 if bal["refFixW"] else "")
               + ("" if e <= 1 else ". More than 1 % is not balanced: converge further or refine the mesh."))
+        if bal["netMassKgS"] is None and abs(ambient - ENTHALPY_REF_C) > 1:
+            check("warn", f"Net air mass flow not read: the balance at {ambient} C ambient is not corrected for the solver's "
+                          f"25 C air reference and may be off by a few % for that reason alone.")
     rows = [{"refDes": p["refDes"], "powerW": p["powerW"], "tempC": _temp(ic, p["refDes"], p["network"]),
              "rjaCW": p["rjaCW"], "tjMaxC": p["tjMaxC"]} for p in powered]
     if any(r["tempC"] is None for r in rows):
@@ -834,13 +953,14 @@ def _solve(ic, folder, board, powered, ambient, write=True):
     seen = [v for v in [board] + others + [r["tempC"] for r in rows] if v is not None]
     anywhere = max(seen) if seen else None
     res = {"schema": "pcb-thermal-ansys/results", "solvedAt": time.strftime("%H:%M:%S"), "seconds": round(secs),
-           "ambientC": ambient, "converged": conv, "balance": bal, "boardC": board, "boardMeanC": board_mean, "hottestC": anywhere,
-           "parts": rows}
+           "ambientC": ambient, "converged": conv, "balance": bal, "monitors": mon, "profile": prof,
+           "boardC": board, "boardMeanC": board_mean, "hottestC": anywhere, "parts": rows}
     if write:
         (folder / "results.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
+    rid = step("keep the run", lambda: _keep_run(folder, res, study, parts, powered, setup, label))
     step("save project", lambda: ic.save_project())
     check("ok", f"Board hottest {board} C, board average {board_mean} C, hottest measured {anywhere} C"
-                + ("; results.json written" if write else ""))
+                + ("; results.json written" if write else "") + (f"; kept as runs\\{rid}.json" if rid else ""))
     return res
 
 
@@ -875,10 +995,10 @@ def _mesh_check(ic, folder, board, parts, powered, study):
     local = lambda ps: {p["refDes"]: p["meshMm"] for p in ps if p.get("meshMm")}  # noqa: E731
     check("ok", f"Mesh check 1 of 2: the finer mesh, {_mesh_text(fine['mesh'])}")
     _mesh(ic, fine_parts, fine)
-    b = _solve(ic, folder, board, powered, study["ambientC"], write=False)
+    b = _solve(ic, folder, board, powered, fine, fine_parts, write=False, label="Mesh check, finer")
     check("ok", f"Mesh check 2 of 2: your mesh, {_mesh_text(study['mesh'])}")
     _mesh(ic, parts, study)
-    a = _solve(ic, folder, board, powered, study["ambientC"]) if b else None
+    a = _solve(ic, folder, board, powered, study, parts, label="Mesh check, yours") if b else None
     if not (a and b):
         check("error", "Mesh check stopped: a solve failed")
         return
@@ -977,6 +1097,8 @@ def read_state(ic, board):
         "airMm": [round(reg[3] - reg[0], 1), round(reg[4] - reg[1], 1), round(reg[5] - reg[2], 1)] if reg else None,
         "padMm": pad,
         "setup": {"name": setup.name, "iterations": setup.props.get("Convergence Criteria - Max Iterations"),
+                  "flowLimit": num(setup.props.get("Convergence Criteria - Flow")),
+                  "energyLimit": num(setup.props.get("Convergence Criteria - Energy")),
                   "flow": setup.props.get("Flow Regime"),
                   "radiation": setup.props.get("Radiation Model")} if setup else None,
         "blocks": blocks,

@@ -8,6 +8,7 @@ it lists the folders opened before and the sub-folders of the start folder that 
 """
 import json
 import os
+import re
 import subprocess
 import webbrowser
 import sys
@@ -48,6 +49,26 @@ lock = threading.Lock()
 def jread(name):
     p = FOLDER / name
     return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+
+
+RUN_ID = re.compile(r"^\d{8}-\d{6}$")     # runs/<id>.json, as setup_study.py names them
+
+
+def runs():
+    """every kept solve, newest first, with its file name as id"""
+    out = []
+    for p in sorted((FOLDER / "runs").glob("*.json"), reverse=True):
+        if RUN_ID.match(p.stem):
+            try:
+                out.append({"id": p.stem, **json.loads(p.read_text(encoding="utf-8"))})
+            except (OSError, ValueError):
+                continue
+    return out
+
+
+def run_path(q):
+    rid = (q.get("id") or [""])[0]
+    return FOLDER / "runs" / f"{rid}.json" if RUN_ID.match(rid) else None
 
 
 def project_file():
@@ -130,7 +151,7 @@ class H(BaseHTTPRequestHandler):
             self._send(200, (HERE / "page.html").read_bytes(), "text/html; charset=utf-8")
         elif self.path == "/api/state":
             self._send(200, {"folder": str(FOLDER), "boards": boards(), "board": jread("board.json"), "study": jread("study.json"),
-                             "checks": jread("checks.json"), "results": jread("results.json"), "meshcheck": jread("meshcheck.json"), "built": jread("built.json"), "meshed": jread("meshed.json"), "projectFile": project_file(), "state": jread("state.json"), "job": job})
+                             "checks": jread("checks.json"), "results": jread("results.json"), "meshcheck": jread("meshcheck.json"), "runs": runs(), "built": jread("built.json"), "meshed": jread("meshed.json"), "projectFile": project_file(), "state": jread("state.json"), "job": job})
         else:
             self._send(404, {"error": "not found"})
 
@@ -145,10 +166,19 @@ class H(BaseHTTPRequestHandler):
     def do_PUT(self):
         if self._foreign():
             return
-        if self.path == "/api/study":
-            n = int(self.headers.get("Content-Length", 0))
+        path, _, query = self.path.partition("?")
+        n = int(self.headers.get("Content-Length", 0))
+        if path == "/api/study":
             study = json.loads(self.rfile.read(n))
             (FOLDER / "study.json").write_text(json.dumps(study, indent=1), encoding="utf-8")
+            self._send(200, {"ok": True})
+        elif path == "/api/runnote":       # the note typed next to a kept run
+            p = run_path(parse_qs(query))
+            if not p or not p.exists():
+                return self._send(404, {"ok": False, "error": "No such run."})
+            r = json.loads(p.read_text(encoding="utf-8"))
+            r["note"] = str(json.loads(self.rfile.read(n)).get("note", ""))[:300]
+            p.write_text(json.dumps(r, indent=1), encoding="utf-8")
             self._send(200, {"ok": True})
         else:
             self._send(404, {"error": "not found"})
@@ -179,6 +209,11 @@ class H(BaseHTTPRequestHandler):
             return self._send(200, {"ok": True, "folder": str(FOLDER)})
         if path == "/api/read":
             ok = run_script("read_board.py", "Reading the heights from the STEP", "--step") if "step" in q else                 run_script("read_board.py", "Reading the board")
+        elif path == "/api/runremove":    # a kept run the user no longer wants in the table
+            p = run_path(q)
+            if p and p.exists():
+                p.unlink()
+            return self._send(200, {"ok": bool(p)})
         elif path == "/api/run" and mode in WHAT:
             ok = run_script("setup_study.py", WHAT[mode], mode, silent="silent" in q)
         else:
