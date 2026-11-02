@@ -781,7 +781,9 @@ def _balance(ic, total_w, ambient):
             mass = float(total) * scale if scale else None
         else:
             got[q] = float(total) / (1000.0 if unit == "mW" else 1.0)
-    fix = mass * AIR_CP * (ambient - ENTHALPY_REF_C) if mass is not None else 0.0   # same sign convention as the heat flows
+    # MassFlowRate is signed opposite to the heat flows on the same faces: with the same sign the 55 C run of
+    # 2026-11-02 went from AEDT's +6.5 % to +12.6 %; with the opposite sign to +0.33 %, as the same board at 25 C (+0.35 %)
+    fix = -mass * AIR_CP * (ambient - ENTHALPY_REF_C) if mass is not None else 0.0
     raw_conv, raw_out = got["ConvectiveHeatFlow"], got["HeatFlowRate"]
     bal = {"outW": round(abs(raw_out - fix), 4), "radiationW": round(abs(got["RadiationFlow"]), 4),
            "convectionW": round(abs(raw_conv - fix), 4)}
@@ -816,7 +818,11 @@ def _history(ic, expr, category):
     """a quantity per iteration: (iterations, values)"""
     sd = ic.post.get_solution_data(expressions=[expr], setup_sweep_name=f"{SETUP} : SteadyState", report_category=category)
     x, y = sd.get_expression_data(sd.expressions[0])[:2]
-    return [float(v) for v in x], [float(v) for v in y]
+    y = [float(v) for v in y]
+    x = [float(v) for v in x]
+    if len(set(x)) < len(x):    # the sweep AEDT returns is not the iteration (all 0 on 2026-11-02): count the points
+        x = [float(i) for i in range(1, len(y) + 1)]
+    return x, y
 
 
 def _thin(x, y, most=200):
@@ -860,6 +866,14 @@ def _profile(ic, since):
             "cores": int(grab(r"Cores\\?',\s*(\d+)") or 0) or None, "status": grab(r"Status\\?',\s*\\?'([^'\\]+)")}
 
 
+def _dur(secs):
+    """a solve time as people read it: '45 s' under a minute, '5 min', '1 h 12 min' from an hour (as the page)"""
+    if secs < 60:
+        return f"{secs:.0f} s"
+    m = round(secs / 60)
+    return f"{m} min" if m < 60 else f"{m // 60} h {m % 60} min"
+
+
 def _setup_now(ic):
     """the setup values the solve will use, as AEDT holds them. Read before the solve: after it AEDT cannot be read"""
     s = next((x for x in ic.setups if x.name == SETUP), None)
@@ -899,7 +913,7 @@ def _solve(ic, folder, board, powered, study, parts, write=True, label="Solve"):
     if not ok:
         check("error", "Solve failed or was stopped. Open AEDT and read the message window.")
         return None
-    check("ok", f"Solved in {secs:.0f} s")
+    check("ok", f"Solved in {_dur(secs)}")
     conv = _convergence(ic)
     if not conv["read"]:
         check("warn", "Convergence could not be read. The result files may be stale (AEDT was killed or crashed earlier). "
@@ -916,7 +930,9 @@ def _solve(ic, folder, board, powered, study, parts, write=True, label="Solve"):
         check("warn", f"Temperatures still moving over the last 10 % of the iterations: {', '.join(moving)} "
                       f"(more than {DRIFT_K} K). Tighten the limits or raise the iterations.")
     elif any(m["ok"] for m in mon):
-        check("ok", f"Temperatures settled: every monitor moved {DRIFT_K} K or less over the last 10 % of the iterations")
+        most = max(m["driftK"] for m in mon if m["ok"])
+        check("ok", f"Temperatures settled: every monitor moved {most} K or less over the last 10 % of the iterations "
+                    f"(limit {DRIFT_K} K)")
     prof = step("solver profile", lambda: _profile(ic, t))
     if prof:
         check("ok" if (prof["status"] or "").startswith("Normal") else "warn",

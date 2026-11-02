@@ -789,6 +789,8 @@ const SIGMA = 5.67e-8;
 const HC_DEFAULT = { hTop: 8, hBottom: 5, hParts: 8, emissivity: 0.9, surfaceRiseK: 20, coverage: 0.6, kParts: 0.5,
   critMargin: 15, critDensity: 2, critShare: 25, watchMargin: 30, watchDensity: 0.8, watchShare: 10 };
 const isNum = x => typeof x === "number" && isFinite(x);
+// a solve time: "45 s" under a minute, "5 min", "1 h 12 min" from an hour
+const dur = s => { if (!isNum(s)) return "?"; if (s < 60) return `${Math.round(s)} s`; const m = Math.round(s / 60); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
 const N = x => isNum(x) ? x : 0;
 const sum = a => a.reduce((s, x) => s + N(x), 0);
 let hc = { ...HC_DEFAULT }, hcSel = null, hcLast = null;
@@ -1166,7 +1168,7 @@ function renderMeshCheck() {
   else if (!powerSame) warn.push("Power or ambient changed since this check. The verdict usually still holds; check again for final numbers.");
   const k = v => (v >= 0 ? "+" : "") + v.toFixed(1);
   out.innerHTML = `<p style="margin:12px 0 6px"><b class="${SAY[worst][0]}">${SAY[worst][1]}</b></p>
-    <p class="hint">Checked ${esc(mc.at)}. Your mesh: ${esc(mc.yours.text)}, solved in ${A.seconds} s. Finer: ${esc(mc.finer.text)}, solved in ${B.seconds} s.</p>
+    <p class="hint">Checked ${esc(mc.at)}. Your mesh: ${esc(mc.yours.text)}, solved in ${dur(A.seconds)}. Finer: ${esc(mc.finer.text)}, solved in ${dur(B.seconds)}.</p>
     ${warn.length ? `<ul class="plain checks hint">${warn.map(w => `<li class="warn">${esc(w)}</li>`).join("")}</ul>` : ""}
     <div class="scroll"><table><thead><tr><th>Where</th><th class="n">Your mesh (&deg;C)</th><th class="n">Finer (&deg;C)</th><th class="n">Change (K)</th><th class="n">Change of the rise</th><th>Verdict</th></tr></thead><tbody>
     ${rows.map(r => `<tr><td><b>${esc(r.name)}</b></td><td class="n">${r.a.toFixed(1)}</td><td class="n">${r.b.toFixed(1)}</td><td class="n">${k(r.d)}</td>
@@ -1182,7 +1184,7 @@ function checkMesh() {
 function renderResult(r) {
   results = r;
   if (!r || !r.parts) { $("fIce").textContent = "not solved"; return; }
-  $("resAt").textContent = `solved ${r.solvedAt}, ${r.seconds} s`;
+  $("resAt").textContent = `solved ${r.solvedAt}, took ${dur(r.seconds)}`;
   $("fIce").textContent = r.hottestC != null ? `${r.hottestC.toFixed(1)} °C` : "n/a";
   const f = v => v == null ? "n/a" : v.toFixed(1) + " &deg;C";
   const hand = hcLast ? hcLast.parts : {};
