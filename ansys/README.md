@@ -45,11 +45,14 @@ the board surface so it can touch the PCB.
 | Height but no power | A block without heat: it shapes the air flow and spreads heat |
 | Only one of Rjc, Rjb | Plain block, warning; no junction temperature |
 | Rjc and Rjb both | Junction model; if AEDT refuses it, plain block and a warning |
+| Local mesh on a junction model | Not sent, warning: the block is not meshed inside, and a mesh region on it stops the solver. The value stays on the page |
+| Pd from the circuit gives below 0 W, or efficiency over 1 (85 typed for 0.85) | Pd not calculated, warning; the typed Pd is used |
 | Tj max or Rja | No hand check or margin line, nothing else changes |
 | Part not in the EDB | Error for that part, the others are still built |
 | Part without position or size in the EDB | Listed as skipped in `board.json`, warning, no heat source possible |
 | `study.json` | Defaults, no heat sources |
 | AEDT closed (read) | Last known values kept, page says AEDT is not running |
+| A project with the same name open from another folder | Error, nothing changed: AEDT finds a project by name, so the job would change that copy. Close it in AEDT |
 
 **Do not run another PyAEDT script against the same AEDT while the page is open**: two clients attaching at the same
 time made one of them hang. The page's own jobs never overlap, and a hung job is killed after 60 s (read) or 15 min.
@@ -74,10 +77,17 @@ Folder contents: `<board>.aedb` (you), `board.json`, `study.json` (page), `state
 (mesh, local mesh, iterations, flow and energy limits and radiation as AEDT held them, ambient, gravity, total Pd) and `result`
 as in `results.json`; the page's **Runs** table compares them, and Remove deletes the file).
 Solve health in `results.json` (and so in each run): `converged {ok, items[{name, value, limit, ok, history}], iterations,
-maxIterations, hitMax}`, `balance {inW, outW, convectionW, radiationW, errorPct, rawOutW, netMassKgS, refFixW}` (the solver counts air heat from 25 C, so at another ambient the leftover net mass flow x cp x (ambient - 25) is taken off convection; `rawOutW` is AEDT's own number), `monitors[{refDes, driftK, ok, history}]` (how far each heat source temperature still moved over
-the last 10 % of the iterations; over 0.1 K is not settled), `profile {cells, nodes, memory, elapsed, cores, status}` (read from
+totalIterations, continued, maxIterations, hitMax}` (`iterations` is this solve's; a solve with nothing changed goes on from
+the last solution, then `continued` is true and `totalIterations` counts from its start; with no monitor history this solve's
+share is not known and `iterations` and `continued` are null), `balance {inW, outW, convectionW, radiationW, errorPct, rawOutW, netMassKgS, refFixW}` (the solver counts air heat from 25 C, so at another ambient the leftover net mass flow x cp x (ambient - 25) is taken off convection; `rawOutW` is AEDT's own number), `monitors[{refDes, driftK, ok, read, history}]` (how far each heat source temperature still moved over
+the last 10 % of this solve's iterations; over 0.1 K is not settled; `read` false: no history found, `ok` null with `read` true:
+one iteration only), `profile {cells, nodes, memory, elapsed, cores, status}` (read from
 the newest `*.profile` AEDT wrote in the project's `.aedtresults`). Histories are `[[iteration, value]]`, at most 200 points;
-the page plots them and a report can reuse them.
+the page plots them and a report can reuse them. They come from the solver's own files (`DV*_S*_MON*.sd` named in
+`.aedtresults\Icepak.asol`, read after a save, each monitor's file found by the monitor's `ID=` in the saved `.aedt`),
+because AEDT's report API gives only the final value. A failed read is a warning only.
+Solve also repairs the mesh of an older project before it starts: it removes a local mesh on a junction model and any
+mesh sub-region box no region uses (both stop the solver), says so in the checks, and rereads `state.json`.
 `study.json`: `edb`, `ambientC`, `orientation` (the direction gravity points in the board's axes: -Z flat parts up, +Z flat parts down, ±X or ±Y standing on that edge; the page sets it by turning the board about its X or Y axis in 90° steps; the old names flat-up, flat-down, vertical-long, vertical-short still load), `marginMm`,
 `marginAboveMm`, `radiation`, `pcbResolution`, `iterations`, `flowLimit?`, `energyLimit?` (solver limits; left out keeps AEDT's), `mesh {mode auto|manual, level, maxMm, gapElems, edgeElems}`,
 `parts[{refDes, powerW?, heightMm?, bodyXMm?, bodyYMm?, meshMm?, rjcCW?, rjbCW?, rjaCW?, tjMaxC?, cls?, vinV?, iinA?, voutV?, ioutA?, efficiency?, rOhm?, pdMeasuredW?}]`

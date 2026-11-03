@@ -79,6 +79,9 @@
   svg.plot .pt { fill:var(--mut); font-size:11px; font-family:var(--mono); }
   .plots .keys { display:flex; flex-wrap:wrap; gap:4px 12px; font-size:12px; margin-top:4px; }
   .plots .keys i { display:inline-block; width:12px; height:3px; margin-right:5px; vertical-align:middle; border-radius:2px; }
+  .plots .key { font:inherit; color:inherit; background:none; border:0; padding:2px 0; cursor:pointer; }
+  .plots .key:hover { text-decoration:underline; } .plots .key.off { opacity:.4; text-decoration:line-through; }
+  .plots .key.all { color:var(--mut); }
   #runs td input.note { width:160px; text-align:left; padding:4px 6px; min-height:32px; }
   #runs td button { min-height:32px; padding:2px 8px; }
   label.dirty { border-radius:5px; padding:2px 6px; }
@@ -532,6 +535,8 @@ function derive(s) {
     // Rjb without Rjc has no place in AEDT (a junction model needs both): keep the typed value, not sent
     const p = parts[b.refDes];
     if (b.kind === "Solid Block" && p?.rjbCW > 0 && !(p.rjcCW > 0)) d.parts[b.refDes].rjbCW = p.rjbCW;
+    // nor a local mesh on a junction model (it stops the solver): keep the typed value, not sent
+    if (b.kind === "Network" && p?.meshMm > 0 && !l) d.parts[b.refDes].meshMm = p.meshMm;
   }
   d.mats = Object.fromEntries((s.materials || []).map(m => [m.name, { kWmK: m.kWmK, rhoKgM3: m.rhoKgM3, cpJkgK: m.cpJkgK }]));
   return d;
@@ -666,6 +671,7 @@ function loadPower(p) {
     case "Switching regulator":
       if (isNum(pinW) && isNum(poutW)) { pdCalcW = pinW - poutW; how = "Vin × Iin − Vout × Iout"; }
       else if (count(vout, iout, eff) < 3 || eff === 0) problem = "needs Vout, Iout, efficiency";
+      else if (eff > 1) problem = "needs the efficiency as a fraction (0.85, not 85)";
       else { pdCalcW = poutW * (1 / eff - 1); how = "Vout × Iout × (1/η − 1)"; }
       break;
     case "Digital load (V x I)":
@@ -680,6 +686,8 @@ function loadPower(p) {
       if (!isNum(meas)) problem = "needs Pd measured";
       break;
   }
+  if (Math.abs(pdCalcW) < 1e-9) pdCalcW = 0;     // equal in and out through different factors: rounding, not a loss below zero
+  if (pdCalcW < 0) { problem = `gives ${+pdCalcW.toPrecision(3)} W, below zero: check the values (Vout over Vin?)`; pdCalcW = how = undefined; }
   const pdW = isNum(meas) ? meas : pdCalcW;
   if (isNum(meas)) { how = "Pd measured" + (isNum(pdCalcW) ? ` (calculated ${+pdCalcW.toFixed(3)} W)` : ""); problem = undefined; }
   return { method, pinW, poutW, pdCalcW, pdW, problem, how };
@@ -765,19 +773,24 @@ function markDirty() {
 }
 function notes() {
   const out = [], by = Object.fromEntries(board.parts.map(p => [p.refDes, p]));
+  const noHeat = [], halfJ = [], noTj = [];     // the same note for many parts: one line that lists them
   for (const ref of order.filter(r => parts[r])) {
     const p = parts[ref], b = by[ref];
     if (!b) { out.push(`<li class="error">${esc(ref)} is not in the EDB and will be skipped.</li>`); continue; }
     if (pdOf[ref]?.problem) out.push(`<li class="warn">${esc(ref)}: ${esc(p.cls)} ${esc(pdOf[ref].problem)}, so Pd is not calculated. The Pd typed in Parts is used.</li>`);
     if (!(p.powerW > 0)) {
-      out.push(p.heightMm > 0 || b.stepHMm > 0 ? `<li class="mut">${esc(ref)}: no power, so a block without heat. It shapes the air flow and spreads heat.</li>`
-                                               : `<li class="warn">${esc(ref)} has no power and no height: nothing is made for it.</li>`);
+      if (p.heightMm > 0 || b.stepHMm > 0) noHeat.push(ref);
+      else out.push(`<li class="warn">${esc(ref)} has no power and no height: nothing is made for it.</li>`);
       continue;
     }
     if (!(p.heightMm > 0) && !(b.stepHMm > 0) && b.hMm < 0.2) out.push(`<li class="warn">${esc(ref)}: the EDB height is ${b.hMm.toFixed(2)} mm, a placeholder. 0.2 mm is used until you type the real height.</li>`);
-    if (p.rjcCW > 0 !== p.rjbCW > 0) out.push(`<li class="warn">${esc(ref)}: Rjc and Rjb are both needed for a junction model. A plain block is used until both are given.</li>`);
-    if (p.rjaCW > 0 && !(p.tjMaxC > 0)) out.push(`<li class="mut">${esc(ref)}: no Tj max, so no margin check.</li>`);
+    if (p.rjcCW > 0 !== p.rjbCW > 0) halfJ.push(ref);
+    if (p.rjaCW > 0 && !(p.tjMaxC > 0)) noTj.push(ref);
   }
+  const list = a => esc(a.length > 1 ? a.slice(0, -1).join(", ") + " and " + a.at(-1) : a[0]);
+  if (halfJ.length) out.push(`<li class="warn">${list(halfJ)}: Rjc and Rjb are both needed for a junction model. A plain block is used until both are given.</li>`);
+  if (noTj.length) out.push(`<li class="mut">${list(noTj)}: no Tj max, so no margin check.</li>`);
+  if (noHeat.length) out.push(`<li class="mut">${list(noHeat)}: no power, so ${noHeat.length > 1 ? "blocks" : "a block"} without heat. ${noHeat.length > 1 ? "They shape" : "It shapes"} the air flow and spread${noHeat.length > 1 ? "" : "s"} heat.</li>`);
   $("notes").innerHTML = out.join("");
 }
 
@@ -1160,7 +1173,9 @@ function renderMeshCheck() {
   if (warn.length) warn.push("Fix this first: a run that is not converged or not balanced says nothing about the mesh.");
   readRows();
   const m = mc.yours.mesh, mode = getS("mesh.mode");
-  const local = Object.fromEntries(order.filter(r => parts[r]?.meshMm > 0).map(r => [r, parts[r].meshMm]));
+  // a junction model gets no local mesh in AEDT, so the check recorded none for it
+  const nets = new Set((state?.blocks || []).filter(b => b.kind === "Network").map(b => b.refDes));
+  const local = Object.fromEntries(order.filter(r => parts[r]?.meshMm > 0 && !nets.has(r)).map(r => [r, parts[r].meshMm]));
   const meshSame = mode === m.mode && (mode === "manual" ? same(getS("mesh.maxMm"), m.maxMm) : same(getS("mesh.level"), +m.level))
     && JSON.stringify(Object.entries(local).sort()) === JSON.stringify(Object.entries(mc.yours.local || {}).sort());
   const powerSame = Math.abs(sum(A.parts.map(p => p.powerW)) - pagePowerW()) < 1e-3 && same(getS("ambientC"), amb);
@@ -1190,38 +1205,57 @@ function renderResult(r) {
   const hand = hcLast ? hcLast.parts : {};
   const rows = r.parts.map(p => {
     const over = p.tjMaxC != null && p.tempC != null && p.tempC > p.tjMaxC, h = hand[p.refDes]?.minor ? undefined : hand[p.refDes]?.tjC;
-    return `<tr><td><b>${esc(p.refDes)}</b></td><td class="n">${p.powerW} W</td><td class="n${over ? " error" : ""}"><b>${f(p.tempC)}</b></td>
-      <td class="n">${p.tjMaxC != null ? p.tjMaxC + " &deg;C" : ""}</td><td class="n">${p.tempC != null && p.tjMaxC != null ? (p.tjMaxC - p.tempC).toFixed(1) + " K" : ""}</td>
-      <td class="n">${isNum(h) ? f(h) : ""}</td></tr>`;
+    // margin as a share of the rise allowed above ambient (Tj max − ambient): °C ratios depend on where 0 is
+    const m = p.tempC != null && p.tjMaxC != null ? p.tjMaxC - p.tempC : null, room = p.tjMaxC - r.ambientC;
+    return `<tr><td><b>${esc(p.refDes)}</b></td><td class="n">${p.tjMaxC != null ? p.tjMaxC + " &deg;C" : ""}</td><td class="n">${isNum(h) ? f(h) : ""}</td>
+      <td class="n${over ? " error" : ""}"><b>${f(p.tempC)}</b></td>
+      <td class="n${over ? " error" : ""}">${m == null ? "" : room > 0 ? `${(m / room * 100).toFixed(0)} % (${m.toFixed(1)} K)` : `${m.toFixed(1)} K`}</td></tr>`;
   }).join("");
   const c = r.converged, bad = c && c.items.filter(i => i.ok === false).map(i => i.name).join(", ");
-  const used = c?.iterations ? ` after ${c.iterations} of ${c.maxIterations ?? "?"} iterations` : "";
+  const it = c?.iterations, its = it === 1 ? "iteration" : "iterations";
+  const used = it ? (c.continued ? ` after ${it} more ${its} (${c.totalIterations} in all; it went on from the last solution, limit ${c.maxIterations ?? "?"} per solve)`
+    : ` after ${it} of ${c.maxIterations ?? "?"} iterations`)
+    : c?.totalIterations ? ` after ${c.totalIterations} iterations in all (how many in this solve is not known)` : "";
+  const span = "the last 10 % of this solve's iterations";
   const conv = !c ? "" : !c.read ? '<li class="warn">Convergence could not be read. Check the residuals in AEDT.</li>'
     : c.ok ? `<li class="ok">Converged: residuals are below the setup limits${used}.</li>`
     : `<li class="error">Not converged (${esc(bad)})${used}${c.hitMax ? ": it used them all, raise Iterations max" : ""}. Do not trust these numbers. Raise the iterations or refine the mesh.</li>`;
   const mon = r.monitors || [], moving = mon.filter(m => m.ok === false);
   const settle = !mon.length ? "" : moving.length
-    ? `<li class="error">Temperatures still moving over the last 10 % of the iterations: ${moving.map(m => `${esc(m.refDes)} ${m.driftK} K`).join(", ")}. Do not trust these numbers yet.</li>`
-    : mon.some(m => m.ok) ? `<li class="ok">Temperatures settled: every monitor moved ${Math.max(...mon.filter(m => m.ok).map(m => m.driftK))} K or less over the last 10 % of the iterations.</li>` : "";
+    ? `<li class="error">Temperatures still moving over ${span}: ${moving.map(m => `${esc(m.refDes)} ${m.driftK} K`).join(", ")}. Do not trust these numbers yet.</li>`
+    : mon.some(m => m.ok) ? `<li class="ok">Temperatures settled: every monitor moved ${Math.max(...mon.filter(m => m.ok).map(m => m.driftK))} K or less over ${span}.</li>` : "";
   const pf = r.profile;
   const prof = !pf ? "" : `<li class="${(pf.status || "").startsWith("Normal") ? "ok" : "warn"}">Mesh ${pf.cells != null ? pf.cells.toLocaleString("en") + " cells" : "size not read"}${pf.nodes != null ? ", " + pf.nodes.toLocaleString("en") + " nodes" : ""}. Solver ${esc(pf.status || "status not read")}, ${esc(pf.memory || "?")} memory, ${pf.cores ?? "?"} cores.</li>`;
   const plots = (c?.items || []).some(i => i.history) || mon.some(m => m.history) ? `<div class="plots">
-      ${(c?.items || []).some(i => i.history) ? `<figure><figcaption>Residuals per iteration (log scale). Dashed: the limits.</figcaption>${lineSvg(c.items.filter(i => i.history).map(i => ({ name: i.name, pts: i.history, limit: i.limit })), true)}</figure>` : ""}
-      ${mon.some(m => m.history) ? `<figure><figcaption>Heat source temperature per iteration (&deg;C). Flat at the end means settled.</figcaption>${lineSvg(mon.filter(m => m.history).map(m => ({ name: m.refDes, pts: m.history })), false)}</figure>` : ""}
+      ${(c?.items || []).some(i => i.history) ? `<figure><figcaption>Residuals per iteration (log scale). Dashed: the limits.</figcaption>${lineSvg(c.items.filter(i => i.history).map(i => ({ name: i.name, pts: i.history, limit: i.limit })), true, "res")}</figure>` : ""}
+      ${mon.some(m => m.history) ? `<figure><figcaption>Heat source temperature per iteration (&deg;C). Flat at the end means settled.</figcaption>${lineSvg(mon.filter(m => m.history).map(m => ({ name: m.refDes, pts: m.history })), false, "mon")}</figure>` : ""}
     </div>` : "";
   const b = r.balance, split = b && b.radiationW != null ? `, ${b.convectionW} W convection, ${b.radiationW} W radiation` : "";
   const bal = !b ? "" : b.radiation ? `<li class="warn">Energy balance not checked: radiation is on, and the monitors count only convection (${b.outW} W of ${b.inW} W). Solve again to check it.</li>` : `<li class="${Math.abs(b.errorPct) <= 1 ? "ok" : "error"}">Energy balance: ${b.inW} W in, ${b.outW} W out (${split.slice(2)}${split ? ", " : ""}${b.errorPct > 0 ? "+" : ""}${b.errorPct} %).${b.refFixW ? ` Corrected by ${b.refFixW} W for the solver's 25 &deg;C air reference (AEDT reports ${b.rawOutW} W out).` : ""}${Math.abs(b.errorPct) <= 1 ? "" : " Not balanced: do not trust these numbers."}</li>`;
   $("result").innerHTML = `<ul class="plain checks">${conv}${settle}${bal}${prof}</ul>${plots}<dl class="kv" style="margin-top:10px"><dt>Board hottest</dt><dd>${f(r.boardC)}</dd><dt>Board average</dt><dd>${f(r.boardMeanC)}</dd><dt>Hottest measured</dt><dd>${f(r.hottestC)}</dd><dt>Ambient</dt><dd>${r.ambientC} &deg;C</dd></dl>
-    <div class="scroll"><table><thead><tr><th>Heat source</th><th class="n">Power</th><th class="n">Icepak</th><th class="n">Tj max</th><th class="n">Margin</th><th class="n">Hand check Tj</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    <div class="scroll"><table><thead><tr><th>Heat source</th><th class="n">Tj max</th><th class="n">Hand check Tj</th><th class="n">Icepak</th><th class="n" data-tip="Tj max minus the Icepak temperature, as a share of the rise allowed above ambient (Tj max minus ambient), then in K">Margin</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 /* ---- a small line plot of histories per iteration: [{name, pts: [[x, y]], limit?}] ---- */
 const PLOT_C = ["--cold", "--hot", "--ok", "--mild", "--act", "--wire", "--err", "--warn"];
-function lineSvg(series, log) {
+const PLOTS = {}, PLOT_HIDE = {};     // per plot id: what it draws, and the lines hidden from its keys (kept over re-renders)
+function lineSvg(all, log, id) {
   const W = 520, H = 220, L = 54, R = 10, T = 10, B = 30;
+  PLOTS[id] = { all, log };
+  const hide = PLOT_HIDE[id] ||= new Set();
+  for (const n of [...hide]) if (!all.some(s => s.name === n)) hide.delete(n);     // a line no longer drawn (radiation off) is not hidden
+  // colour by place in the whole list, so a line keeps its colour when others are hidden
+  let series = all.map((s, i) => ({ ...s, col: `var(${PLOT_C[i % PLOT_C.length]})` }));
+  const keys = series.map(s => `<button type="button" class="key${hide.has(s.name) ? " off" : ""}" data-plot="${id}" data-name="${esc(s.name)}" title="Click to hide or show ${esc(s.name)}"><i style="background:${s.col}"></i>${esc(s.name)}</button>`).join("")
+    + (hide.size ? `<button type="button" class="key all" data-plot="${id}">Show all</button>` : "");
+  series = series.filter(s => !hide.has(s.name));
+  const shown = series.length;
+  // a residual is 0 in the first iterations: no place on a log axis, it would stretch it down to 1e-30
+  if (log) series = series.map(s => ({ ...s, pts: s.pts.filter(p => p[1] > 0) })).filter(s => s.pts.length);
   const tf = v => log ? Math.log10(Math.max(v, 1e-30)) : v;
   const xs = series.flatMap(s => s.pts.map(p => p[0])), ys = series.flatMap(s => [...s.pts.map(p => tf(p[1])), ...(s.limit ? [tf(s.limit)] : [])]);
-  if (!xs.length) return "";
+  if (!xs.length) return `<div class="plotbox" data-plot="${id}"><svg viewBox="0 0 ${W} ${H}" class="plot" role="img">
+    <text x="${W / 2}" y="${H / 2}" text-anchor="middle" class="pt">${shown ? "No value above 0 to draw on a log scale" : "All lines hidden"}</text></svg><div class="keys">${keys}</div></div>`;
   const x0 = Math.min(...xs), x1 = Math.max(...xs) || 1;
   let y0 = Math.min(...ys), y1 = Math.max(...ys);
   if (log) { y0 = Math.floor(y0); y1 = Math.ceil(y1); } else { const pad = (y1 - y0) * 0.05 || 0.5; y0 -= pad; y1 += pad; }
@@ -1230,17 +1264,24 @@ function lineSvg(series, log) {
   const ticks = log ? Array.from({ length: y1 - y0 + 1 }, (_, i) => y0 + i).filter((_, i, a) => a.length <= 8 || i % 2 === 0)
     : Array.from({ length: 5 }, (_, i) => y0 + (y1 - y0) * i / 4);
   const grid = ticks.map(t => `<line x1="${L}" x2="${W - R}" y1="${py(t)}" y2="${py(t)}" class="pg"/><text x="${L - 6}" y="${py(t) + 4}" text-anchor="end" class="pt">${log ? "1e" + t : t.toFixed(1)}</text>`).join("");
-  const lines = series.map((s, i) => {
-    const col = `var(${PLOT_C[i % PLOT_C.length]})`;
+  const lines = series.map(s => {
     const d = s.pts.map((p, j) => `${j ? "L" : "M"}${px(p[0]).toFixed(1)} ${py(tf(p[1])).toFixed(1)}`).join("");
-    const lim = s.limit ? `<line x1="${L}" x2="${W - R}" y1="${py(tf(s.limit))}" y2="${py(tf(s.limit))}" stroke="${col}" stroke-dasharray="4 4" stroke-width="1" opacity=".7"/>` : "";
-    return `<path d="${d}" fill="none" stroke="${col}" stroke-width="1.6"/>${lim}`;
+    const lim = s.limit ? `<line x1="${L}" x2="${W - R}" y1="${py(tf(s.limit))}" y2="${py(tf(s.limit))}" stroke="${s.col}" stroke-dasharray="4 4" stroke-width="1" opacity=".7"/>` : "";
+    return `<path d="${d}" fill="none" stroke="${s.col}" stroke-width="1.6"/>${lim}`;
   }).join("");
-  const keys = series.map((s, i) => `<span><i style="background:var(${PLOT_C[i % PLOT_C.length]})"></i>${esc(s.name)}</span>`).join("");
-  return `<svg viewBox="0 0 ${W} ${H}" class="plot" role="img">${grid}
+  return `<div class="plotbox" data-plot="${id}"><svg viewBox="0 0 ${W} ${H}" class="plot" role="img">${grid}
     <line x1="${L}" x2="${W - R}" y1="${H - B}" y2="${H - B}" class="pa"/><text x="${L}" y="${H - 8}" class="pt">${x0}</text>
-    <text x="${W - R}" y="${H - 8}" text-anchor="end" class="pt">${x1} iterations</text>${lines}</svg><div class="keys">${keys}</div>`;
+    <text x="${W - R}" y="${H - 8}" text-anchor="end" class="pt">${x1} iterations</text>${lines}</svg><div class="keys">${keys}</div></div>`;
 }
+document.addEventListener("click", e => {      // a plot key hides or shows its line; the axis fits what is left
+  const k = e.target.closest(".plots .key");
+  if (!k) return;
+  const id = k.dataset.plot, hide = PLOT_HIDE[id], p = PLOTS[id], box = k.closest(".plotbox");
+  if (k.classList.contains("all")) hide.clear();
+  else if (hide.has(k.dataset.name)) hide.delete(k.dataset.name);
+  else hide.add(k.dataset.name);
+  if (p && box) box.outerHTML = lineSvg(p.all, p.log, id);
+});
 
 /* ---- kept runs: one row per solve, to compare what a change did ---- */
 let runsSig = null;
@@ -1264,7 +1305,8 @@ function renderRuns(list) {
     const set = SET.map(([, get]) => { const v = String(get(s)); return `<td class="n${older && v !== String(get(older)) ? " chg" : ""}">${esc(v)}</td>`; }).join("");
     const conv = !c ? "" : !c.read ? '<td class="warn">not read</td>' : c.ok ? '<td class="ok">yes</td>' : '<td class="error">no</td>';
     const bal = !b || b.errorPct == null || b.radiation ? "<td></td>" : `<td class="n ${Math.abs(b.errorPct) <= 1 ? "ok" : "error"}">${b.errorPct > 0 ? "+" : ""}${b.errorPct} %</td>`;
-    const used = c?.iterations ? `<td class="n${c.hitMax ? " error" : ""}">${c.iterations}${c.maxIterations ? " / " + c.maxIterations : ""}</td>` : "<td></td>";
+    const used = c?.iterations ? `<td class="n${c.hitMax ? " error" : ""}">${c.iterations}${c.maxIterations ? " / " + c.maxIterations : ""}${c.continued ? ` <small>(went on, ${c.totalIterations} in all)</small>` : ""}</td>`
+      : c?.totalIterations ? `<td class="n mut">? <small>(${c.totalIterations} in all)</small></td>` : "<td></td>";
     const ds = (res.monitors || []).filter(m => m.driftK != null), drift = ds.length ? Math.max(...ds.map(m => m.driftK)) : null;
     const settled = drift == null ? "<td></td>" : `<td class="n ${ds.every(m => m.ok) ? "ok" : "error"}">${drift} K</td>`;
     const cells = `<td class="n">${res.profile?.cells != null ? res.profile.cells.toLocaleString("en") : ""}</td>`;
@@ -1274,8 +1316,8 @@ function renderRuns(list) {
       <td><button data-rm title="Remove this run from the table and delete its file">Remove</button></td></tr>`;
   }).join("");
   $("runs").innerHTML = `<div class="scroll"><table><thead><tr><th>When</th><th>What</th><th>Note</th>${SET.map(([h]) => `<th class="n">${h}</th>`).join("")}
-    <th>Converged</th><th class="n" title="Iterations the solver used, of the most allowed. Red: it used them all and stopped there, not converged.">Iterations used</th>
-    <th class="n" title="The most any heat source temperature still moved over the last 10 % of the iterations. Red: more than 0.1 K, not settled.">Still moving</th>
+    <th>Converged</th><th class="n" title="Iterations this solve used, of the most allowed per solve. A solve that went on from the last solution also shows the count since the solution started. Red: it used them all and stopped there, not converged.">Iterations used</th>
+    <th class="n" title="The most any heat source temperature still moved over the last 10 % of this solve's iterations. Red: more than 0.1 K, not settled.">Still moving</th>
     <th class="n">Balance</th><th class="n" title="Mesh cells, from the solver profile.">Cells</th><th class="n">Board hottest (&deg;C)</th><th class="n">Board average (&deg;C)</th>
     ${refs.map(r => `<th class="n">${esc(r)} (&deg;C)</th>`).join("")}<th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
@@ -1432,6 +1474,7 @@ function notSent() {       // what Apply cannot put in AEDT
       continue;
     }
     if (p.rjbCW > 0 && !(p.rjcCW > 0)) out.push(`${ref}: Rjb without Rjc. A junction model needs both, so AEDT gets a plain block and Rjb stays on the page.`);
+    if (p.meshMm > 0 && p.rjcCW > 0 && p.rjbCW > 0) out.push(`${ref}: local mesh on a junction model. It stops the solver, so AEDT gets none there and it stays on the page.`);
   }
   const res = parseInt($("pcbRes").value, 10), was = srv.built?.pcbResolution;
   if (built && was && res !== was) out.push(`PCB mapping ${res}: only Build changes it. The project keeps ${was}.`);

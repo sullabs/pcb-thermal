@@ -172,8 +172,7 @@ def main(folder: Path, mode: str = "build") -> int:
         else:
             if not project_file.exists():
                 raise RuntimeError("No built project yet. Press Build first.")
-            ic = step("open project", lambda: Icepak(project=str(project_file), design=DESIGN, version=VERSION,
-                                                    new_desktop=False, port=PORT), fatal=True)
+            ic = step("open project", lambda: _open(Icepak, project_file), fatal=True)
         if mode == "open":
             check("ok", f"Opened {project_file.name} in AEDT")
         if mode == "update":
@@ -297,11 +296,11 @@ def _build(Hfss3dLayout, Icepak, desktop, folder, board, study):
 # ---------------------------------------------------------------- apply (same for build and update)
 
 def _apply(ic, board, by_ref, parts, study):
-    step("parts", lambda: _blocks(ic, board, by_ref, parts, study))
+    rebuilt = step("parts", lambda: _blocks(ic, board, by_ref, parts, study)) or set()
     step("air", lambda: _air(ic, study, board))
     step("environment", lambda: _environment(ic, study))
     step("setup", lambda: _setup(ic, study))
-    step("mesh", lambda: _mesh(ic, parts, study))
+    step("mesh", lambda: _mesh(ic, parts, study, rebuilt))
 
 
 def thermal(ic):
@@ -459,6 +458,9 @@ def _crossing(P, Q):
 
 
 def _blocks(ic, board, by_ref, parts, study):
+    """make or fix one block per part. Returns the RefDes of the blocks made new (a local mesh on the old block does
+    not follow the new one)"""
+    rebuilt = set()
     m = ic.materials.add_material(PKG)
     if m:
         m.thermal_conductivity = study["packageK"]
@@ -516,6 +518,7 @@ def _blocks(ic, board, by_ref, parts, study):
         if cur is not None or ref in objects:
             _delete_block(ic, ref)
         obj = ic.modeler.create_box([-l / 2, -w / 2, z], [l, w, h], name=ref, material=mat)
+        rebuilt.add(ref)
         if not obj:
             check("error", f"{ref}: block not created")
             continue
@@ -543,6 +546,7 @@ def _blocks(ic, board, by_ref, parts, study):
     if parts:
         check("ok" if made == len(parts) else "error",
               f"{made} of {len(parts)} parts in AEDT: {nets} with a junction model (Rjc, Rjb), {passive} without power")
+    return rebuilt
 
 
 def _air(ic, study, board):
@@ -600,7 +604,9 @@ def _setup(ic, study):
             check("ok","Radiation changed: old solution deleted, the next solve starts fresh")
 
 
-def _mesh(ic, parts, study):
+def _mesh(ic, parts, study, rebuilt=()):
+    """global mesh and one local mesh region per part with meshMm. `rebuilt`: blocks _blocks made new, whose old
+    region is made again"""
     m = study["mesh"]
     gm = ic.mesh.global_mesh_region
     manual = m.get("mode") == "manual"
@@ -617,22 +623,20 @@ def _mesh(ic, parts, study):
         else:
             gm.settings["MeshRegionResolution"] = int(m.get("level", 3))
         gm.update()
-    wanted = {p["refDes"]: p["meshMm"] for p in parts if p.get("meshMm")}
+    # a junction model block is hollow (not meshed inside): a mesh region on it leaves it with no mesh at all and the
+    # solver stops with an execution error (seen 2026-11-02). Taken from AEDT's block type, not the page's Rjc and Rjb:
+    # a junction model AEDT refused is a plain block, which can take a local mesh
+    nets = _networks(ic)
+    hollow = sorted(p["refDes"] for p in parts if p.get("meshMm") and p["refDes"] in nets)
+    if hollow:
+        check("warn", f"{', '.join(hollow)}: no local mesh. A junction model (Rjc and Rjb) is not meshed inside, and a "
+                      f"local mesh on it stops the solver. The global mesh is used there.")
+    wanted = {p["refDes"]: p["meshMm"] for p in parts if p.get("meshMm") and p["refDes"] not in nets}
     have = local_mesh(ic)
-    stale = [ref for ref, size in have.items() if wanted.get(ref) != size]
-    if stale:
-        for r in list(ic.mesh.meshregions):
-            if r.name[5:] in stale and r.name.startswith("Mesh_") and not r.name.endswith("_SubRegion"):
-                try:
-                    r.delete()
-                except BaseException:  # noqa: BLE001  AEDT removes the sub-region together with the region
-                    pass
-        for ref in stale:
-            have.pop(ref)
-    for o in [o for o in ic.modeler.object_names if o.startswith("Mesh_") and o.endswith("_SubRegion")
-              and o[5:-10] not in wanted]:
-        ic.modeler.delete(o)
-    ic.modeler.refresh_all_ids()
+    stale = [ref for ref, size in have.items() if wanted.get(ref) != size or ref in rebuilt]
+    _drop_local(ic, stale)
+    for ref in stale:
+        have.pop(ref)
     for ref, size in wanted.items():
         if ref in have:
             continue
@@ -655,6 +659,45 @@ def local_mesh(ic):
             for n in ic.get_oo_name(ic.odesign, "Mesh") if n.startswith("Mesh_") and not n.endswith("_SubRegion")}
 
 
+def _networks(ic, tree=None):
+    """RefDes of the junction model (Network) blocks in AEDT"""
+    if tree is None:
+        _, tree = thermal(ic)
+    names = set(ic.modeler.object_names)
+    return {n[2:] for n, d in tree.items() if n.startswith("P_") and d["type"] == "Network" and n[2:] in names}
+
+
+def _drop_local(ic, refs):
+    """delete the local mesh regions of `refs`, then every sub-region box no mesh region uses. AEDT keeps a deleted
+    region's box, renamed SubRegion<n>: left there it overlaps the part's new box, the part gets no mesh and the solve
+    fails. Boxes left by earlier runs go too. Returns how many boxes were deleted"""
+    refs = set(refs)
+    if refs:
+        for r in list(ic.mesh.meshregions):
+            if r.name.startswith("Mesh_") and not r.name.endswith("_SubRegion") and r.name[5:] in refs:
+                try:
+                    r.delete()
+                except BaseException:  # noqa: BLE001  AEDT removes the sub-region together with the region
+                    pass
+    ic.modeler.refresh_all_ids()
+    node = ic.get_oo_object(ic.odesign, "Mesh")
+    used = set()
+    for n in ic.get_oo_name(ic.odesign, "Mesh"):
+        try:
+            a = ic.get_oo_property_value(node, n, "Assignment")
+        except BaseException:  # noqa: BLE001
+            if n.startswith("Mesh_"):
+                return 0        # a region whose box is not known: delete nothing rather than its box
+            continue            # the global region has no sub-region
+        used.update(a if isinstance(a, (list, tuple)) else [s.strip() for s in str(a).split(",")])
+    orphans = [o for o in ic.modeler.object_names if "subregion" in o.lower() and o not in used]
+    for o in orphans:
+        ic.modeler.delete(o)
+    if orphans:
+        ic.modeler.refresh_all_ids()
+    return len(orphans)
+
+
 def _mesh_now(ic):
     t = time.time()
     ok = ic.mesh.generate_mesh(SETUP)
@@ -675,11 +718,21 @@ def _mesh_sig(geo, mesh, pad):
 # ---------------------------------------------------------------- solve
 
 def _hollow(ic):
-    """network blocks must not be meshed inside, also in projects built before this was set"""
-    _, tree = thermal(ic)
-    for n, d in tree.items():
-        if d["type"] == "Network" and n.startswith("P_") and ic.modeler[n[2:]].solve_inside:
-            ic.modeler[n[2:]].solve_inside = False
+    """network blocks must not be meshed inside and must have no local mesh (it stops the solver), also in projects
+    built before this was set; sub-region boxes no region uses go too. Returns True if the mesh changed"""
+    nets = _networks(ic)
+    for ref in nets:
+        if ic.modeler[ref].solve_inside:
+            ic.modeler[ref].solve_inside = False
+    bad = sorted(set(local_mesh(ic)) & nets)
+    boxes = _drop_local(ic, bad)
+    if bad:
+        check("warn", f"{', '.join(bad)}: local mesh removed. A junction model is not meshed inside, and a local mesh on "
+                      f"it stops the solver. The global mesh is used there.")
+    if boxes:
+        check("warn", f"{boxes} leftover mesh sub-region box{'es' if boxes > 1 else ''} removed (left by a deleted local "
+                      f"mesh; it would leave its part with no mesh)")
+    return bool(bad or boxes)
 
 
 def _sources(ic, powered):
@@ -702,8 +755,9 @@ def _sources(ic, powered):
 
 def _monitors(ic, sources, board):
     """one point monitor T_<ref> per heat source, made fresh for each solve. A network block is hollow, so its
-    monitor sits on the case side face (the face away from the board), a plain block gets it at its centre."""
-    for n in [n for n in ic.get_oo_name(ic.odesign, "Monitor") if n.startswith("T_")]:
+    monitor sits on the case side face (the face away from the board), a plain block gets it at its centre.
+    The Q_ heat flow face monitors older versions made go too."""
+    for n in [n for n in ic.get_oo_name(ic.odesign, "Monitor") if n.startswith(("T_", "Q_"))]:
         ic.monitor.delete_monitor(n)
     _, zhi = board_z(ic, board)
     for s in sources:
@@ -741,16 +795,17 @@ def _fmax(ic, obj, op="Maximum"):
             pass
 
 
-def _temp(ic, ref, hollow):
+def _temp(ic, ref, hollow, monitor=None):
     """temperature of a heat source: field maximum for a block, case-side monitor for a hollow network block.
-    The field calculator must never see a hollow block: the failed call breaks the whole AEDT session."""
+    The field calculator must never see a hollow block: the failed call breaks the whole AEDT session.
+    `monitor`: the monitor's final value when it was already read"""
     v = None if hollow else _fmax(ic, ref)
     if v is not None:
         return v
+    if monitor is not None:
+        return round(monitor, 2)
     try:
-        sd = ic.post.get_solution_data(expressions=[f"T_{ref}.Temperature"], setup_sweep_name=f"{SETUP} : SteadyState",
-                                       report_category="Monitor")
-        return round(float(sd.get_expression_data(sd.expressions[0])[1][-1]), 2)
+        return round(_final(ic, f"T_{ref}.Temperature", "Monitor"), 2)
     except BaseException:  # noqa: BLE001  one missing value must not stop the others
         return None
 
@@ -765,8 +820,6 @@ def _balance(ic, total_w, ambient):
     The convective flow is counted from 25 C, not from the ambient: air that comes in and goes out in slightly
     different amounts (the leftover mass flow of a converged run) then adds mass flow x cp x (ambient - 25 C), several %
     at 55 C ambient and nothing at 25 C. That part is taken off, so the balance checks the physics."""
-    for n in [n for n in ic.get_oo_name(ic.odesign, "Monitor") if n.startswith("Q_")]:
-        ic.monitor.delete_monitor(n)    # the heat flow face monitors older versions made
     fs = ic.post.create_field_summary()
     qs = {"outW": "HeatFlowRate", "radiationW": "RadiationFlow", "convectionW": "ConvectiveHeatFlow"}
     for q in [*qs.values(), "MassFlowRate"]:
@@ -791,88 +844,142 @@ def _balance(ic, total_w, ambient):
             "rawOutW": round(abs(raw_out), 4), "netMassKgS": mass, "refFixW": round(abs(fix), 4) if mass is not None else None}
 
 
-def _convergence(ic):
-    """final residuals against the setup's convergence criteria: {"ok": bool, "items": [{name, value, limit, ok}]}"""
+def _convergence(ic, hist):
+    """final residuals against the setup's convergence criteria: {"ok": bool, "items": [{name, value, limit, ok, history}]}.
+    `hist` is _solver_files(ic): the residual files count every iteration since the solution started, a restart
+    included; the monitors cover this solve only, from its first new iteration, so where they start tells a continued
+    solve from a fresh one. With no monitor history this solve's share is not known: `iterations` and `continued`
+    are None then, `totalIterations` is still given"""
     setup = next((x for x in ic.setups if x.name == SETUP), None)
     limit = {"Continuity": "Flow", "XVelocity": "Flow", "YVelocity": "Flow", "ZVelocity": "Flow", "Energy": "Energy"}
     if setup and str(setup.props.get("Radiation Model", "Off")) != "Off":
         limit["DOIntensity"] = "Discrete Ordinates"
-    items, used = [], None
+    res, mons = hist
+    items = []
     for q, crit in limit.items():
         try:
-            x, y = _history(ic, "Residual." + q, "Residual")
-            val = y[-1]
-            if len(y) > 1:      # one point is the final value only: no iteration count, no plot
-                used = max(used or 0, int(x[-1]))
+            val = _final(ic, "Residual." + q, "Residual")
             lim = num(setup.props.get(f"Convergence Criteria - {crit}")) if setup else None
+            h = res.get(q, [])
             items.append({"name": q, "value": val, "limit": lim, "ok": lim is None or val <= lim,
-                          **({"history": _thin(x, y)} if len(y) > 1 else {})})
+                          **({"history": _thin(h)} if len(h) > 1 else {})})
         except BaseException:  # noqa: BLE001
             items.append({"name": q, "value": None, "limit": None, "ok": None})
     known = [i for i in items if i["ok"] is not None]
     most = num(setup.props.get("Convergence Criteria - Max Iterations")) if setup else None
+    total = int(max(h[-1][0] for h in res.values() if h)) if any(res.values()) else None
+    start = min((h[0][0] for h in mons.values() if h), default=None)
+    # a fresh solve's monitors start at iteration 1; a continued one's at the first iteration after the one it went on
+    # from (kept run 20261102-145928: residuals to 424, monitors 423 and 424, so 2 iterations in that solve)
+    run = total - int(start) + 1 if total and start else None
     return {"ok": bool(known) and all(i["ok"] for i in known), "read": len(known), "items": items,
-            "iterations": used, "maxIterations": int(most) if most else None,
-            "hitMax": bool(used and most and used >= most)}
+            "iterations": run, "totalIterations": total, "continued": None if run is None else run != total,
+            "maxIterations": int(most) if most else None, "hitMax": bool(run and most and run >= most)}
 
 
-HISTORY_NOTE = []    # why a history per iteration could not be read, said once in the checks
+def _final(ic, expr, category):
+    """the final value of a residual or monitor, as AEDT reports it"""
+    sd = ic.post.get_solution_data(expressions=[expr], setup_sweep_name=f"{SETUP} : SteadyState", report_category=category)
+    return float(sd.get_expression_data(sd.expressions[0])[1][-1])
 
 
-def _history(ic, expr, category):
-    """a quantity per iteration: (iterations, values). The default call gave only the final value (one point at 0)
-    on 2026-11-02, so ask for the Iteration sweep first. One point back means no history: callers check len > 1"""
-    sweep = f"{SETUP} : SteadyState"
-    x = y = []
-    for kw in ({"primary_sweep_variable": "Iteration", "variations": {"Iteration": ["All"]}}, {}):
-        try:
-            sd = ic.post.get_solution_data(expressions=[expr], setup_sweep_name=sweep, report_category=category, **kw)
-            x, y = [[float(v) for v in a] for a in sd.get_expression_data(sd.expressions[0])[:2]]
-        except BaseException:  # noqa: BLE001  try the next way
+def _solver_files(ic):
+    """residuals and temperature monitors per iteration, read from the files the solver wrote: ({residual: [[it, v]]},
+    {monitor name: [[it, v]]}). AEDT's report API gives only the final value however the sweep is asked for (one
+    point at X = 0, 2026-11-02), so read the files `<design>.asol` names for the setup's solution: DV*_S*_MON0_*.sd
+    holds every residual of every iteration since the solution started (a restart adds to it), DV*_S*_MON<id>_*.sd
+    one monitor over this solve only (a continued solve starts at its first new iteration). The monitor ids are the
+    ID= of each monitor in the saved .aedt, so each history is matched to its monitor by name.
+    Read after the project is saved: before that the .asol names the last solve's files"""
+    root = Path(ic.results_directory)
+    asol = root / f"{DESIGN}.asol"
+    if not asol.exists():
+        asol = next(root.rglob(f"{DESIGN}.asol"), None)
+        if not asol:
+            return {}, {}
+    sd_dir = asol.parent / f"{DESIGN}.results"
+    names = re.findall(r"File='(DV\d+_S\d+_MON(\d+)_V\d+\.sd)'", asol.read_text(encoding="utf-8", errors="replace"))
+    ids = {i: n for n, i in _monitor_ids(ic.project_file).items()}
+    res, mons = {}, {}
+    for name, mid in names:
+        f = sd_dir / name
+        if not f.exists():
             continue
-        if len(y) > 1:
-            break
-    if not y:
-        raise RuntimeError(f"{expr}: no data")
-    if len(y) > 1 and len(set(x)) < len(x):    # a sweep that is not the iteration: count the points
-        x = [float(i) for i in range(1, len(y) + 1)]
-    if len(y) < 2 and not HISTORY_NOTE:
-        try:    # name the sweeps AEDT has, so the next fix can ask for the right one
-            r = ic.oreportsetup.GetSolutionDataPerVariation(category, sweep, [], [], expr)[0]
-            HISTORY_NOTE.append(", ".join(f"{n} ({len(list(r.GetSweepValues(n)))} values)" for n in r.GetSweepNames()) or "none")
-        except BaseException as ex:  # noqa: BLE001
-            HISTORY_NOTE.append(f"not read: {type(ex).__name__}")
-    return x, y
+        rows = {}
+        for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
+            head, _, rest = line.strip().partition(" ")
+            try:
+                it = float(head)
+                if it < 1:      # the solution block's own file holds only the final value, at iteration -1
+                    continue
+                for q, v in re.findall(r"(\w+)\(([^)]*)\)", rest):
+                    rows.setdefault(q, []).append([it, float(v)])
+            except ValueError:
+                continue
+        if mid == "0":
+            res = rows
+        elif rows.get("Temperature") and ids.get(int(mid), "").startswith("T_"):
+            mons[ids[int(mid)]] = rows["Temperature"]
+    return res, mons
 
 
-def _thin(x, y, most=200):
-    """at most `most` points of a history, the last one always kept: enough for a plot in the page or a report"""
-    k = max(1, -(-len(x) // most))
-    idx = list(range(0, len(x), k))
-    if idx[-1] != len(x) - 1:
-        idx.append(len(x) - 1)
-    return [[x[i], y[i]] for i in idx]
+def _monitor_ids(project_file):
+    """{monitor name: id} from the IcepakMonitors block of the saved project file"""
+    txt = Path(project_file).read_bytes().decode("latin-1")
+    i = txt.find("$begin 'IcepakMonitors'")
+    j = txt.find("$end 'IcepakMonitors'", i)
+    if i < 0 or j < 0:
+        return {}
+    out, stack = {}, []
+    for line in txt[i:j].splitlines()[1:]:
+        s = line.strip()
+        m = re.fullmatch(r"\$begin '(.*)'", s)
+        if m:
+            stack.append(m.group(1))
+        elif s.startswith("$end "):
+            if stack:
+                stack.pop()
+        elif len(stack) == 1 and (m := re.fullmatch(r"ID=(\d+)", s)):
+            out[stack[0]] = int(m.group(1))
+    return out
+
+
+def _thin(h, most=200):
+    """at most `most` points of a history [[x, y]], the last one always kept: enough for a plot in the page or a report"""
+    k = max(1, -(-len(h) // most))
+    idx = list(range(0, len(h), k))
+    if idx[-1] != len(h) - 1:
+        idx.append(len(h) - 1)
+    return [h[i] for i in idx]
 
 
 DRIFT_K = 0.1     # a monitor that still moves more than this over the last 10 % of the iterations is not settled
 
 
-def _monitor_health(ic, powered):
-    """each heat source's temperature monitor per iteration, and how far it still moved over the last 10 %.
-    Residuals under their limits do not prove the temperatures stopped moving; this does"""
-    out = []
+def _monitor_health(ic, powered, hist):
+    """each heat source's temperature monitor per iteration, and how far it still moved over the last 10 % of this
+    solve's iterations (at least its last step). Residuals under their limits do not prove the temperatures stopped
+    moving; this does. Each history (matched by monitor name) is checked against AEDT's own final value before it is
+    used. Returns (monitors, {RefDes: final value}); `read` False on a monitor: no history found or it did not match;
+    True with ok None: one iteration only, nothing to compare"""
+    out, finals = [], {}
     for p in powered:
+        ref = p["refDes"]
         try:
-            x, y = _history(ic, f"T_{p['refDes']}.Temperature", "Monitor")
-            if len(y) < 2:      # the final value only: whether it settled cannot be told
-                out.append({"refDes": p["refDes"], "driftK": None, "ok": None})
-                continue
-            tail = y[int(len(y) * 0.9)]
-            drift = round(abs(y[-1] - tail), 3)
-            out.append({"refDes": p["refDes"], "driftK": drift, "ok": drift <= DRIFT_K, "history": _thin(x, y)})
+            final = finals[ref] = _final(ic, f"T_{ref}.Temperature", "Monitor")
         except BaseException:  # noqa: BLE001  one missing monitor must not stop the others
-            out.append({"refDes": p["refDes"], "driftK": None, "ok": None})
-    return out
+            out.append({"refDes": ref, "driftK": None, "ok": None, "read": False})
+            continue
+        h = hist[1].get(f"T_{ref}", [])
+        if not h or abs(h[-1][1] - final) > 1e-6 * max(1.0, abs(final)):
+            out.append({"refDes": ref, "driftK": None, "ok": None, "read": False})
+        elif len(h) < 2:
+            out.append({"refDes": ref, "driftK": None, "ok": None, "read": True})
+        else:
+            tail = h[min(int(len(h) * 0.9), len(h) - 2)][1]
+            drift = round(abs(h[-1][1] - tail), 3)
+            out.append({"refDes": ref, "driftK": drift, "ok": drift <= DRIFT_K, "read": True, "history": _thin(h)})
+    return out, finals
 
 
 def _profile(ic, since):
@@ -904,12 +1011,14 @@ def _setup_now(ic):
         return {}
     p = s.props
     return {"iterations": num(p.get("Convergence Criteria - Max Iterations")), "flowLimit": num(p.get("Convergence Criteria - Flow")),
-            "energyLimit": num(p.get("Convergence Criteria - Energy")), "radiation": str(p.get("Radiation Model", "Off"))}
+            "energyLimit": num(p.get("Convergence Criteria - Energy")), "radiation": str(p.get("Radiation Model", "Off")),
+            "localMm": local_mesh(ic)}
 
 
 def _keep_run(folder, res, study, parts, powered, setup, label):
     """every solve also goes to runs/<date-time>.json with the settings it ran with, so the page can compare runs.
-    results.json stays the last solve only"""
+    results.json stays the last solve only. `setup` (_setup_now) holds the local meshes as AEDT had them; the page's
+    are only the fallback when it could not be read"""
     runs = folder / "runs"
     runs.mkdir(exist_ok=True)
     rid = time.strftime("%Y%m%d-%H%M%S")
@@ -926,7 +1035,11 @@ def _solve(ic, folder, board, powered, study, parts, write=True, label="Solve"):
     """solve and read the results; written to results.json unless `write` is False, and always kept in runs/.
     Returns them, None if it failed"""
     ambient = study["ambientC"]
-    step("junction blocks hollow", lambda: _hollow(ic))
+    if step("junction blocks hollow", lambda: _hollow(ic)):
+        # the mesh changed: read it now (AEDT cannot be read after the solve), so meshed.json gets the new meshSig
+        state = step("read back", lambda: read_state(ic, board))
+        if state:
+            (folder / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
     powered = _sources(ic, powered)     # from here on the heat sources are the ones in AEDT, with AEDT's power
     step("temperature monitors", lambda: _monitors(ic, powered, board))
     setup = step("setup values", lambda: _setup_now(ic)) or {}
@@ -937,29 +1050,43 @@ def _solve(ic, folder, board, powered, study, parts, write=True, label="Solve"):
         check("error", "Solve failed or was stopped. Open AEDT and read the message window.")
         return None
     check("ok", f"Solved in {_dur(secs)}")
-    conv = _convergence(ic)
+    step("save project", lambda: ic.save_project())     # the .asol names this solve's files only once saved
+    try:    # only for the plots and the iteration count: a failed read is a warning, the result stands
+        hist = _solver_files(ic)
+    except BaseException as ex:  # noqa: BLE001
+        hist = ({}, {})
+        check("warn", f"Solver histories not read ({type(ex).__name__}): no plots, settled check or iteration count")
+    conv = _convergence(ic, hist)
+    n, total = conv["iterations"], conv["totalIterations"]
+    used = (f", after {n} more iteration{'s' if n != 1 else ''} ({total} in all; it went on from the last solution, "
+            f"limit {conv['maxIterations']} per solve)" if n and conv["continued"]
+            else f", after {n} of {conv['maxIterations']} iterations" if n
+            else f", after {total} iterations in all (how many in this solve is not known: no monitor history)" if total
+            else "")
     if not conv["read"]:
         check("warn", "Convergence could not be read. The result files may be stale (AEDT was killed or crashed earlier). "
                       "Press Solve again; if it stays, check the residuals in AEDT before trusting the numbers.")
     elif conv["ok"]:
-        check("ok", "Converged: all residuals are below the setup limits"
-                    + (f", after {conv['iterations']} of {conv['maxIterations']} iterations" if conv["iterations"] else ""))
+        check("ok", "Converged: all residuals are below the setup limits" + used)
     else:
         bad = ", ".join(i["name"] for i in conv["items"] if i["ok"] is False)
-        used = f"; it used all {conv['iterations']} iterations: raise Iterations max" if conv["hitMax"] else ""
-        check("warn", f"NOT converged ({bad}){used}. Raise the iterations or refine the mesh before trusting the numbers.")
-    mon = step("monitor histories", lambda: _monitor_health(ic, powered)) or []
+        full = f"; it used all {n} iterations: raise Iterations max" if conv["hitMax"] else used
+        check("warn", f"NOT converged ({bad}){full}. Raise the iterations or refine the mesh before trusting the numbers.")
+    mon, finals = step("monitor histories", lambda: _monitor_health(ic, powered, hist)) or ([], {})
+    span = "the last 10 % of this solve's iterations"
     moving = [f"{m['refDes']} {m['driftK']} K" for m in mon if m["ok"] is False]
     if moving:
-        check("warn", f"Temperatures still moving over the last 10 % of the iterations: {', '.join(moving)} "
+        check("warn", f"Temperatures still moving over {span}: {', '.join(moving)} "
                       f"(more than {DRIFT_K} K). Tighten the limits or raise the iterations.")
     elif any(m["ok"] for m in mon):
         most = max(m["driftK"] for m in mon if m["ok"])
-        check("ok", f"Temperatures settled: every monitor moved {most} K or less over the last 10 % of the iterations "
-                    f"(limit {DRIFT_K} K)")
-    if HISTORY_NOTE:
-        check("warn", f"History per iteration not read: AEDT gave only the final values, so the iterations used and "
-                      f"whether the temperatures settled are unknown. Sweeps AEDT has: {HISTORY_NOTE[0]}")
+        check("ok", f"Temperatures settled: every monitor moved {most} K or less over {span} (limit {DRIFT_K} K)")
+    if not any(i.get("history") for i in conv["items"]) or any(m["read"] is False for m in mon):
+        check("warn", "History per iteration not read for every item: the solver files were not found or did not match "
+                      "AEDT's final values, so the plots and the settled check may be missing.")
+    elif any(m["ok"] is None for m in mon):
+        check("ok", "Temperatures not checked for settling: this solve ran one iteration only (it went on from a "
+                    "solution that had already converged)")
     prof = step("solver profile", lambda: _profile(ic, t))
     if prof:
         check("ok" if (prof["status"] or "").startswith("Normal") else "warn",
@@ -978,7 +1105,7 @@ def _solve(ic, folder, board, powered, study, parts, write=True, label="Solve"):
         if bal["netMassKgS"] is None and abs(ambient - ENTHALPY_REF_C) > 1:
             check("warn", f"Net air mass flow not read: the balance at {ambient} C ambient is not corrected for the solver's "
                           f"25 C air reference and may be off by a few % for that reason alone.")
-    rows = [{"refDes": p["refDes"], "powerW": p["powerW"], "tempC": _temp(ic, p["refDes"], p["network"]),
+    rows = [{"refDes": p["refDes"], "powerW": p["powerW"], "tempC": _temp(ic, p["refDes"], p["network"], finals.get(p["refDes"])),
              "rjaCW": p["rjaCW"], "tjMaxC": p["tjMaxC"]} for p in powered]
     if any(r["tempC"] is None for r in rows):
         check("warn", "Some temperatures could not be read. Look at the result in AEDT.")
@@ -1001,7 +1128,6 @@ def _solve(ic, folder, board, powered, study, parts, write=True, label="Solve"):
     if write:
         (folder / "results.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
     rid = step("keep the run", lambda: _keep_run(folder, res, study, parts, powered, setup, label))
-    step("save project", lambda: ic.save_project())
     check("ok", f"Board hottest {board} C, board average {board_mean} C, hottest measured {anywhere} C"
                 + ("; results.json written" if write else "") + (f"; kept as runs\\{rid}.json" if rid else ""))
     return res
@@ -1035,20 +1161,21 @@ def _mesh_check(ic, folder, board, parts, powered, study):
     if not fine:
         check("error", "The mesh is already at automatic level 5, the finest. Switch to Manual to check a finer one.")
         return
-    local = lambda ps: {p["refDes"]: p["meshMm"] for p in ps if p.get("meshMm")}  # noqa: E731
     check("ok", f"Mesh check 1 of 2: the finer mesh, {_mesh_text(fine['mesh'])}")
     _mesh(ic, fine_parts, fine)
+    local_b = local_mesh(ic)       # as AEDT holds them: a junction model gets none, whatever the page has
     b = _solve(ic, folder, board, powered, fine, fine_parts, write=False, label="Mesh check, finer")
     check("ok", f"Mesh check 2 of 2: your mesh, {_mesh_text(study['mesh'])}")
     _mesh(ic, parts, study)
+    local_a = local_mesh(ic)
     a = _solve(ic, folder, board, powered, study, parts, label="Mesh check, yours") if b else None
     if not (a and b):
         check("error", "Mesh check stopped: a solve failed")
         return
     (folder / "meshcheck.json").write_text(json.dumps({
         "schema": "pcb-thermal-ansys/meshcheck", "at": time.strftime("%Y-%m-%d %H:%M"), "ambientC": study["ambientC"],
-        "yours": {"mesh": study["mesh"], "local": local(parts), "text": _mesh_text(study["mesh"]), "result": a},
-        "finer": {"mesh": fine["mesh"], "local": local(fine_parts), "text": _mesh_text(fine["mesh"]), "result": b},
+        "yours": {"mesh": study["mesh"], "local": local_a, "text": _mesh_text(study["mesh"]), "result": a},
+        "finer": {"mesh": fine["mesh"], "local": local_b, "text": _mesh_text(fine["mesh"]), "result": b},
     }, indent=1), encoding="utf-8")
     check("ok", "Mesh check done: meshcheck.json written")
 
@@ -1154,6 +1281,16 @@ def read_state(ic, board):
     }
 
 
+def _open(Icepak, project_file):
+    """the folder's project in AEDT. AEDT finds an open project by name: a copy with the same name from another
+    folder would be the one changed (seen 2026-11-03), so that stops here"""
+    ic = Icepak(project=str(project_file), design=DESIGN, version=VERSION, new_desktop=False, port=PORT)
+    if Path(ic.project_file).resolve() != Path(project_file).resolve():
+        raise RuntimeError(f"close the other {project_file.name} in AEDT and try again; it is open from "
+                           f"{Path(ic.project_file).parent}")
+    return ic
+
+
 def read_only(folder, board, project_file):
     """mode read: look at AEDT as it is. Never starts AEDT, never opens a project, never writes checks.json."""
     from ansys.aedt.core import Desktop, Icepak
@@ -1178,7 +1315,10 @@ def read_only(folder, board, project_file):
     try:
         if name not in list(desktop.odesktop.GetProjectList()):
             return closed(f"Project {name} is not open in AEDT")
-        ic = Icepak(project=str(project_file), design=DESIGN, version=VERSION, new_desktop=False, port=PORT)
+        try:
+            ic = _open(Icepak, project_file)
+        except RuntimeError as ex:
+            return closed(str(ex))
         state = read_state(ic, board)
         out.write_text(json.dumps(state, indent=1), encoding="utf-8")
         print("read", state["readAt"])
