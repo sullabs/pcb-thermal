@@ -144,6 +144,9 @@ def main(folder: Path, mode: str = "build") -> int:
     from ansys.aedt.core.generic.settings import settings
     settings.enable_screen_logs = False
     _quiet_history()
+    fresh = mode == "solvefresh"        # a solve that deletes the old solution first, so it starts from nothing
+    if fresh:
+        mode = "solve"
 
     study = load_study(folder)
     if mode == "build" or not (folder / "board.json").exists():
@@ -200,6 +203,8 @@ def main(folder: Path, mode: str = "build") -> int:
         if mode == "mesh":
             meshed = _mesh_now(ic)
         if mode == "solve":
+            if fresh and step("clear old solution", lambda: ic.cleanup_solution()):
+                check("ok", "Old solution deleted: this solve starts fresh")
             step("solve", lambda: _solve(ic, folder, board, powered, study, parts), fatal=True)
         if mode == "meshcheck":
             step("mesh check", lambda: _mesh_check(ic, folder, board, parts, powered, study), fatal=True)

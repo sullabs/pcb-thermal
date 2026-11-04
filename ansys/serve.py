@@ -41,8 +41,8 @@ FOLDER = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 and sys.argv[1] else P
 ROOT = FOLDER
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8765
 WHAT = {"build": "Building the project", "update": "Applying changes", "mesh": "Generating the mesh",
-        "read": "Reading AEDT", "solve": "Solving", "meshcheck": "Checking the mesh (two solves)", "open": "Opening the project"}
-LIMIT = {"solve": 12 * 3600, "meshcheck": 24 * 3600, "mesh": 4 * 3600}     # s; any other job 30 min, the silent read 60 s
+        "read": "Reading AEDT", "solve": "Solving", "solvefresh": "Solving fresh", "meshcheck": "Checking the mesh (two solves)", "open": "Opening the project"}
+LIMIT = {"solve": 12 * 3600, "solvefresh": 12 * 3600,"meshcheck": 24 * 3600, "mesh": 4 * 3600}     # s; any other job 30 min, the silent read 60 s
 job = {"running": False, "what": "", "log": "", "silent": False}
 lock = threading.Lock()
 

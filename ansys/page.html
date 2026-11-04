@@ -1571,8 +1571,16 @@ async function doSolve() {
                         [["apply", "Apply first", true], ["go", "Solve anyway"], CANCEL]);
     if (v === "apply") return doApply();
     if (v !== "go") return;
-  } else if (await ask("Solve now?", "<p>It can take several minutes. The result shows here when it ends.</p>",
+  } else if (!results?.parts && await ask("Solve now?", "<p>It can take several minutes. The result shows here when it ends.</p>",
                        [["go", "Solve", true], CANCEL]) !== "go") return;
+  if (results?.parts) {      // a solution is there: AEDT would go on from it unless it is deleted first
+    const v = await ask("Start fresh or continue?", `<p>AEDT holds the solution solved ${esc(results.solvedAt)}.</p>
+      <p><b>Start fresh</b> deletes it and solves from nothing: a clean residual plot and a true iteration count. It takes longer.</p>
+      <p><b>Continue</b> goes on from it: faster after a small change, but the plot and the count carry the old solves.</p>`,
+                        [["fresh", "Start fresh", true], ["go", "Continue"], CANCEL]);
+    if (v === "fresh") return run("solvefresh");
+    if (v !== "go") return;
+  }
   run("solve");
 }
 async function doMesh() {
