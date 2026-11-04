@@ -69,6 +69,7 @@
   input[type=file] { padding:5px; font-size:13.5px; max-width:300px; }
   .dirty { background:var(--dirty) !important; border-color:var(--dirty-line) !important; }
   input.idle { opacity:.45; }
+  input.auto { color:var(--mut); background:var(--soft); }   /* what an automatic mesh level sets; typing makes it manual */
   input[readonly] { background:var(--soft); }
   td.warn { color:var(--warn); }
   td.chg { font-weight:700; color:var(--act); }
@@ -251,10 +252,8 @@
         <label>Air around (mm)<input type="number" id="margin" data-k="marginMm" step="5" min="5"></label>
         <label>Extra air above (mm)<input type="number" id="above" data-k="marginAboveMm" step="5" min="0"></label>
     </div>
-    <h3 data-tip="Cells in gaps and on edges count only for a manual mesh. PCB mapping changes only on Build. The rest is sent to AEDT on Apply.">Mesh, advanced</h3>
+    <h3 data-tip="How finely the board's copper layers are mapped into AEDT. Changes only on Build.">PCB mapping</h3>
     <div class="row">
-        <label>Cells in gaps<input type="number" id="gapElems" data-k="mesh.gapElems" min="1" step="1"></label>
-        <label>Cells on edges<input type="number" id="edgeElems" data-k="mesh.edgeElems" min="1" step="1"></label>
         <label>PCB mapping (needs Build)<select id="pcbRes"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
     </div>
     <p class="hint">Yellow fields here are changes not yet in AEDT, as on the page.</p>
@@ -347,12 +346,17 @@
 
     <section class="step" id="s-mesh">
       <h2><span class="n">4</span> Mesh</h2>
-      <div class="row">
-        <label class="inline"><input type="radio" name="mm" value="auto" data-k="mesh.mode"> Automatic, level
-          <select id="level" data-k="mesh.level"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
-        <label class="inline"><input type="radio" name="mm" value="manual" data-k="mesh.mode"> Manual, largest element
-          <input type="number" id="maxMm" data-k="mesh.maxMm" step="0.5" min="0.05"> mm</label>
+      <div class="row" id="meshRow">
+        <label>Mesh<select id="level" data-k="mesh.mode"><option value="1">Automatic, level 1</option><option value="2">Automatic, level 2</option>
+          <option value="3">Automatic, level 3</option><option value="4">Automatic, level 4</option><option value="5">Automatic, level 5</option><option value="manual">Manual</option></select></label>
+        <label>Largest element X (mm)<input type="number" id="maxMm" data-k="mesh.maxMm" step="any" min="0.01"></label>
+        <label>Y (mm)<input type="number" id="maxYMm" data-k="mesh.maxYMm" step="any" min="0.01"></label>
+        <label>Z (mm)<input type="number" id="maxZMm" data-k="mesh.maxZMm" step="any" min="0.01"></label>
+        <label>Cells in gaps<input type="number" id="gapElems" data-k="mesh.gapElems" min="1" step="1"></label>
+        <label>Cells on edges<input type="number" id="edgeElems" data-k="mesh.edgeElems" min="1" step="1"></label>
+        <label>Max size ratio<input type="number" id="ratio" data-k="mesh.ratio" min="1" step="any"></label>
       </div>
+      <p class="hint" id="meshHint"></p>
       <div class="row" style="margin-top:10px">
         <label class="inline">Iterations max <input type="number" id="iterations" data-k="iterations" step="50" min="10"></label>
         <label class="inline">Flow limit <input type="number" id="flowLimit" data-k="flowLimit" step="any" min="0"></label>
@@ -450,20 +454,28 @@ let srv = {};       // the last /api/state: projectFile, built (what Build used)
 let pendingN = 0;   // changes on the page not yet in AEDT    // ref -> loadPower() of the part, from the last readRows()
 const MAT_F = ["kWmK", "rhoKgM3", "cpJkgK"];                            // board materials, sent to AEDT
 const STANDIN = { copper: [400, 8933, 385], solder: [48, 8000, 167], "FR-4": [0.3, 1900, 1100], air: [0.0261, 1.1614, 1006.43] };   // as read_board.py
-const SCALARS = ["ambientC", "orientation", "marginMm", "marginAboveMm", "radiation", "mesh.mode", "mesh.level", "mesh.maxMm", "mesh.gapElems", "mesh.edgeElems", "iterations", "flowLimit", "energyLimit"];
+const MESH_F = ["mesh.maxMm", "mesh.maxYMm", "mesh.maxZMm", "mesh.gapElems", "mesh.edgeElems", "mesh.ratio"];   // the manual mesh
+const SCALARS = ["ambientC", "orientation", "marginMm", "marginAboveMm", "radiation", "mesh.mode", "mesh.level", ...MESH_F, "iterations", "flowLimit", "energyLimit"];
+// What each automatic level sets, read from AEDT 2026 R1's Mesh Region dialog (Advanced tab) on 2026-11-04: the largest
+// element is the air box divided by `div` on each axis. Levels 1 and 2 also leave out 3D multi level meshing, and
+// levels 3 to 5 add per-object mesh levels, which a manual mesh does not have
+const AUTO_MESH = { 1: [20, 2, 1, 10], 2: [20, 2, 1, 5], 3: [20, 3, 2, 2], 4: [30, 3, 2, 2], 5: [40, 3, 2, 2] };   // div, gap, edge, ratio
+let meshLevel = 3;  // the automatic level, also while the mesh is manual
 let parts = {};   // ref -> {powerW, heightMm, bodyXMm, bodyYMm, meshMm, rjcCW, rjbCW, rjaCW, tjMaxC}
 let order = [];   // rows in the order they were added
 let mats = {};    // material name -> {kWmK, rhoKgM3, cpJkgK}
 
 const el = k => document.querySelector(`[data-k="${k}"]`);
 const getS = k => {
-  if (k === "mesh.mode") return document.querySelector("input[name=mm]:checked")?.value;
+  if (k === "mesh.mode") return $("level").value === "manual" ? "manual" : "auto";
+  if (k === "mesh.level") return meshLevel;
   const e = el(k); if (!e) return undefined;
-  return e.type === "checkbox" ? e.checked : e.type === "number" ? (e.value === "" ? undefined : parseFloat(e.value)) : e.tagName === "SELECT" && k === "mesh.level" ? parseInt(e.value, 10) : e.value;
+  return e.type === "checkbox" ? e.checked : e.type === "number" ? (e.value === "" ? undefined : parseFloat(e.value)) : e.value;
 };
 const setS = (k, v) => {
   if (v === undefined || v === null) return;
-  if (k === "mesh.mode") { document.querySelector(`input[name=mm][value=${v}]`).checked = true; return; }
+  if (k === "mesh.mode") { $("level").value = v === "manual" ? "manual" : String(meshLevel); autoMesh(); return; }
+  if (k === "mesh.level") { meshLevel = +v; if ($("level").value !== "manual") $("level").value = String(meshLevel); autoMesh(); return; }
   if (k === "orientation") { setGravity(OLD_ORIENT[v] ?? v); return; }
   const e = el(k); if (e.type === "checkbox") e.checked = !!v; else e.value = v;
 };
@@ -510,6 +522,43 @@ function drawPos() {
     <path class="air" d="M18 52 V18 M12 26 L18 16 L24 26" /><text class="at" x="26" y="14">warm air</text>`;
 }
 
+/* ---- mesh: an automatic level fills the fields with what it sets in AEDT; typing in one makes the mesh manual ---- */
+function airBox() {     // the air box Apply makes, in mm: the board and blocks AEDT holds (else the board and the tallest part) plus the page's air
+  const side = getS("marginMm"), g = getS("orientation");
+  if (!board || !(side >= 0) || UP[g] === undefined) return null;
+  const pad = Array(6).fill(side); pad[UP[g]] += getS("marginAboveMm") ?? 0;
+  let core, fromAedt = !!(state?.airMm && state.padMm);
+  if (fromAedt) core = state.airMm.map((v, i) => v - state.padMm[2 * i] - state.padMm[2 * i + 1]);
+  else {
+    const o = board.outlineMm, by = Object.fromEntries(board.parts.map(p => [p.refDes, p]));
+    const h = Math.max(0, ...order.filter(r => parts[r]?.powerW > 0 || parts[r]?.heightMm > 0).map(r => toAedt(parts[r], "heightMm", by[r]) || 0));
+    core = [o.xMax - o.xMin, o.yMax - o.yMin, board.thicknessMm + h];
+  }
+  return { mm: core.map((v, i) => v + pad[2 * i] + pad[2 * i + 1]), fromAedt };
+}
+const r3 = v => +v.toPrecision(3);
+const xyz = m => [m.maxMm, m.maxYMm ?? m.maxMm, m.maxZMm ?? m.maxMm].join(" × ");   // largest element X × Y × Z; an older one has maxMm only
+function autoMesh() {
+  const auto = $("level").value !== "manual", air = airBox(), [div, gap, edge, ratio] = AUTO_MESH[meshLevel] || AUTO_MESH[3];
+  if (auto) {
+    if (air) air.mm.forEach((v, i) => setS(MESH_F[i], r3(v / div)));
+    setS("mesh.gapElems", gap); setS("mesh.edgeElems", edge); setS("mesh.ratio", ratio);
+  }
+  for (const k of MESH_F) el(k).classList.toggle("auto", auto);
+  const box = air ? `${air.mm.map(v => r3(v)).join(" × ")} mm` : "";
+  $("meshHint").innerHTML = auto
+    ? `Level ${meshLevel} sets these in AEDT${air ? `: the largest element is the air box (${box}${air.fromAedt ? "" : ", before Build"}) / ${div}` : ""}. Type in a field to make the mesh manual; pick a level to go back.`
+    : `Manual: AEDT uses these values${air ? ` (air box ${box})` : ""}. A manual mesh has 3D multi level meshing and no per-object mesh levels (levels 3 to 5 have them).`;
+}
+function meshTyped() {         // the first key in a field of an automatic mesh: manual from the level's values
+  if ($("level").value === "manual") return;
+  $("level").value = "manual"; autoMesh();
+}
+function levelPicked() {
+  if ($("level").value !== "manual") meshLevel = +$("level").value;
+  autoMesh();
+}
+
 // numbers: 1e-6 apart is the same; below 1e-3 (the solver limits, 1e-7 against 1e-8) the 1e-6 is relative
 const tol = (a, b) => { const m = Math.max(Math.abs(a), Math.abs(b)); return m < 1e-3 ? 1e-6 * m : 1e-6; };
 const same = (a, b) => (a == null || a === "") && (b == null || b === "") || (typeof a === "number" && typeof b === "number" ? Math.abs(a - b) <= tol(a, b) : a === b);
@@ -529,8 +578,8 @@ function derive(s) {
     d.iterations = n(s.setup.iterations); d.flowLimit = n(s.setup.flowLimit); d.energyLimit = n(s.setup.energyLimit);
   }
   d["mesh.mode"] = s.mesh.manual ? "manual" : "auto";
-  if (s.mesh.manual) { d["mesh.maxMm"] = s.mesh.maxMm; d["mesh.gapElems"] = s.mesh.gapElems; d["mesh.edgeElems"] = s.mesh.edgeElems; }
-  else if (s.mesh.level) d["mesh.level"] = s.mesh.level;
+  if (s.mesh.manual) for (const k of MESH_F) d[k] = s.mesh[k.slice(5)];
+  else if (s.mesh.level) d["mesh.level"] = +s.mesh.level;
   for (const b of s.blocks) {
     const l = s.mesh.local.find(x => x.refDes === b.refDes);
     d.parts[b.refDes] = { powerW: b.kind === "Passive" ? undefined : b.powerW, heightMm: b.heightMm, meshMm: l ? l.maxMm : undefined, rjcCW: b.rjcCW ?? undefined, rjbCW: b.rjbCW ?? undefined };
@@ -734,12 +783,14 @@ function drawPd() {          // results of the Pd table, after readRows()
 function markDirty() {
   let n = 0;
   const flag = (e, dirty) => { e.classList.toggle("dirty", dirty); n += dirty; };
+  readRows(); autoMesh();
+  const auto = getS("mesh.mode") === "auto";
   for (const k of SCALARS) {
-    const rel = k === "mesh.level" ? getS("mesh.mode") === "auto" : ["mesh.maxMm", "mesh.gapElems", "mesh.edgeElems"].includes(k) ? getS("mesh.mode") === "manual" : true;
-    const e = el(k);
-    const dirty = built && rel && base && base[k] !== undefined && !same(getS(k), base[k]);
-    flag(k === "mesh.mode" ? document.querySelector("input[name=mm][value=auto]").closest("label") : k === "orientation" ? $("pos") : e, dirty);
-    if (k === "mesh.mode") document.querySelector("input[name=mm][value=manual]").closest("label").classList.toggle("dirty", dirty);
+    if (k === "mesh.level") continue;       // shown in the mesh select, with the mode
+    const rel = MESH_F.includes(k) ? !auto : true;
+    const dirty = built && rel && base && base[k] !== undefined && !same(getS(k), base[k])
+      || k === "mesh.mode" && built && auto && base?.["mesh.mode"] === "auto" && !same(meshLevel, base["mesh.level"]);
+    flag(k === "orientation" ? $("pos") : el(k), dirty);
   }
   readRows(); readMats();
   const bp = base ? base.parts : {}, bm = base ? base.mats : {};
@@ -1135,7 +1186,7 @@ function rail() {
   $("rParts").textContent = n ? `${hot} with power, ${n - hot} without` : "none yet";
   dot("dParts", hot ? "ok" : "warn");
   $("rEnv").textContent = `${getS("ambientC") ?? ""} °C, ${posText(getS("orientation"))}`;
-  $("rMesh").textContent = getS("mesh.mode") === "manual" ? `manual, ${getS("mesh.maxMm")} mm` : `automatic, level ${getS("mesh.level")}`;
+  $("rMesh").textContent = getS("mesh.mode") === "manual" ? `manual, ${xyz({ maxMm: getS("mesh.maxMm"), maxYMm: getS("mesh.maxYMm"), maxZMm: getS("mesh.maxZMm") })} mm` : `automatic, level ${meshLevel}`;
   const pl = hcLast ? Object.values(hcLast.parts) : [], fail = pl.filter(r => r.status === "FAIL").length, tight = pl.filter(r => r.status === "Tight").length;
   const noMax = pl.filter(r => r.status === "no Tj max").length;
   const crit = pl.filter(r => r.flag === "CRITICAL").length, watch = pl.filter(r => r.flag === "Watch").length;
@@ -1159,7 +1210,7 @@ function renderAedt() {
   const s = state;
   $("readAt").textContent = s ? `read ${s.readAt || s.checkedAt || ""}` : "";
   if (!s || !s.schema) { $("aedt").innerHTML = '<span class="mut">Nothing built yet. Press Build.</span>'; return; }
-  const mesh = s.mesh.manual ? `manual, max ${s.mesh.maxMm} mm, ${s.mesh.gapElems} in gaps, ${s.mesh.edgeElems} on edges` : `automatic, level ${s.mesh.level}`;
+  const mesh = s.mesh.manual ? `manual, largest element ${xyz(s.mesh)} mm, ${s.mesh.gapElems} in gaps, ${s.mesh.edgeElems} on edges, size ratio ${s.mesh.ratio ?? "?"}` : `automatic, level ${s.mesh.level}`;
   const rows = s.blocks.map(b => `<tr><td><b>${esc(b.refDes)}</b></td><td>${b.kind === "Network" ? "junction model" : "block"}</td><td class="n">${b.powerW} W</td>
       <td class="n">${b.heightMm} mm</td><td class="n">${b.rjcCW ?? ""}</td><td class="n">${b.rjbCW ?? ""}</td>
       <td class="n">${(s.mesh.local.find(l => l.refDes === b.refDes) || {}).maxMm ?? "global"}</td></tr>`).join("");
@@ -1206,7 +1257,7 @@ function renderMeshCheck() {
   // a junction model gets no local mesh in AEDT, so the check recorded none for it
   const nets = new Set((state?.blocks || []).filter(b => b.kind === "Network").map(b => b.refDes));
   const local = Object.fromEntries(order.filter(r => parts[r]?.meshMm > 0 && !nets.has(r)).map(r => [r, parts[r].meshMm]));
-  const meshSame = mode === m.mode && (mode === "manual" ? same(getS("mesh.maxMm"), m.maxMm) : same(getS("mesh.level"), +m.level))
+  const meshSame = mode === m.mode && (mode === "manual" ? MESH_F.every(k => same(getS(k), m[k.slice(5)] ?? (k.startsWith("mesh.max") ? m.maxMm : getS(k)))) : same(meshLevel, +m.level))
     && JSON.stringify(Object.entries(local).sort()) === JSON.stringify(Object.entries(mc.yours.local || {}).sort());
   const powerSame = Math.abs(sum(A.parts.map(p => p.powerW)) - pagePowerW()) < 1e-3 && same(getS("ambientC"), amb);
   if (!meshSame) warn.push("The mesh on the page changed since this check. Check again for the new mesh.");
@@ -1334,7 +1385,7 @@ function renderRuns(list) {
   runsSig = sig;
   if (!list.length) { $("runs").innerHTML = '<span class="mut">No run kept yet. Each Solve adds one.</span>'; return; }
   const refs = [...new Set(list.flatMap(r => (r.result?.parts || []).map(p => p.refDes)))];
-  const meshT = s => !s?.mesh ? "" : s.mesh.mode === "manual" ? `manual ${s.mesh.maxMm} mm` : `level ${s.mesh.level}`;
+  const meshT = s => !s?.mesh ? "" : s.mesh.mode === "manual" ? `manual ${xyz(s.mesh)} mm` : `level ${s.mesh.level}`;
   const local = s => Object.entries(s?.localMm || {}).map(([r, v]) => `${r} ${v}`).join(", ");
   const SET = [["Mesh", meshT], ["Local mesh", local], ["Iter.", s => s?.iterations ?? ""], ["Flow", s => s?.flowLimit ?? ""],
     ["Energy", s => s?.energyLimit ?? ""], ["Radiation", s => s?.radiation ? (s.radiation === "Off" ? "off" : "on") : ""],
@@ -1455,9 +1506,11 @@ function moved(to) {
 }
 
 function initForm() {          // first load: the page's last values, then AEDT takes over
-  const d = { ambientC: 25, orientation: "-Z", marginMm: 50, marginAboveMm: 50, radiation: true, "mesh.mode": "auto", "mesh.level": 3, "mesh.maxMm": 3, "mesh.gapElems": 3, "mesh.edgeElems": 2, iterations: 300 };
-  const m = study.mesh || {}, flat = { ...d, ...study, "mesh.mode": m.mode ?? d["mesh.mode"], "mesh.level": m.level ?? 3, "mesh.maxMm": m.maxMm ?? 3, "mesh.gapElems": m.gapElems ?? 3, "mesh.edgeElems": m.edgeElems ?? 2 };
-  for (const k of SCALARS) setS(k, flat[k]);
+  const d = { ambientC: 25, orientation: "-Z", marginMm: 50, marginAboveMm: 50, radiation: true, iterations: 300 };
+  // the mesh fields: what study.json holds; an automatic mesh refills them from its level
+  const m = study.mesh || {}, flat = { ...d, ...study, "mesh.level": m.level ?? 3, "mesh.mode": m.mode ?? "auto",
+    ...Object.fromEntries(MESH_F.map(k => [k, m[k.slice(5)] ?? (k.startsWith("mesh.max") ? m.maxMm : undefined)])) };
+  for (const k of ["mesh.level", ...SCALARS.filter(k => k !== "mesh.level")]) setS(k, flat[k]);
   for (const p of study.parts || []) { parts[p.refDes] = { ...p }; order.push(p.refDes); }
   for (const [name, v] of Object.entries(study.materials || {})) mats[name] = { ...v };
   for (const e of document.querySelectorAll("[data-hc]")) e.value = study.handCheck?.[e.dataset.hc] ?? (e.dataset.hc === "critMargin" ? study.handCheck?.tightC : undefined) ?? "";   // tightC: the old name
@@ -1478,7 +1531,7 @@ function collect() {
     schema: "pcb-thermal-ansys/study", edb: board.edb,
     ambientC: getS("ambientC"), orientation: getS("orientation"), marginMm: getS("marginMm"), marginAboveMm: getS("marginAboveMm"),
     radiation: getS("radiation"), pcbResolution: parseInt($("pcbRes").value, 10), iterations: getS("iterations") ?? 300, flowLimit: getS("flowLimit"), energyLimit: getS("energyLimit"), packageK: study.packageK ?? 1,
-    mesh: { mode, level: getS("mesh.level"), maxMm: getS("mesh.maxMm"), gapElems: getS("mesh.gapElems"), edgeElems: getS("mesh.edgeElems") },
+    mesh: { mode, level: meshLevel, ...Object.fromEntries(MESH_F.map(k => [k.slice(5), getS(k)])) },
     parts: order.filter(r => parts[r]).map(r => ({ refDes: r, ...Object.fromEntries(Object.entries(parts[r]).filter(([, v]) => v !== undefined)) })),
     materials: Object.fromEntries(typed),
     handCheck: { ...readHc(), ...(hcMatched ? { matched: hcMatched } : {}) },
@@ -1674,6 +1727,8 @@ $("mcBtn").onclick = checkMesh;
 $("solveBtn").onclick = doSolve;
 $("addBtn").onclick = () => { addPart($("addRef").value); $("addRef").value = ""; };
 $("addRef").onkeydown = e => { if (e.key === "Enter") $("addBtn").click(); };
+for (const k of MESH_F) el(k).addEventListener("input", meshTyped);     // before the form's markDirty
+$("level").addEventListener("change", levelPicked);
 $("form").addEventListener("input", markDirty);
 $("rotAxis").addEventListener("change", onTurn);
 $("rotDeg").addEventListener("change", onTurn);
@@ -1717,15 +1772,17 @@ const TERMS = {
   margin: ["Air around", "Distance from the board to the walls of the air box on every side, in mm. Too small and the walls cramp the flow; 50 mm is usually enough for natural convection."],
   above: ["Extra air above", "More air on the side away from gravity, where the warm plume rises. Added to Air around."],
   radiation: ["Radiation", "Heat leaving the surfaces as infrared, besides convection. With natural convection it carries a large share, often a third to a half: leave it on unless you compare with a run without it."],
-  level: ["Mesh level", "1 is coarse and fast, 5 fine and slow. 3 is a good start; compare two levels to see if the answer still moves."],
-  maxMm: ["Largest element", "The biggest cell allowed in the air and the board, in mm. Smaller is more accurate and slower."],
-  gapElems: ["Cells in gaps", "How many cells across the narrow gap between two objects. More resolves the air between close parts better."],
-  edgeElems: ["Cells on edges", "How many cells along the edges of small objects."],
+  level: ["Mesh", "An automatic level lets Icepak size the cells: 1 is coarse and fast, 5 fine and slow. 3 is a good start; Check the mesh tells whether it is fine enough. The fields beside it show what the level sets. Manual uses the fields as they are."],
+  maxMm: ["Largest element X", "The biggest cell allowed along X, in the air and the board, in mm. Smaller is more accurate and slower. Levels 1 to 3 use the air box / 20, level 4 / 30, level 5 / 40. Typing makes the mesh manual."],
+  maxYMm: ["Largest element Y", "The biggest cell allowed along Y, in mm. As X."],
+  maxZMm: ["Largest element Z", "The biggest cell allowed along Z, in mm. As X."],
+  gapElems: ["Cells in gaps", "How many cells at least across the gap between two objects. More resolves the air between close parts better. Levels 1 and 2 use 2, levels 3 to 5 use 3."],
+  edgeElems: ["Cells on edges", "How many cells at least along each edge of an object. Levels 1 and 2 use 1, levels 3 to 5 use 2."],
+  ratio: ["Max size ratio", "How much bigger a cell may be than the one next to it. Smaller grows the mesh more gently away from small parts, with more cells. Level 1 uses 10, level 2 uses 5, levels 3 to 5 use 2."],
   iterations: ["Iterations max", "The solver stops here even if it has not converged. More helps only when the last run used them all (see the residual plot in AEDT); if it stopped earlier, tighten the limits instead. Needs Apply."],
   flowLimit: ["Flow limit", "The solve counts as converged when the continuity and velocity residuals are below this. AEDT default 0.001. 0.0001 gives a closer energy balance and takes longer. Empty keeps the value in AEDT. Needs Apply."],
   energyLimit: ["Energy limit", "The solve counts as converged when the energy residual is below this. AEDT default 1e-7. Try 1e-8 when the energy balance is off by more than 1 %. Empty keeps the value in AEDT. Needs Apply."],
   pcbRes: ["PCB mapping", "How finely Icepak maps the copper of each layer onto the board's conductivity. Higher follows the traces and planes more closely; it needs Build to change."],
-  mm: ["Mesh", "Automatic lets Icepak size the cells by a level; Manual sets the largest cell yourself."],
   powerW: ["Pd", "Power loss: the heat the part gives off, in W. Not the power it takes in from the rail, and not the datasheet's maximum. Not in the export: type it, or fill Pd from the circuit below and it is calculated there and locked here. Without Pd a part is a block that only shapes the air."],
   heightMm: ["Height", "Height of the part above the board, in mm. The grey number is from the STEP (or a placeholder under 0.2 mm when the STEP has no body for it); a typed value wins."],
   bodyXMm: ["Body X", "Package body size along the part's own X axis (the one nearest the board's X), in mm. The grey number is the STEP body, else the pad outline. A part shown as turned keeps its real size (15 × 15 at 45° stays 15 × 15) and its block is built turned in AEDT. A typed value wins."],

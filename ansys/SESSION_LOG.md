@@ -224,3 +224,21 @@ Level 3, before and after the fix:
 | Sentinel | 25 C | 54.7 | 33.9 | LED1 74.3 | 0.28 / 0.39 W (42 % / 58 %) |
 
 Hand check (Spartan, about 0.021 m2 of board and part surface, average rise 8.9 K): convection about 3.7 W/m2K, radiation about 4.9 W/m2K against 4 x 0.8 x sigma x T^3 = 5.0 W/m2K. Both now plausible for a small board in still air. Earlier results in this log (and the mesh study) were made with the 20 C surround; the mesh conclusion (level 3 is enough) does not depend on it.
+
+## What the automatic mesh levels set (2026-11-04)
+AEDT does not give scripts the values an automatic level sets: switching the global region to manual by script leaves
+the sizes at 0 mm. Read from the Mesh Region dialog (Advanced tab, greyed fields) of AEDT 2026 R1, on a scratch
+project with an air box 200 x 160 x 5.2 mm:
+
+| Level | Largest element | Cells in gaps | Cells on edges | Max size ratio | Multi level meshing |
+|---|---|---|---|---|---|
+| 1 | air box / 20 per axis | 2 | 1 | 10 | off, max levels 1 |
+| 2 | air box / 20 | 2 | 1 | 5 | on, max levels 1, not enforced |
+| 3 | air box / 20 | 3 | 2 | 2 | on, 3D enforced, max levels 0, uniform average |
+| 4 | air box / 30 | 3 | 2 | 2 | as level 3 |
+| 5 | air box / 40 | 3 | 2 | 2 | as level 3 |
+
+Minimum gap 1 x 1 x 0.52 mm at every level. Level 2 was read with a mouse click on the slider, the others with the keyboard.
+The manual says levels 3 to 5 also turn on per-object mesh levels, which a manual mesh does not have, so a manual mesh
+with these numbers is close to the level, not the same. The page's Mesh step shows these values for the chosen level;
+typing in one makes the mesh manual. A manual mesh now sends X, Y, Z and the max size ratio (before: one size for all three).

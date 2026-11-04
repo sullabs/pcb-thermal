@@ -658,18 +658,14 @@ def _mesh(ic, parts, study, rebuilt=()):
     m = study["mesh"]
     gm = ic.mesh.global_mesh_region
     manual = m.get("mode") == "manual"
-    want = ({"MaxElementSizeX": m["maxMm"], "MinElementsInGap": m.get("gapElems", 3), "MinElementsOnEdge": m.get("edgeElems", 2)}
+    want = ({**{f"MaxElementSize{ax}": v for ax, v in zip("XYZ", _max_xyz(m))}, "MinElementsInGap": m.get("gapElems", 3),
+             "MinElementsOnEdge": m.get("edgeElems", 2), "MaxSizeRatio": m.get("ratio", 2)}
             if manual else {"MeshRegionResolution": int(m.get("level", 3))})
     same = bool(gm.manual_settings) == manual and all(num(_get(gm.settings, k)) == float(v) for k, v in want.items())
     if not same:
         gm.manual_settings = manual
-        if manual:
-            for ax in "XYZ":
-                gm.settings[f"MaxElementSize{ax}"] = f"{m['maxMm']}mm"
-            gm.settings["MinElementsInGap"] = str(m.get("gapElems", 3))
-            gm.settings["MinElementsOnEdge"] = str(m.get("edgeElems", 2))
-        else:
-            gm.settings["MeshRegionResolution"] = int(m.get("level", 3))
+        for k, v in want.items():
+            gm.settings[k] = f"{v}mm" if k.startswith("MaxElementSize") else int(v) if k == "MeshRegionResolution" else str(v)
         gm.update()
     # a junction model block is hollow (not meshed inside): a mesh region on it leaves it with no mesh at all and the
     # solver stops with an execution error (seen 2026-11-02). Taken from AEDT's block type, not the page's Rjc and Rjb:
@@ -696,8 +692,19 @@ def _mesh(ic, parts, study, rebuilt=()):
             r.update()
         else:
             check("error", f"{ref}: local mesh not created")
-    what = f"global max element {m['maxMm']} mm" if manual else f"global automatic level {m.get('level', 3)}"
-    check("ok", f"Mesh: {what}, {len(wanted)} local refinements")
+    check("ok", f"Mesh: global {_mesh_text(m)}, {len(wanted)} local refinements")
+
+
+def _max_xyz(m):
+    """largest element X, Y, Z of a manual mesh in mm. An older study.json has one maxMm for all three"""
+    return [m.get(k) or m["maxMm"] for k in ("maxMm", "maxYMm", "maxZMm")]
+
+
+def _manual_read(gm):
+    """the manual settings of the global mesh region, in the keys of study.json mesh"""
+    g = lambda k: num(_get(gm.settings, k))
+    return {"maxMm": g("MaxElementSizeX"), "maxYMm": g("MaxElementSizeY"), "maxZMm": g("MaxElementSizeZ"),
+            "gapElems": g("MinElementsInGap"), "edgeElems": g("MinElementsOnEdge"), "ratio": g("MaxSizeRatio")}
 
 
 def local_mesh(ic):
@@ -1064,8 +1071,7 @@ def _setup_now(ic):
     ds = ic.design_settings
     out.update(ambientC=num(ds["AmbTemp"]), orientation=_gravity(ds))
     gm = ic.mesh.global_mesh_region
-    out["mesh"] = ({"mode": "manual", "maxMm": num(_get(gm.settings, "MaxElementSizeX")),
-                    "gapElems": num(_get(gm.settings, "MinElementsInGap")), "edgeElems": num(_get(gm.settings, "MinElementsOnEdge"))}
+    out["mesh"] = ({"mode": "manual", **_manual_read(gm)}
                    if gm.manual_settings else {"mode": "auto", "level": int(num(_get(gm.settings, "MeshRegionResolution"), 3))})
     out["localMm"] = local_mesh(ic)
     return out
@@ -1197,14 +1203,16 @@ FINER = 2 / 3     # a finer mesh: every largest element times this, or one autom
 
 
 def _mesh_text(m):
-    return f"largest element {m['maxMm']} mm" if m.get("mode") == "manual" else f"automatic level {int(m.get('level', 3))}"
+    if m.get("mode") != "manual":
+        return f"automatic level {int(m.get('level', 3))}"
+    return f"manual, largest element {' x '.join(f'{v:g}' for v in _max_xyz(m))} mm"
 
 
 def _finer(study, parts):
     """the study and parts with a finer global mesh and finer local meshes; None at automatic level 5, the finest"""
     m = dict(study["mesh"])
     if m.get("mode") == "manual":
-        m["maxMm"] = round(m["maxMm"] * FINER, 3)
+        m["maxMm"], m["maxYMm"], m["maxZMm"] = (round(v * FINER, 3) for v in _max_xyz(m))
     elif int(m.get("level", 3)) >= 5:
         return None, None
     else:
@@ -1315,9 +1323,7 @@ def read_state(ic, board):
     local = [{"refDes": r, "maxMm": v} for r, v in local_mesh(ic).items()]
     mesh = {"manual": bool(gm.manual_settings),
             "level": _get(gm.settings, "MeshRegionResolution"),
-            "maxMm": num(_get(gm.settings, "MaxElementSizeX")),
-            "gapElems": num(_get(gm.settings, "MinElementsInGap")),
-            "edgeElems": num(_get(gm.settings, "MinElementsOnEdge")),
+            **_manual_read(gm),
             "local": local}
     return {
         "schema": "pcb-thermal-ansys/state",

@@ -95,7 +95,7 @@ because AEDT's report API gives only the final value. A failed read is a warning
 Solve also repairs the mesh of an older project before it starts: it removes a local mesh on a junction model and any
 mesh sub-region box no region uses (both stop the solver), says so in the checks, and rereads `state.json`.
 `study.json`: `edb`, `ambientC`, `orientation` (the direction gravity points in the board's axes: -Z flat parts up, +Z flat parts down, ±X or ±Y standing on that edge; the page sets it by turning the board about its X or Y axis in 90° steps; the old names flat-up, flat-down, vertical-long, vertical-short still load), `marginMm`,
-`marginAboveMm`, `radiation`, `pcbResolution`, `iterations`, `flowLimit?`, `energyLimit?` (solver limits; left out keeps AEDT's), `mesh {mode auto|manual, level, maxMm, gapElems, edgeElems}`,
+`marginAboveMm`, `radiation`, `pcbResolution`, `iterations`, `flowLimit?`, `energyLimit?` (solver limits; left out keeps AEDT's), `mesh {mode auto|manual, level, maxMm (largest element X), maxYMm, maxZMm, gapElems, edgeElems, ratio}` (manual only; an older file with one `maxMm` uses it for X, Y and Z),
 `parts[{refDes, powerW?, heightMm?, bodyXMm?, bodyYMm?, meshMm?, rjcCW?, rjbCW?, rjaCW?, tjMaxC?, cls?, vinV?, iinA?, voutV?, ioutA?, efficiency?, rOhm?, pdMeasuredW?}]`
 (`powerW` is Pd, the heat given off; `cls` to `pdMeasuredW` are page only and give it as the SolidWorks register),
 `materials {name: {kWmK?, rhoKgM3?, cpJkgK?}}`, `handCheck {hTop?, hBottom?, hParts?, emissivity?, surfaceRiseK?, coverage?, kxy?, kParts?, critMargin?, critDensity?, critShare?, watchMargin?, watchDensity?, watchShare?, matched? {hPcb, run, powerW, ambientC, orientation, boardMeanC}}`
