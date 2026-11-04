@@ -17,20 +17,20 @@ Axes: X along the package length (lead rows parallel to X), Y across (leads poin
 """
 import json
 import sys
-import tempfile
 import time
 import warnings
 from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
-VERSION = "2026.1"
-PORT = 50051
-SETUP = "Study"
 HERE = Path(__file__).parent
+sys.path.insert(0, str(HERE.parent))
+import setup_study  # noqa: E402  the AEDT version (AEDT_VERSION, set by run.ps1), its port and the busy mark
+
+VERSION = setup_study.VERSION
+PORT = setup_study.PORT
+SETUP = "Study"
 RUNS = HERE / "runs"
-# the page server's background read leaves AEDT alone while this file names a living process (setup_study.py)
-BUSY = Path(tempfile.gettempdir()) / f"pcb_thermal_aedt_{PORT}.busy"
 
 PLATE_C = 20.0          # paper
 PASTE_K = 3.0           # paper
@@ -197,8 +197,11 @@ def main(level, cases):
 if __name__ == "__main__":
     lvl = int(sys.argv[1]) if len(sys.argv) > 1 else 4
     todo = sys.argv[2:] or ["dead_10", "dead_5", "live_10", "live_5", "liveair_10", "liveair_5"]
-    BUSY.write_text(str(__import__("os").getpid()))
+    # while this runs, the page's jobs and its background read leave AEDT alone; it does not start during a page job
+    other = setup_study.take_busy()
+    if other:
+        raise SystemExit(f"setup_study.py (process {other}) is using AEDT. Try again when the page's job has ended.")
     try:
         main(lvl, todo)
     finally:
-        BUSY.unlink(missing_ok=True)
+        setup_study.drop_busy()

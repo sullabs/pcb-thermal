@@ -12,3 +12,6 @@ backup/
 ansys/.venv/
 dist/
 ansys/**/__pycache__/
+
+# Claude Code runtime lock
+.claude/scheduled_tasks.lock

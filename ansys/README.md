@@ -52,10 +52,15 @@ the board surface so it can touch the PCB.
 | Part without position or size in the EDB | Listed as skipped in `board.json`, warning, no heat source possible |
 | `study.json` | Defaults, no heat sources |
 | AEDT closed (read) | Last known values kept, page says AEDT is not running |
+| AEDT running without the page's gRPC port (started outside `start.bat`) | The read leaves it alone and says so; it never starts a second AEDT |
+| An edit made in the AEDT window and not saved | Blocks, power, ambient and air show at the next read; mesh and setup settings only once saved in AEDT (PyAEDT reads them from the saved file). Apply, Generate mesh and Solve save the project first, so they never undo such an edit |
+| A typed material value cleared | Apply sets the export's value again, or the stand-in |
+| `.busy` mark of another script (the SO-8 benchmark) | The job stops with an error instead of using AEDT at the same time |
 | A project with the same name open from another folder | Error, nothing changed: AEDT finds a project by name, so the job would change that copy. Close it in AEDT |
 
 **Do not run another PyAEDT script against the same AEDT while the page is open**: two clients attaching at the same
-time made one of them hang. The page's own jobs never overlap, and a hung job is killed after 60 s (read) or 15 min.
+time made one of them hang. The page's own jobs never overlap, and a hung job is killed after 60 s (read), 4 h (mesh),
+12 h (solve), 24 h (mesh check) or 30 min (any other job).
 
 ## Files
 
@@ -72,7 +77,8 @@ time made one of them hang. The page's own jobs never overlap, and a hung job is
 
 Folder contents: `<board>.aedb` (you), `board.json`, `study.json` (page), `state.json`, `checks.json`, `<board>_icepak.aedt`,
 `results.json` (Solve), `meshcheck.json` (Check the mesh), `built.json` (when and with which PCB mapping Build ran),
-`meshed.json` (the mesh signature of the last Generate mesh or solve),
+`meshed.json` (the mesh signature of the last Generate mesh or solve), `applied.json` (the body sizes the last Build or
+Apply made the blocks from: the page compares Body X and Y with it),
 `runs\<yyyymmdd-hhmmss>.json` (every solve, mesh check solves too: `at`, `label`, `note` typed on the page, `settings` it ran with
 (mesh, local mesh, iterations, flow and energy limits and radiation as AEDT held them, ambient, gravity, total Pd) and `result`
 as in `results.json`; the page's **Runs** table compares them, and Remove deletes the file).

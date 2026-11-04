@@ -1,0 +1,66 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "page",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "C:/Users/Sultan/Desktop/projects/Dev Projects/thermal_wt_addin/webapp/tools/serve.mjs"
+      ],
+      "port": 8173
+    },
+    {
+      "name": "ansys-page",
+      "runtimeExecutable": "pwsh",
+      "runtimeArgs": [
+        "-NoProfile",
+        "-File",
+        "C:/Users/Sultan/Desktop/projects/Dev Projects/thermal_similation/ansys/run.ps1",
+        "serve.py",
+        "C:/Users/Sultan/AppData/Local/Temp/claude/C--Users-Sultan-Desktop-projects-Dev-Projects-thermal-similation/b5bb43d6-ef01-443e-9a3c-36de7f8eab73/scratchpad/bt",
+        "8767"
+      ],
+      "port": 8767,
+      "autoPort": false
+    },
+    {
+      "name": "ansys-spartan",
+      "runtimeExecutable": "pwsh",
+      "runtimeArgs": [
+        "-NoProfile",
+        "-File",
+        "C:/Users/Sultan/Desktop/projects/Dev Projects/thermal_similation/ansys/run.ps1",
+        "serve.py",
+        "C:/Users/Sultan/Desktop/projects/Dev Projects/thermal_similation/ansys/example/spartan_iie",
+        "8768"
+      ],
+      "port": 8768,
+      "autoPort": false
+    },
+    {
+      "name": "ansys-review",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "C:/Users/Sultan/AppData/Local/Temp/claude/C--Users-Sultan-Desktop-projects-Dev-Projects-thermal-similation/e9dcd8da-2ec6-4972-9db7-58bed0d437a1/scratchpad/review_serve.py",
+        "C:/Users/Sultan/AppData/Local/Temp/claude/C--Users-Sultan-Desktop-projects-Dev-Projects-thermal-similation/e9dcd8da-2ec6-4972-9db7-58bed0d437a1/scratchpad/review/nomat",
+        "8771"
+      ],
+      "port": 8771,
+      "autoPort": false
+    },
+    {
+      "name": "ansys-hot",
+      "runtimeExecutable": "pwsh",
+      "runtimeArgs": [
+        "-NoProfile",
+        "-File",
+        "C:/Users/Sultan/Desktop/projects/Dev Projects/thermal_similation/ansys/run.ps1",
+        "serve.py",
+        "C:/Users/Sultan/AppData/Local/Temp/claude/C--Users-Sultan-Desktop-projects-Dev-Projects-thermal-similation/60871368-cc68-4098-a20a-17f388a8bc23/scratchpad/hot",
+        "8769"
+      ],
+      "port": 8769,
+      "autoPort": false
+    }
+  ]
+}

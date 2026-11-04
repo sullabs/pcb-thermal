@@ -12,6 +12,7 @@ Needs no AEDT session, only PyEDB (about 7 s).
 import json
 import math
 import os
+import re
 import shutil
 import sys
 import warnings
@@ -20,12 +21,16 @@ from pathlib import Path
 warnings.filterwarnings("ignore")
 VERSION = os.environ.get("AEDT_VERSION", "2026.1")   # start.bat / run.ps1 set it to the newest AEDT installed
 M2MM = 1000.0
-THERMAL = {"copper": (400, 8933, 385), "solder": (48, 8000, 167), "FR-4": (0.3, 1900, 1100)}   # W/mK, kg/m3, J/kgK
+# W/mK, kg/m3, J/kgK. air: Icepak's own, because Icepak's air box uses the material "air" too, and an EDB names its
+# fill "AIR" in the same project: FR-4 values there would make the air a solid
+THERMAL = {"copper": (400, 8933, 385), "solder": (48, 8000, 167), "FR-4": (0.3, 1900, 1100), "air": (0.0261, 1.1614, 1006.43)}
 
 
 def thermal_kind(name, conductor):
-    """which THERMAL values stand in for a material that has none: copper, solder or FR-4"""
+    """which THERMAL values stand in for a material that has none: air, copper, solder or FR-4"""
     n = name.lower()
+    if n == "air" or n.startswith("air_"):
+        return "air"
     if "solder" in n and "resist" not in n and "mask" not in n:
         return "solder"
     if "copper" in n or n.startswith("cu") or conductor:
@@ -34,14 +39,15 @@ def thermal_kind(name, conductor):
 
 
 def find_edb(folder: Path) -> Path:
+    # an Altium .edb exported again is copied first, also when study.json names its .aedb (the page always does)
+    for src in sorted(folder.glob("*.edb")):
+        if src.is_dir() and (src / "edb.def").exists():
+            _copy_edb(src, src.with_suffix(".aedb"))
     study = folder / "study.json"
     if study.exists():
         name = json.loads(study.read_text(encoding="utf-8")).get("edb")
         if name and (folder / name).exists():
             return folder / name
-    for src in sorted(folder.glob("*.edb")):
-        if src.is_dir() and (src / "edb.def").exists():
-            _copy_edb(src, src.with_suffix(".aedb"))
     found = sorted(folder.glob("*.aedb"))
     if not found:
         raise SystemExit(f"No .aedb or .edb folder in {folder}")
@@ -94,11 +100,32 @@ def footprint(c, pads):
     return cx - (u1 - u0) / 2, cy - (v1 - v0) / 2, u1 - u0, v1 - v0, t
 
 
+_UNIT = {"": 1.0, "m": 1.0, "cm": 1e-2, "mm": 1e-3, "um": 1e-6, "nm": 1e-9, "mil": 25.4e-6, "in": 0.0254,
+         "rad": 1.0, "deg": math.pi / 180}
+
+
+def _si(text):
+    """an EDB value as PyEDB gives it, a string such as '0', '1.5708', '90deg' or '0.1mm', in m or radians (a number
+    without a unit is in those already). ValueError for anything else"""
+    m = re.fullmatch(r"\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*([A-Za-z]*)\s*", str(text or 0))
+    if not m or m.group(2).lower() not in _UNIT:
+        raise ValueError(f"EDB value not read: {text!r}")
+    return float(m.group(1)) * _UNIT[m.group(2).lower()]
+
+
+def _f(v):
+    """a coordinate: a number, or an EDB Value (PyEDB over gRPC gives those for polygon points)"""
+    return float(v) if isinstance(v, (int, float, str)) else float(getattr(v, "value", None) if hasattr(v, "value") else str(v))
+
+
 def _pad_outline(pad):
     """(points in the pin's frame, round) of a pad, or None for a shape not read"""
     shape, v = pad.shape, [float(x) for x in (pad.parameters_values or [])]
     if shape == "polygon" and pad.polygon_data is not None:
-        pts = [(float(p.x), float(p.y)) for p in pad.polygon_data.points]
+        # an arc is stored as a point with x near 1e308 and y its height: not a corner, left out
+        pts = [(x, y) for x, y in ((_f(p.x), _f(p.y)) for p in pad.polygon_data.points) if abs(x) < 1e10 and abs(y) < 1e10]
+        if not pts:
+            return None
     elif shape == "circle" and v:
         return [(v[0] / 2 * math.cos(i * math.pi / 4), v[0] / 2 * math.sin(i * math.pi / 4)) for i in range(8)], True
     elif shape == "square" and v:
@@ -107,7 +134,10 @@ def _pad_outline(pad):
         pts = [(sx * v[0] / 2, sy * v[1] / 2) for sx in (-1, 1) for sy in (-1, 1)]
     else:
         return None
-    r, ox, oy = float(pad.rotation or 0.0), float(pad.offset_x or 0.0), float(pad.offset_y or 0.0)
+    try:
+        r, ox, oy = _si(pad.rotation), _si(pad.offset_x), _si(pad.offset_y)
+    except ValueError:      # an expression: the pin's box on the board stands in, as for a shape not read
+        return None
     cr, sr = math.cos(r), math.sin(r)
     return [(ox + px * cr - py * sr, oy + px * sr + py * cr) for px, py in pts], False
 

@@ -42,6 +42,7 @@ ROOT = FOLDER
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8765
 WHAT = {"build": "Building the project", "update": "Applying changes", "mesh": "Generating the mesh",
         "read": "Reading AEDT", "solve": "Solving", "meshcheck": "Checking the mesh (two solves)", "open": "Opening the project"}
+LIMIT = {"solve": 12 * 3600, "meshcheck": 24 * 3600, "mesh": 4 * 3600}     # s; any other job 30 min, the silent read 60 s
 job = {"running": False, "what": "", "log": "", "silent": False}
 lock = threading.Lock()
 
@@ -52,6 +53,7 @@ def jread(name):
 
 
 RUN_ID = re.compile(r"^\d{8}-\d{6}$")     # runs/<id>.json, as setup_study.py names them
+_runs = {}      # path -> (mtime, parsed run): the page asks every 5 s, a run file changes only with its note
 
 
 def runs():
@@ -60,7 +62,10 @@ def runs():
     for p in sorted((FOLDER / "runs").glob("*.json"), reverse=True):
         if RUN_ID.match(p.stem):
             try:
-                out.append({"id": p.stem, **json.loads(p.read_text(encoding="utf-8"))})
+                t = p.stat().st_mtime
+                if _runs.get(p, (None,))[0] != t:
+                    _runs[p] = (t, {"id": p.stem, **json.loads(p.read_text(encoding="utf-8"))})
+                out.append(_runs[p][1])
             except (OSError, ValueError):
                 continue
     return out
@@ -89,7 +94,8 @@ def pick_folder():
     """the Windows folder dialog, in its own process (Tk wants the main thread). Empty when cancelled"""
     code = ("import sys, tkinter as tk, tkinter.filedialog as fd; r = tk.Tk(); r.withdraw(); r.attributes('-topmost', True); "
             "print(fd.askdirectory(parent=r, initialdir=sys.argv[1], title='Board folder (with the .edb or .aedb export)'))")
-    out = subprocess.run([sys.executable, "-c", code, str(FOLDER.parent)], capture_output=True, text=True, encoding="utf-8")
+    # -X utf8: else the child prints to the pipe in the Windows code page, and a folder named Café or in Arabic breaks
+    out = subprocess.run([sys.executable, "-X", "utf8", "-c", code, str(FOLDER.parent)], capture_output=True, text=True, encoding="utf-8")
     return out.stdout.strip()
 
 
@@ -112,8 +118,9 @@ def run_script(script, what, *args, silent=False):
         try:
             proc = subprocess.Popen([sys.executable, "-u", str(HERE / script), str(FOLDER), *args], stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
-            limit = 60 if silent else 3600 if args[:1] == ("solve",) else 7200 if args[:1] == ("meshcheck",) else 900
-            timer = threading.Timer(limit, lambda: (killed.set(), proc.kill()))    # a hung gRPC call must not block the page
+            # a hung gRPC call must not block the page, but a solve or mesh of a big board may take hours
+            limit = 60 if silent else LIMIT.get(args[0] if args else "", 1800)
+            timer = threading.Timer(limit, lambda: (killed.set(), proc.kill()))
             timer.start()
             for line in proc.stdout:
                 if not silent and "INFO" not in line:
@@ -122,7 +129,8 @@ def run_script(script, what, *args, silent=False):
             if silent:
                 pass
             elif killed.is_set():    # on Windows a killed process exits with 1, like a normal "not ready"
-                job["log"] += "[error] The script was stopped after %d min, the time limit. AEDT may be busy or frozen.\n" % (limit // 60)
+                job["log"] += ("[error] The script was stopped after %d min, the time limit. AEDT may be busy or frozen; "
+                               "a solve or mesh may still run on in AEDT.\n" % (limit // 60))
             elif proc.returncode not in (0, 1):
                 job["log"] += "[error] The script was stopped (exit code %s). AEDT may be busy or frozen.\n" % proc.returncode
         except Exception as ex:  # noqa: BLE001  the job must always end, or every later request gets 409
@@ -147,11 +155,17 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
-        if self.path == "/":
+        path, _, query = self.path.partition("?")
+        if path == "/":
             self._send(200, (HERE / "page.html").read_bytes(), "text/html; charset=utf-8")
-        elif self.path == "/api/state":
-            self._send(200, {"folder": str(FOLDER), "boards": boards(), "board": jread("board.json"), "study": jread("study.json"),
-                             "checks": jread("checks.json"), "results": jread("results.json"), "meshcheck": jread("meshcheck.json"), "runs": runs(), "built": jread("built.json"), "meshed": jread("meshed.json"), "projectFile": project_file(), "state": jread("state.json"), "job": job})
+        elif path == "/api/state":
+            st = {"folder": str(FOLDER), "board": jread("board.json"), "study": jread("study.json"),
+                  "checks": jread("checks.json"), "results": jread("results.json"), "meshcheck": jread("meshcheck.json"), "runs": runs(),
+                  "built": jread("built.json"), "meshed": jread("meshed.json"), "applied": jread("applied.json"),
+                  "projectFile": project_file(), "state": jread("state.json"), "job": job}
+            if "boards" in parse_qs(query, keep_blank_values=True):      # the folder list: the page asks once
+                st["boards"] = boards()
+            self._send(200, st)
         else:
             self._send(404, {"error": "not found"})
 
@@ -163,10 +177,20 @@ class H(BaseHTTPRequestHandler):
             return True
         return False
 
+    def _moved(self, q):
+        """the page names the folder it shows: a write for another folder (another tab switched the server) is refused"""
+        f = (q.get("folder") or [None])[0]
+        if f is not None and f != str(FOLDER):
+            self._send(409, {"ok": False, "moved": True, "error": "The server shows another folder now."})
+            return True
+        return False
+
     def do_PUT(self):
         if self._foreign():
             return
         path, _, query = self.path.partition("?")
+        if self._moved(parse_qs(query)):
+            return
         n = int(self.headers.get("Content-Length", 0))
         if path == "/api/study":
             study = json.loads(self.rfile.read(n))
@@ -207,6 +231,8 @@ class H(BaseHTTPRequestHandler):
             FOLDER = want
             remember(FOLDER)
             return self._send(200, {"ok": True, "folder": str(FOLDER)})
+        if self._moved(q):
+            return
         if path == "/api/read":
             ok = run_script("read_board.py", "Reading the heights from the STEP", "--step") if "step" in q else                 run_script("read_board.py", "Reading the board")
         elif path == "/api/runremove":    # a kept run the user no longer wants in the table

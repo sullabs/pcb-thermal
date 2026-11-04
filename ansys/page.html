@@ -423,7 +423,9 @@
 let board = null, study = {}, base = null, lastRead = null, lastCheckedAt = null, state = null, job = {}, built = false, folder = null, results = null;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const api = async (path, opt) => (await fetch(path, opt)).json();
+const api = async (path, opt) => { const r = await (await fetch(path, opt)).json(); if (r.moved) refresh(); return r; };
+// a write names the folder the page shows: the server refuses it ("moved") when another tab opened another folder
+const at = path => path + (path.includes("?") ? "&" : "?") + "folder=" + encodeURIComponent(folder ?? "");
 // "orientation" is the direction gravity points in the board's axes (-Z: flat, parts up). Older study.json used names.
 const OLD_ORIENT = { "flat-up": "-Z", "flat-down": "+Z", "vertical-long": "-Y", "vertical-short": "-X" };
 const UP = { "+X": 1, "-X": 0, "+Y": 3, "-Y": 2, "+Z": 5, "-Z": 4 };   // air face away from gravity: +X -X +Y -Y +Z -Z
@@ -447,7 +449,7 @@ let pdOf = {};
 let srv = {};       // the last /api/state: projectFile, built (what Build used), meshed (sig of the last mesh)
 let pendingN = 0;   // changes on the page not yet in AEDT    // ref -> loadPower() of the part, from the last readRows()
 const MAT_F = ["kWmK", "rhoKgM3", "cpJkgK"];                            // board materials, sent to AEDT
-const STANDIN = { copper: [400, 8933, 385], solder: [48, 8000, 167], "FR-4": [0.3, 1900, 1100] };   // as setup_study.py
+const STANDIN = { copper: [400, 8933, 385], solder: [48, 8000, 167], "FR-4": [0.3, 1900, 1100], air: [0.0261, 1.1614, 1006.43] };   // as read_board.py
 const SCALARS = ["ambientC", "orientation", "marginMm", "marginAboveMm", "radiation", "mesh.mode", "mesh.level", "mesh.maxMm", "mesh.gapElems", "mesh.edgeElems", "iterations", "flowLimit", "energyLimit"];
 let parts = {};   // ref -> {powerW, heightMm, bodyXMm, bodyYMm, meshMm, rjcCW, rjbCW, rjaCW, tjMaxC}
 let order = [];   // rows in the order they were added
@@ -575,8 +577,17 @@ function sync(s) {
     for (const f of MAT_F) if (!base || !bm[name] || same(mats[name][f], bm[name][f])) mats[name][f] = v[f];
   }
   base = nb;
-  drawParts(); drawMats(); markDirty();
+  // AEDT is read every 15 s: with the same rows, put its values into the fields in place, so the field being typed in
+  // keeps its text and its focus. Drawing the tables again would take both
+  if ([...$("rows").children].map(tr => tr.dataset.ref).join("\n") === order.filter(r => parts[r]).join("\n")) {
+    for (const tr of $("rows").children) for (const f of PART_F) setField(tr.querySelector(`[data-f=${f}]`), parts[tr.dataset.ref][f]);
+  } else drawParts();
+  if ([...$("mats").children].map(tr => tr.dataset.mat ?? "").join("\n") === (board.materials || []).map(m => m.name).join("\n")) {
+    for (const tr of $("mats").children) if (tr.dataset.mat) for (const f of MAT_F) setField(tr.querySelector(`[data-f=${f}]`), mats[tr.dataset.mat]?.[f]);
+  } else drawMats();
+  markDirty();
 }
+function setField(e, v) { if (e !== document.activeElement) e.value = v ?? ""; }
 
 /* ---- what the export lacks, and the board materials ---- */
 let gapCount = 0;
@@ -596,8 +607,9 @@ function gaps() {
   }
   if (st?.away?.length) notes.push(["away", "warn", `${st.away.length} parts sit elsewhere in the STEP than their pads in the EDB; their height and body size are used anyway: ${st.away.map(a => `<b>${esc(a.refDes)}</b> ${a.distMm} mm (body at ${a.atMm[0]}, ${a.atMm[1]}, pads at ${a.padsMm[0]}, ${a.padsMm[1]})`).join("; ")}. Check that the STEP and the EDB are from the same revision of the layout.`]);
   if (st?.unmatched?.length) notes.push(["unmatched", "warn", `${st.unmatched.length} components in the STEP went to no part: ${st.unmatched.map(u => `<b>${esc(u.name)}</b> (${u.xMm} × ${u.yMm} × ${u.hMm} mm at ${u.atMm[0]}, ${u.atMm[1]}): ${esc(u.why)}`).join("; ")}.`]);
-  notes.push(zero.length ? ["materials", "warn", `Thermal values are missing for ${esc(zero.join(", "))}: the grey stand-ins below are used. Type the real ones if you have them.`]
-                         : ["materials", "ok", "Every board material has thermal values, from the export or typed below."]);
+  notes.push(!(board.materials || []).length ? ["materials", "warn", "The export lists no board materials, so none can be typed here (a board read by an older version of this page lists none). Press <b>Read the export again</b>."]
+           : zero.length ? ["materials", "warn", `Thermal values are missing for ${esc(zero.join(", "))}: the grey stand-ins below are used. Type the real ones if you have them.`]
+           : ["materials", "ok", "Every board material has thermal values, from the export or typed below."]);
   if (board.skipped?.length) notes.push(["skipped", "warn", `${board.skipped.length} parts have no position or size in the export: ${esc(board.skipped.join(", "))}.`]);
   const off = ([k, lvl, h]) => lvl !== "ok" && hiddenNotes[k] === sig(h);
   const shown = notes.filter(x => !off(x)), hid = notes.filter(off);
@@ -616,6 +628,7 @@ function toggleNote(e) {
 }
 function readMats() {
   for (const tr of $("mats").children) {
+    if (!tr.dataset.mat) continue;       // the "lists no materials" row has no fields
     const m = mats[tr.dataset.mat] ??= {};
     for (const f of MAT_F) { const v = parseFloat(tr.querySelector(`[data-f=${f}]`).value); m[f] = v > 0 ? v : undefined; }
   }
@@ -730,19 +743,21 @@ function markDirty() {
   }
   readRows(); readMats();
   const bp = base ? base.parts : {}, bm = base ? base.mats : {};
-  const sent = Object.fromEntries((study.parts || []).map(p => [p.refDes, p]));   // body sizes as last sent
+  const sent = srv.applied?.bodies ?? firstBodies;   // body sizes the blocks in AEDT were made from (applied.json)
   const by = Object.fromEntries(board.parts.map(p => [p.refDes, p]));
   let total = 0;
   for (const tr of $("rows").children) {
-    const ref = tr.dataset.ref, p = parts[ref];
+    const ref = tr.dataset.ref, p = parts[ref], b = by[ref];
+    const makes = !!b && (p.powerW > 0 || p.heightMm > 0 || b.stepHMm > 0);   // Apply makes a block for it
     total += p.powerW || 0;
     for (const f of PART_F) {
       const e = tr.querySelector(`[data-f=${f}]`);
-      const dirty = built && !same(p[f], bp[ref]?.[f]) && !(bp[ref] === undefined && !p[f]);
+      // what Apply would put in AEDT against what AEDT holds: a part that gets no block sends nothing
+      const dirty = built && (makes || bp[ref] !== undefined) && !same(toAedt(p, f, b), bp[ref]?.[f]) && !(bp[ref] === undefined && !p[f]);
       e.classList.toggle("dirty", dirty); n += dirty;
     }
     for (const f of BODY_F) {
-      const dirty = built && !same(p[f], sent[ref]?.[f]) && (p.powerW > 0 || p.heightMm > 0 || by[ref]?.stepHMm > 0);
+      const dirty = built && !same(p[f], sent[ref]?.[f]) && makes;
       tr.querySelector(`[data-f=${f}]`).classList.toggle("dirty", dirty); n += dirty;
     }
     const est = tr.querySelector("[data-est]"), ta = getS("ambientC");
@@ -752,12 +767,13 @@ function markDirty() {
     } else { est.textContent = ""; est.className = "n page"; }
   }
   for (const ref of Object.keys(bp)) if (!parts[ref] && built) n++;     // a part removed here will be removed in AEDT
+  const bms = Object.fromEntries((board.materials || []).map(m => [m.name, m]));
   for (const tr of $("mats").children) {
     const name = tr.dataset.mat; if (!name) continue;
-    for (const f of MAT_F) {
-      const dirty = built && !!bm?.[name] && mats[name]?.[f] !== undefined && !same(mats[name][f], bm[name][f]);
+    MAT_F.forEach((f, i) => {     // an emptied field goes back to the export's value or the stand-in on Apply
+      const dirty = built && !!bm?.[name] && !!bms[name] && !same(matToAedt(bms[name], i), bm[name][f]);
       tr.querySelector(`[data-f=${f}]`).classList.toggle("dirty", dirty); n += dirty;
-    }
+    });
   }
   drawPd();
   $("total").textContent = +total.toFixed(3);
@@ -770,6 +786,18 @@ function markDirty() {
   handCheck();
   gaps();
   rail();
+}
+// What Apply puts in AEDT, as setup_study.py does. A Parts field: a Pd or a mesh of 0 is none, an empty height is the
+// STEP's or the EDB's (0.2 mm at least), Rjc and Rjb go only with a Pd
+function toAedt(p, f, b) {
+  if (f === "heightMm") return p.heightMm > 0 ? p.heightMm : b ? (b.stepHMm > 0 ? b.stepHMm : Math.max(b.hMm, 0.2)) : undefined;
+  if ((f === "rjcCW" || f === "rjbCW") && !(p.powerW > 0)) return undefined;
+  return p[f] > 0 ? p[f] : undefined;
+}
+// a board material's value i (MAT_F): typed, else the export's, else the stand-in
+function matToAedt(m, i) {
+  const typed = mats[m.name]?.[MAT_F[i]], have = m[MAT_F[i]];
+  return typed > 0 ? typed : have > (i ? 0 : 0.01) ? have : (STANDIN[m.kind] || STANDIN["FR-4"])[i];
 }
 function notes() {
   const out = [], by = Object.fromEntries(board.parts.map(p => [p.refDes, p]));
@@ -1095,7 +1123,7 @@ function hitFormula(fid) {
 let hcSave = null;
 function saveHcSoon() {      // the hand check inputs are page-only: keep them in study.json without waiting for a job
   clearTimeout(hcSave);
-  hcSave = setTimeout(async () => { if (board && !job.running) await api("/api/study", { method: "PUT", body: JSON.stringify(study = collect()) }); }, 800);
+  hcSave = setTimeout(async () => { if (board && !job.running && !movedTo) await api(at("/api/study"), { method: "PUT", body: JSON.stringify(study = collect()) }); }, 800);
 }
 
 /* ---- rail: where each step stands ---- */
@@ -1114,7 +1142,9 @@ function rail() {
   const flags = crit || watch ? `; ${[crit && `${crit} critical`, watch && `${watch} watch`].filter(Boolean).join(", ")}` : "";
   $("rHand").textContent = (!pl.length ? "no power yet" : fail ? `${fail} over Tj max` : tight ? `${tight} tight` : noMax === pl.length ? "no Tj max typed" : noMax ? `${pl.length - noMax} OK, ${noMax} without Tj max` : "all within Tj max") + flags;
   dot("dHand", !pl.length ? "" : fail ? "error" : tight || crit || noMax === pl.length ? "warn" : "ok");
-  $("rAedt").textContent = !built ? "not built" : state?.open === false ? "AEDT closed" : `${state.blocks.length} heat sources`;
+  const hotN = built ? state.blocks.filter(b => b.kind !== "Passive").length : 0, coldN = built ? state.blocks.length - hotN : 0;
+  $("rAedt").textContent = !built ? "not built" : state?.open === false ? "AEDT closed"
+    : `${hotN} heat source${hotN === 1 ? "" : "s"}${coldN ? `, ${coldN} without power` : ""}`;
   dot("dAedt", !built ? "" : state?.open === false ? "warn" : "ok");
   const c = results?.converged;
   $("rRes").textContent = !results?.parts ? "not solved" : c && c.read && !c.ok ? "not converged" : `solved ${results.solvedAt}`;
@@ -1190,11 +1220,17 @@ function renderMeshCheck() {
       <td class="n">${r.rise > 0 ? (100 * r.d / r.rise).toFixed(1) + " %" : ""}</td><td class="${SAY[r.v][0]}">${WORD[r.v]}</td></tr>`).join("")}
     </tbody></table></div>`;
 }
-function checkMesh() {
-  if ($("applyBtn").classList.contains("main")) { alert("Apply your changes first: the mesh check solves what is in AEDT."); return; }
-  if (getS("mesh.mode") === "auto" && getS("mesh.level") >= 5) { alert("Level 5 is the finest automatic level. Switch to Manual to check a finer mesh."); return; }
-  if (confirm("Check the mesh? It solves twice, with a finer mesh and with yours. It takes about three times one solve.")) run("meshcheck");
+async function checkMesh() {
+  if (pendingN) {
+    if (await ask("Changes not applied", `<p>${changesText()} The mesh check solves what is in AEDT, so apply first.</p>`,
+                  [["apply", "Apply first", true], CANCEL]) === "apply") doApply();
+    return;
+  }
+  if (getS("mesh.mode") === "auto" && getS("mesh.level") >= 5) { tell("Already the finest", "Level 5 is the finest automatic level. Switch to Manual to check a finer mesh."); return; }
+  if (await ask("Check the mesh?", "<p>It solves twice, with a finer mesh and with yours. It takes about three times one solve.</p>",
+                [["go", "Check the mesh", true], CANCEL]) === "go") run("meshcheck");
 }
+const changesText = () => `${pendingN} change${pendingN > 1 ? "s" : ""} on the page ${pendingN > 1 ? "are" : "is"} not in AEDT yet.`;
 
 function renderResult(r) {
   results = r;
@@ -1311,20 +1347,22 @@ function renderRuns(list) {
     const settled = drift == null ? "<td></td>" : `<td class="n ${ds.every(m => m.ok) ? "ok" : "error"}">${drift} K</td>`;
     const cells = `<td class="n">${res.profile?.cells != null ? res.profile.cells.toLocaleString("en") : ""}</td>`;
     const temps = refs.map(ref => `<td class="n">${f((res.parts || []).find(p => p.refDes === ref)?.tempC)}</td>`).join("");
+    // the temperatures first, so they are in view without scrolling; then how far to trust them, then the settings
     return `<tr data-run="${esc(r.id)}"><td>${esc(r.at)}</td><td>${esc(r.label)}</td><td><input class="note" value="${esc(r.note || "")}" placeholder="what you changed"></td>
-      ${set}${conv}${used}${settled}${bal}${cells}<td class="n">${f(res.boardC)}</td><td class="n">${f(res.boardMeanC)}</td>${temps}
+      <td class="n">${f(res.boardC)}</td><td class="n">${f(res.boardMeanC)}</td>${temps}${conv}${used}${settled}${bal}${cells}${set}
       <td><button data-rm title="Remove this run from the table and delete its file">Remove</button></td></tr>`;
   }).join("");
-  $("runs").innerHTML = `<div class="scroll"><table><thead><tr><th>When</th><th>What</th><th>Note</th>${SET.map(([h]) => `<th class="n">${h}</th>`).join("")}
+  $("runs").innerHTML = `<div class="scroll"><table><thead><tr><th>When</th><th>What</th><th>Note</th>
+    <th class="n">Board hottest (&deg;C)</th><th class="n">Board average (&deg;C)</th>${refs.map(r => `<th class="n">${esc(r)} (&deg;C)</th>`).join("")}
     <th>Converged</th><th class="n" title="Iterations this solve used, of the most allowed per solve. A solve that went on from the last solution also shows the count since the solution started. Red: it used them all and stopped there, not converged.">Iterations used</th>
     <th class="n" title="The most any heat source temperature still moved over the last 10 % of this solve's iterations. Red: more than 0.1 K, not settled.">Still moving</th>
-    <th class="n">Balance</th><th class="n" title="Mesh cells, from the solver profile.">Cells</th><th class="n">Board hottest (&deg;C)</th><th class="n">Board average (&deg;C)</th>
-    ${refs.map(r => `<th class="n">${esc(r)} (&deg;C)</th>`).join("")}<th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    <th class="n">Balance</th><th class="n" title="Mesh cells, from the solver profile.">Cells</th>${SET.map(([h]) => `<th class="n">${h}</th>`).join("")}
+    <th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 $("runs").addEventListener("change", async e => {
   const tr = e.target.closest("tr[data-run]");
   if (!tr || !e.target.matches("input.note")) return;
-  await api("/api/runnote?id=" + encodeURIComponent(tr.dataset.run), { method: "PUT", body: JSON.stringify({ note: e.target.value }) });
+  await api(at("/api/runnote?id=" + encodeURIComponent(tr.dataset.run)), { method: "PUT", body: JSON.stringify({ note: e.target.value }) });
   e.target.blur(); runsSig = null; refresh();
 });
 $("runs").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches("input.note")) e.target.blur(); });
@@ -1334,7 +1372,7 @@ $("runs").addEventListener("click", async e => {
   const v = await ask("Remove this run?", `<p>The run from ${esc(tr.cells[0].textContent)} leaves the table, and its file <code>runs\\${esc(tr.dataset.run)}.json</code> is deleted.</p>`,
     [["rm", "Remove"], [...CANCEL, true]]);
   if (v !== "rm") return;
-  await api("/api/runremove?id=" + encodeURIComponent(tr.dataset.run), { method: "POST" });
+  await api(at("/api/runremove?id=" + encodeURIComponent(tr.dataset.run)), { method: "POST" });
   runsSig = null; refresh();
 });
 
@@ -1353,10 +1391,12 @@ function renderJob(st) {
 }
 
 async function refresh() {
-  const st = srv = await api("/api/state");
+  if (movedTo) return;
+  const st = await api("/api/state" + ($("folderSel").options.length ? "" : "?boards=1"));
+  if (folder && folder !== st.folder) { moved(st.folder); return; }   // switched in another tab
+  srv = st;
   const fresh = board && st.board && JSON.stringify(board) !== JSON.stringify(st.board);   // the export was read again
   board = st.board; state = st.state;
-  if (folder && folder !== st.folder) { location.reload(); return; }   // switched in another tab
   folder = st.folder;
   if (!$("folderSel").options.length) {
     const name = b => b.split(/[\\/]/).slice(-1)[0], twice = n => st.boards.filter(b => name(b) === n).length > 1;
@@ -1396,6 +1436,20 @@ async function refresh() {
   renderJob(st); renderAedt(); results = st.results; meshCheck = st.meshcheck; markDirty(); renderResult(st.results); renderRuns(st.runs);
 }
 
+// Another tab opened another folder: the server works there now. This tab keeps its values on screen but sends
+// nothing more, or it would write this board's values into the other folder
+let movedTo = null;
+function moved(to) {
+  if (movedTo) return;
+  movedTo = to;
+  $("form").inert = $("bar").inert = $("setBtn").disabled = true;
+  if ($("settings").open) $("settings").close();
+  const cl = $("closed");
+  cl.hidden = false;
+  cl.innerHTML = `Another tab opened <code>${esc(to)}</code>, so this tab no longer sends anything. Changes not applied here are lost. <button class="x" id="followBtn">Show that folder here</button>`;
+  $("followBtn").onclick = reload;
+}
+
 function initForm() {          // first load: the page's last values, then AEDT takes over
   const d = { ambientC: 25, orientation: "-Z", marginMm: 50, marginAboveMm: 50, radiation: true, "mesh.mode": "auto", "mesh.level": 3, "mesh.maxMm": 3, "mesh.gapElems": 3, "mesh.edgeElems": 2, iterations: 300 };
   const m = study.mesh || {}, flat = { ...d, ...study, "mesh.mode": m.mode ?? d["mesh.mode"], "mesh.level": m.level ?? 3, "mesh.maxMm": m.maxMm ?? 3, "mesh.gapElems": m.gapElems ?? 3, "mesh.edgeElems": m.edgeElems ?? 2 };
@@ -1405,8 +1459,12 @@ function initForm() {          // first load: the page's last values, then AEDT 
   for (const e of document.querySelectorAll("[data-hc]")) e.value = study.handCheck?.[e.dataset.hc] ?? (e.dataset.hc === "critMargin" ? study.handCheck?.tightC : undefined) ?? "";   // tightC: the old name
   hcMatched = study.handCheck?.matched ?? null;
   hiddenNotes = { ...(study.hiddenNotes || {}) };
+  firstBodies = Object.fromEntries((study.parts || []).map(p => [p.refDes, p]));
   drawParts(); drawMats();
 }
+// Body X and Y as loaded, for a project applied before applied.json existed. Not study.json later: every job and every
+// Settings change writes the page's values into it, applied or not
+let firstBodies = {};
 
 function collect() {
   readRows(); readMats();
@@ -1425,28 +1483,40 @@ function collect() {
 }
 async function run(mode) {
   clearTimeout(hcSave);
-  await api("/api/study", { method: "PUT", body: JSON.stringify(study = collect()) });
-  const r = await api("/api/run?mode=" + mode, { method: "POST" });
-  if (!r.ok) alert("Another job is running. Try again in a moment.");
+  await api(at("/api/study"), { method: "PUT", body: JSON.stringify(study = collect()) });
+  const r = await api(at("/api/run?mode=" + mode), { method: "POST" });
+  if (!r.ok) busyNote(r);
   refresh();
 }
+const busyNote = r => r?.moved || tell("Another job is running", "Try again when it has finished.");
 
 /* ---- a message before a job that may not do what you expect ---- */
 // A question with named buttons. Resolves to the value of the button pressed, "cancel" on Esc or a click outside.
+// One at a time: a second question waits until the first is answered.
+let asking = Promise.resolve();
 function ask(title, html, buttons) {
-  return new Promise(done => {
+  const next = asking.then(() => new Promise(done => {
     const d = $("ask");
     $("askTitle").textContent = title;
     $("askBody").innerHTML = html;
     $("askBtns").innerHTML = buttons.map(([v, label, main]) => `<button data-v="${v}"${main ? ' class="main"' : ""}>${esc(label)}</button>`).join("");
     const end = v => { d.onclose = null; d.close(); done(v); };
     $("askBtns").onclick = e => { const v = e.target.dataset?.v; if (v) end(v); };
-    d.onclick = e => { if (e.target === d) end("cancel"); };
+    d.onclick = e => { if (outside(e, d)) end("cancel"); };
     d.onclose = () => done("cancel");
     d.showModal();
-  });
+  }));
+  asking = next;
+  return next;
 }
 const CANCEL = ["cancel", "Cancel"];
+const tell = (title, text) => ask(title, `<p>${esc(text)}</p>`, [["ok", "OK", true]]);
+// a click on the backdrop of a modal dialog: its target is the dialog, as for a click on the dialog's own padding,
+// so the point must also be outside the dialog's box
+const outside = (e, d) => {
+  const r = d.getBoundingClientRect();
+  return e.target === d && (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom);
+};
 const list = xs => `<ul>${xs.map(x => `<li>${esc(x)}</li>`).join("")}</ul>`;
 
 async function doBuild() {
@@ -1491,9 +1561,19 @@ async function doApply() {
   }
   run("update");
 }
+async function doSolve() {
+  if (pendingN) {
+    const v = await ask("Changes not applied", `<p>${changesText()} Solve solves what is in AEDT now, without ${pendingN > 1 ? "them" : "it"}.</p>`,
+                        [["apply", "Apply first", true], ["go", "Solve anyway"], CANCEL]);
+    if (v === "apply") return doApply();
+    if (v !== "go") return;
+  } else if (await ask("Solve now?", "<p>It can take several minutes. The result shows here when it ends.</p>",
+                       [["go", "Solve", true], CANCEL]) !== "go") return;
+  run("solve");
+}
 async function doMesh() {
   if (pendingN) {
-    const v = await ask("Changes not applied", `<p>${pendingN} change${pendingN > 1 ? "s" : ""} on the page ${pendingN > 1 ? "are" : "is"} not in AEDT yet. Generate mesh meshes what is in AEDT now, without ${pendingN > 1 ? "them" : "it"}.</p>`,
+    const v = await ask("Changes not applied", `<p>${changesText()} Generate mesh meshes what is in AEDT now, without ${pendingN > 1 ? "them" : "it"}.</p>`,
                         [["apply", "Apply first", true], ["go", "Mesh anyway"], CANCEL]);
     if (v === "apply") return doApply();
     if (v !== "go") return;
@@ -1509,7 +1589,7 @@ async function doMesh() {
 function addPart(ref, vals = {}) {
   ref = ref.trim(); if (!ref) return;
   const hit = board.parts.find(p => p.refDes.toLowerCase() === ref.toLowerCase());
-  if (!hit) { alert(`${ref} is not in the board.`); return; }
+  if (!hit) { tell("Not in the board", `${ref} is not a RefDes of this board.`); return; }
   readRows();
   if (!parts[hit.refDes]) { parts[hit.refDes] = {}; order.push(hit.refDes); }
   Object.assign(parts[hit.refDes], vals);
@@ -1519,16 +1599,16 @@ function addPart(ref, vals = {}) {
 var reading = "";     // "started" while the server reads the board, then "done"
 $("readBtn").onclick = async () => {
   $("readBtn").disabled = true; $("readBtn").textContent = "Reading the board…"; $("readLog").hidden = true;
-  const r = await api("/api/read", { method: "POST" });
-  if (!r.ok) { alert("Another job is running. Try again in a moment."); $("readBtn").disabled = false; $("readBtn").textContent = "Read the board"; return; }
+  const r = await api(at("/api/read"), { method: "POST" });
+  if (!r.ok) { busyNote(r); $("readBtn").disabled = false; $("readBtn").textContent = "Read the board"; return; }
   reading = "started";
   const t = setInterval(async () => { await refresh(); if (board || reading === "done") clearInterval(t); }, 2000);
 };
 let stepReading = false;
 async function readStep() {          // the STEP only, into board.json; the page follows when the job ends
-  if (job.running && !job.silent) { alert("Another job is running. Try again in a moment."); return; }
-  const r = await api("/api/read?step=1", { method: "POST" });
-  if (!r.ok) { alert("Another job is running. Try again in a moment."); return; }
+  if (job.running && !job.silent) { busyNote(); return; }
+  const r = await api(at("/api/read?step=1"), { method: "POST" });
+  if (!r.ok) { busyNote(r); return; }
   stepReading = true; stepButtons();
   const t = setInterval(async () => {
     await refresh();
@@ -1546,27 +1626,40 @@ $("stepBtn").onclick = readStep;
 $("gaps").onclick = toggleNote;
 $("gapsHiddenList").onclick = toggleNote;
 $("rereadBtn").onclick = async () => {
-  const r = await api("/api/read", { method: "POST" });
-  if (!r.ok) alert("Another job is running. Try again in a moment.");
+  const r = await api(at("/api/read"), { method: "POST" });
+  if (!r.ok) busyNote(r);
   refresh();
 };
+// Before another folder opens: changes not in AEDT are lost (say so first), the page-only values go to study.json
+async function leaveFor() {
+  if (pendingN && await ask("Changes not applied", `<p>${changesText()} They are lost when another folder opens. Page-only values (Rja, Tj max, Pd from the circuit, the hand check) are kept.</p>`,
+                            [["go", "Open the other folder"], [...CANCEL, true]]) !== "go") return false;
+  if (board && !movedTo && !(job.running && !job.silent)) { clearTimeout(hcSave); await api(at("/api/study"), { method: "PUT", body: JSON.stringify(study = collect()) }); }
+  return true;
+}
+const reload = () => { leaving = true; location.reload(); };
 $("folderSel").onchange = async e => {
-  const r = await api("/api/folder?path=" + encodeURIComponent(e.target.value), { method: "POST" });
-  if (r.ok) location.reload(); else { alert(r.error || "The folder could not be opened."); e.target.value = folder; }
+  const to = e.target.value;
+  if (!await leaveFor()) { e.target.value = folder; return; }
+  const r = await api("/api/folder?path=" + encodeURIComponent(to), { method: "POST" });
+  if (r.ok) reload(); else { tell("Folder not opened", r.error || "The folder could not be opened."); e.target.value = folder; }
 };
 $("browseBtn").onclick = async () => {      // the Windows folder dialog opens on the PC running start.bat
+  if (!await leaveFor()) return;
   $("browseBtn").disabled = true; $("browseBtn").textContent = "Choose in the dialog…";
   const r = await api("/api/browse", { method: "POST" });
-  if (r.ok) { location.reload(); return; }
-  if (!r.cancelled) alert(r.error || "The folder could not be opened.");
+  if (r.ok) { reload(); return; }
+  if (!r.cancelled) tell("Folder not opened", r.error || "The folder could not be opened.");
   $("browseBtn").disabled = false; $("browseBtn").innerHTML = "Open folder&hellip;";
 };
+let leaving = false;     // the page reloads itself on purpose: no "leave the page?" question
+addEventListener("beforeunload", e => { if (pendingN && !leaving && !movedTo) { e.preventDefault(); e.returnValue = ""; } });
 $("buildBtn").onclick = doBuild;
 $("applyBtn").onclick = doApply;
 $("meshBtn").onclick = doMesh;
 $("openBtn").onclick = () => run("open");
 $("mcBtn").onclick = checkMesh;
-$("solveBtn").onclick = () => { if (confirm("Solve now? It can take several minutes. Apply pending changes first.")) run("solve"); };
+$("solveBtn").onclick = doSolve;
 $("addBtn").onclick = () => { addPart($("addRef").value); $("addRef").value = ""; };
 $("addRef").onkeydown = e => { if (e.key === "Enter") $("addBtn").click(); };
 $("form").addEventListener("input", markDirty);
@@ -1580,7 +1673,7 @@ for (const ev of ["input", "change"]) $("settings").addEventListener(ev, e => { 
 });
 $("setBtn").onclick = () => $("settings").showModal();
 $("setClose").onclick = () => $("settings").close();
-$("settings").onclick = e => { if (e.target === $("settings")) $("settings").close(); };   // a click on the backdrop
+$("settings").onclick = e => { if (outside(e, $("settings"))) $("settings").close(); };   // a click on the backdrop
 $("matchBtn").onclick = doMatch;
 $("unmatchBtn").onclick = unMatch;
 $("rows").onclick = e => { const r = e.target.dataset && e.target.dataset.del; if (r) { readRows(); delete parts[r]; order = order.filter(x => x !== r); drawParts(); markDirty(); } };
@@ -1591,14 +1684,17 @@ $("hcDetail").onclick = e => { const t = e.target.closest("[data-fid]"); if (t &
 $("hcDetail").onkeydown = e => { const t = e.target.closest("text[data-fid]"); if (t && e.key === "Enter") hitFormula(t.dataset.fid); };
 $("csv").onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
-  const miss = [];
-  for (const line of (await f.text()).split(/\r?\n/)) {
-    const m = line.split(/[,;\t]/).map(x => x.trim()), [w, heightMm, bodyXMm, bodyYMm] = m.slice(1, 5).map(parseFloat);
+  const miss = [], lines = (await f.text()).split(/\r?\n/);
+  // one separator per file, from its first line: tab, else ";" (then a "," is a decimal comma, as Excel writes in
+  // many countries: "U1;1,5;2,3"), else ","
+  const first = lines.find(l => l.trim()) || "", sep = first.includes("\t") ? "\t" : first.includes(";") ? ";" : ",";
+  for (const line of lines) {
+    const m = line.split(sep).map(x => x.trim()), [w, heightMm, bodyXMm, bodyYMm] = m.slice(1, 5).map(x => parseFloat(sep === "," ? x : x.replace(",", ".")));
     if (!m[0] || !(w > 0 || heightMm > 0)) continue;     // a header line or an empty one
     const vals = Object.fromEntries(Object.entries({ powerW: w, heightMm, bodyXMm, bodyYMm }).filter(([, v]) => v > 0));
     if (board.parts.some(p => p.refDes.toLowerCase() === m[0].toLowerCase())) addPart(m[0], vals); else miss.push(m[0]);
   }
-  if (miss.length) alert("Not in the board: " + miss.join(", "));
+  if (miss.length) tell("Not in the board", "These RefDes are not in the board: " + miss.join(", "));
   e.target.value = "";
 };
 /* ---- hover help: what a field, a column or a button means. Off with the switch at the top; the page remembers ---- */
@@ -1720,7 +1816,7 @@ document.querySelectorAll("section.step[id^=s-]").forEach(s => io.observe(s));
 refresh();
 setInterval(refresh, 5000);                       // the page follows state.json
 setInterval(async () => {                         // and asks the server to look at AEDT now and then
-  if (board && !document.hidden && !(job.running)) await fetch("/api/run?mode=read&silent=1", { method: "POST" });
+  if (board && !document.hidden && !job.running && !movedTo) await fetch(at("/api/run?mode=read&silent=1"), { method: "POST" });
 }, 15000);
 </script>
 </body>

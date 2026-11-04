@@ -14,7 +14,8 @@ meshcheck: solve with a finer mesh, then with the page's mesh again, and write m
 
 Input  : <folder>/<board>.aedb (or Altium's <board>.edb), <folder>/study.json (written by the page)
 Output : <folder>/board.json, state.json, checks.json, <board>_icepak.aedt; built.json (what Build used that only Build
-         can change), meshed.json (the meshSig of state.json when the mesh was last generated, by mesh or a solve)
+         can change), meshed.json (the meshSig of state.json when the mesh was last generated, by mesh or a solve),
+         applied.json (the body sizes build or update made the blocks from)
 """
 import hashlib
 import json
@@ -98,10 +99,20 @@ def load_study(folder: Path) -> dict:
     return s
 
 
+_TO_PAGE = {"w": 1.0, "mw": 1e-3, "uw": 1e-6, "kw": 1e3,                                  # power: W
+            "mm": 1.0, "um": 1e-3, "nm": 1e-6, "cm": 10.0, "m": 1e3, "meter": 1e3, "mil": 0.0254, "in": 25.4}   # length: mm
+_TEMP = {"cel": lambda t: t, "kel": lambda t: t - 273.15, "fah": lambda t: (t - 32) / 1.8}   # temperature: C
+
+
 def num(text, default=None):
-    """'1.5W' or '30cel' or '2mm' -> 1.5, 30, 2"""
-    m = re.match(r"\s*(-?[\d.]+(?:[eE][-+]?\d+)?)", str(text))
-    return float(m.group(1)) if m else default
+    """a value as AEDT holds it, in the page's units: '1.5W' or '500mW' -> W, '30cel' or '303.15kel' -> C, '2mm' or
+    '0.002meter' -> mm. Any other unit ('5cel_per_w') or none: the number as it is. Values typed in AEDT may carry
+    any unit, and the page writes back in its own"""
+    m = re.match(r"\s*(-?[\d.]+(?:[eE][-+]?\d+)?)\s*([A-Za-z_]*)", str(text))
+    if not m:
+        return default
+    v, unit = float(m.group(1)), m.group(2).lower()
+    return _TEMP[unit](v) if unit in _TEMP else v * _TO_PAGE.get(unit, 1.0)
 
 
 def connect():
@@ -173,12 +184,17 @@ def main(folder: Path, mode: str = "build") -> int:
             if not project_file.exists():
                 raise RuntimeError("No built project yet. Press Build first.")
             ic = step("open project", lambda: _open(Icepak, project_file), fatal=True)
+        if mode in ("update", "mesh", "solve", "meshcheck"):
+            # PyAEDT reads the setup and mesh settings from the saved .aedt, not from the AEDT window: save first, so an
+            # edit made in AEDT and not saved yet is seen (and kept where the page does not own it), not undone
+            step("save the edits made in AEDT", lambda: ic.save_project())
         if mode == "open":
             check("ok", f"Opened {project_file.name} in AEDT")
         if mode == "update":
-            step("materials", lambda: _thermal_defaults(ic, study))
+            step("materials", lambda: _thermal_defaults(ic, study, board))
         if mode in ("build", "update"):
-            _apply(ic, board, by_ref, parts, study)
+            if _apply(ic, board, by_ref, parts, study):
+                _applied(folder, parts)
             step("save project", lambda: ic.save_project())
             check("ok", f"Saved {project_file.name}")
         if mode == "mesh":
@@ -233,27 +249,36 @@ THERMAL = read_board.THERMAL
 MAT_F = (("kWmK", "thermal_conductivity", 0.01), ("rhoKgM3", "mass_density", 0), ("cpJkgK", "specific_heat", 0))
 
 
-def _thermal_defaults(app, study):
+def _thermal_defaults(app, study, board):
     """EDB materials from an electrical export (Altium, Megtron, Rogers...) can lack density, heat capacity and
     conductivity: the solver then refuses to start or, for copper, solves with no conduction. Values typed on the page
     (study "materials") are used first, a missing one gets copper, solder or FR-4 values, and the check says which.
+    A board material the page lists (board.json) and nobody typed gets the export's value, else the stand-in, as the
+    page shows: a value typed before and cleared goes back too.
     Run on the layout design before the PCB import too: the PCB component copies the layout's materials again at every
     solve, and a changed material marks the solution invalid. On update it runs on the Icepak design: materials belong
     to the project, which holds both designs."""
     typed = {k.lower(): v for k, v in study.get("materials", {}).items()}
+    export = {b["name"].lower(): b for b in board.get("materials", [])}
     fixed, own = {}, set()
     for name, m in app.materials.material_keys.items():
         if name == PKG or name.startswith(RJC_MAT):     # the blocks' own materials, set by _blocks
             continue
         try:
-            t = typed.get(name.lower(), {})
-            kind = read_board.thermal_kind(name, not m.is_dielectric())
+            t, e = typed.get(name.lower(), {}), export.get(name.lower())
+            kind = e["kind"] if e else read_board.thermal_kind(name, not m.is_dielectric())
             for i, (f, attr, low) in enumerate(MAT_F):
                 have = float(getattr(m, attr).value)
                 if t.get(f):
                     if abs(have - t[f]) > 1e-9:
                         setattr(m, attr, t[f])
                         own.add(getattr(m, "name", name))
+                elif e:
+                    want = e[f] if (e.get(f) or 0) > low else THERMAL[kind][i]
+                    if abs(have - want) > 1e-9 * max(1, want):
+                        setattr(m, attr, want)
+                        if want == THERMAL[kind][i]:
+                            fixed.setdefault(kind, set()).add(name)
                 elif have <= low:
                     setattr(m, attr, THERMAL[kind][i])
                     fixed.setdefault(kind, set()).add(name)
@@ -268,17 +293,20 @@ def _thermal_defaults(app, study):
 
 def _build(Hfss3dLayout, Icepak, desktop, folder, board, study):
     _close_same_name(desktop, [board["name"], f"{board['name']}_icepak"])
-    lay = Hfss3dLayout(version=VERSION, new_desktop=False, port=PORT)
-    lay.import_edb(str(folder / board["edb"]))
-    pn, dn = lay.project_name, lay.design_name
-    _thermal_defaults(lay, study)
+    # the EDB becomes a new project of its own. Not Hfss3dLayout() then import_edb: without a project, Hfss3dLayout()
+    # puts an empty layout design into whatever project is active in AEDT, or leaves a new empty project open
+    desktop.odesktop.GetTool("ImportExport").ImportEDB(str(folder / board["edb"] / "edb.def"))
+    proj = desktop.odesktop.GetActiveProject()
+    pn, dn = proj.GetName(), proj.GetActiveDesign().GetName().split(";")[-1]
+    lay = Hfss3dLayout(project=pn, design=dn, version=VERSION, new_desktop=False, port=PORT)
+    _thermal_defaults(lay, study, board)
     ic = Icepak(project=pn, design=DESIGN, version=VERSION, new_desktop=False, port=PORT)
     ok = ic.create_pcb_from_3dlayout("PCB", pn, dn, resolution=int(study["pcbResolution"]), extent_type="Bounding Box",
                                      close_linked_project_after_import=False,
                                      rad="Both" if study["radiation"] else "Nothing")
     check("ok" if ok else "error", f"PCB from the EDB, mapping resolution {study['pcbResolution']}"
           if ok else "PCB import returned False")
-    _thermal_defaults(ic, study)
+    _thermal_defaults(ic, study, board)
     names = [re.sub(r"^PCB_\d+_|_BBox$", "", o) for o in ic.modeler.get_3d_component_object_list(name=PCB)]
     dup = sorted({n for n in names if names.count(n) > 1})
     if dup:
@@ -296,11 +324,22 @@ def _build(Hfss3dLayout, Icepak, desktop, folder, board, study):
 # ---------------------------------------------------------------- apply (same for build and update)
 
 def _apply(ic, board, by_ref, parts, study):
-    rebuilt = step("parts", lambda: _blocks(ic, board, by_ref, parts, study)) or set()
+    """True when the part blocks were made or fixed"""
+    rebuilt = step("parts", lambda: _blocks(ic, board, by_ref, parts, study))
     step("air", lambda: _air(ic, study, board))
     step("environment", lambda: _environment(ic, study))
     step("setup", lambda: _setup(ic, study))
-    step("mesh", lambda: _mesh(ic, parts, study, rebuilt))
+    step("mesh", lambda: _mesh(ic, parts, study, rebuilt or set()))
+    return rebuilt is not None
+
+
+def _applied(folder, parts):
+    """applied.json: the body sizes the blocks were made from. AEDT cannot give them back (a block cut back for an
+    overlap is smaller), and study.json holds the page's values whether applied or not, so the page compares with this"""
+    (folder / "applied.json").write_text(json.dumps({
+        "schema": "pcb-thermal-ansys/applied", "at": time.strftime("%Y-%m-%d %H:%M"),
+        "bodies": {p["refDes"]: {k: p[k] for k in ("bodyXMm", "bodyYMm") if p.get(k)} for p in parts}}, indent=1),
+        encoding="utf-8")
 
 
 def thermal(ic):
@@ -462,10 +501,14 @@ def _blocks(ic, board, by_ref, parts, study):
     not follow the new one)"""
     rebuilt = set()
     m = ic.materials.add_material(PKG)
-    if m:
-        m.thermal_conductivity = study["packageK"]
-        m.mass_density = 2000
-        m.specific_heat = 1000
+    if m:       # only what differs: every write is an EditMaterial, and a changed material voids the solution
+        for attr, v in (("thermal_conductivity", study["packageK"]), ("mass_density", 2000), ("specific_heat", 1000)):
+            try:
+                same = abs(float(getattr(m, attr).value) - v) <= 1e-9 * max(1, v)
+            except (TypeError, ValueError):     # not a single number (anisotropic, or not set yet)
+                same = False
+            if not same:
+                setattr(m, attr, v)
     want = {p["refDes"] for p in parts}
     node, tree = thermal(ic)
     for name in list(tree):
@@ -1005,26 +1048,36 @@ def _dur(secs):
 
 
 def _setup_now(ic):
-    """the setup values the solve will use, as AEDT holds them. Read before the solve: after it AEDT cannot be read"""
+    """the values the solve will use, as AEDT holds them: setup, ambient, gravity, mesh. Not study.json, which holds
+    the page's values whether applied or not. Read before the solve: after it AEDT cannot be read"""
+    out = {}
     s = next((x for x in ic.setups if x.name == SETUP), None)
-    if not s:
-        return {}
-    p = s.props
-    return {"iterations": num(p.get("Convergence Criteria - Max Iterations")), "flowLimit": num(p.get("Convergence Criteria - Flow")),
-            "energyLimit": num(p.get("Convergence Criteria - Energy")), "radiation": str(p.get("Radiation Model", "Off")),
-            "localMm": local_mesh(ic)}
+    if s:
+        p = s.props
+        out.update(iterations=num(p.get("Convergence Criteria - Max Iterations")), flowLimit=num(p.get("Convergence Criteria - Flow")),
+                   energyLimit=num(p.get("Convergence Criteria - Energy")), radiation=str(p.get("Radiation Model", "Off")))
+    ds = ic.design_settings
+    out.update(ambientC=num(ds["AmbTemp"]), orientation=_gravity(ds))
+    gm = ic.mesh.global_mesh_region
+    out["mesh"] = ({"mode": "manual", "maxMm": num(_get(gm.settings, "MaxElementSizeX")),
+                    "gapElems": num(_get(gm.settings, "MinElementsInGap")), "edgeElems": num(_get(gm.settings, "MinElementsOnEdge"))}
+                   if gm.manual_settings else {"mode": "auto", "level": int(num(_get(gm.settings, "MeshRegionResolution"), 3))})
+    out["localMm"] = local_mesh(ic)
+    return out
 
 
 def _keep_run(folder, res, study, parts, powered, setup, label):
     """every solve also goes to runs/<date-time>.json with the settings it ran with, so the page can compare runs.
-    results.json stays the last solve only. `setup` (_setup_now) holds the local meshes as AEDT had them; the page's
-    are only the fallback when it could not be read"""
+    results.json stays the last solve only. `setup` (_setup_now) holds them as AEDT had them; the page's values are
+    only the fallback when AEDT could not be read. The PCB mapping is the one Build used"""
     runs = folder / "runs"
     runs.mkdir(exist_ok=True)
     rid = time.strftime("%Y%m%d-%H%M%S")
+    built = json.loads((folder / "built.json").read_text(encoding="utf-8")) if (folder / "built.json").exists() else {}
     (runs / f"{rid}.json").write_text(json.dumps({
         "schema": "pcb-thermal-ansys/run", "at": time.strftime("%Y-%m-%d %H:%M"), "label": label, "note": "",
-        "settings": {"ambientC": study["ambientC"], "orientation": study["orientation"], "pcbResolution": study["pcbResolution"],
+        "settings": {"ambientC": study["ambientC"], "orientation": study["orientation"],
+                     "pcbResolution": built.get("pcbResolution", study["pcbResolution"]),
                      "mesh": study["mesh"], "localMm": {p["refDes"]: p["meshMm"] for p in parts if p.get("meshMm")},
                      **setup, "totalW": round(sum(p["powerW"] for p in powered), 4)},
         "result": res}, indent=1), encoding="utf-8")
@@ -1034,7 +1087,6 @@ def _keep_run(folder, res, study, parts, powered, setup, label):
 def _solve(ic, folder, board, powered, study, parts, write=True, label="Solve"):
     """solve and read the results; written to results.json unless `write` is False, and always kept in runs/.
     Returns them, None if it failed"""
-    ambient = study["ambientC"]
     if step("junction blocks hollow", lambda: _hollow(ic)):
         # the mesh changed: read it now (AEDT cannot be read after the solve), so meshed.json gets the new meshSig
         state = step("read back", lambda: read_state(ic, board))
@@ -1043,6 +1095,7 @@ def _solve(ic, folder, board, powered, study, parts, write=True, label="Solve"):
     powered = _sources(ic, powered)     # from here on the heat sources are the ones in AEDT, with AEDT's power
     step("temperature monitors", lambda: _monitors(ic, powered, board))
     setup = step("setup values", lambda: _setup_now(ic)) or {}
+    ambient = setup["ambientC"] if setup.get("ambientC") is not None else study["ambientC"]    # what AEDT solves with
     t = time.time()
     ok = ic.analyze_setup(SETUP)
     secs = time.time() - t
@@ -1111,8 +1164,8 @@ def _solve(ic, folder, board, powered, study, parts, write=True, label="Solve"):
         check("warn", "Some temperatures could not be read. Look at the result in AEDT.")
     layers = ic.modeler.get_3d_component_object_list(name=PCB)
     on_board = [v for v in (_fmax(ic, o) for o in layers) if v is not None]
-    board = max(on_board) if on_board else None
-    if board is None:
+    board_max = max(on_board) if on_board else None     # not `board`: that is the board.json dict here
+    if board_max is None:
         check("warn", "Board temperature could not be read. Look at the result in AEDT.")
     board_mean = step("board average", lambda: _board_mean(ic, layers))
     # not "AllObjects": hollow network blocks in it break the AEDT session. Ask every other object one by one.
@@ -1120,15 +1173,15 @@ def _solve(ic, folder, board, powered, study, parts, write=True, label="Solve"):
     hollow = {n[2:] for n, d in tree.items() if d["type"] == "Network" and n.startswith("P_")}
     rest = [o for o in ic.modeler.object_names if o not in hollow and o not in layers and o != "Region"]
     others = [v for v in (_fmax(ic, o) for o in rest) if v is not None]
-    seen = [v for v in [board] + others + [r["tempC"] for r in rows] if v is not None]
+    seen = [v for v in [board_max] + others + [r["tempC"] for r in rows] if v is not None]
     anywhere = max(seen) if seen else None
     res = {"schema": "pcb-thermal-ansys/results", "solvedAt": time.strftime("%H:%M:%S"), "seconds": round(secs),
            "ambientC": ambient, "converged": conv, "balance": bal, "monitors": mon, "profile": prof,
-           "boardC": board, "boardMeanC": board_mean, "hottestC": anywhere, "parts": rows}
+           "boardC": board_max, "boardMeanC": board_mean, "hottestC": anywhere, "parts": rows}
     if write:
         (folder / "results.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
     rid = step("keep the run", lambda: _keep_run(folder, res, study, parts, powered, setup, label))
-    check("ok", f"Board hottest {board} C, board average {board_mean} C, hottest measured {anywhere} C"
+    check("ok", f"Board hottest {board_max} C, board average {board_mean} C, hottest measured {anywhere} C"
                 + ("; results.json written" if write else "") + (f"; kept as runs\\{rid}.json" if rid else ""))
     return res
 
@@ -1173,7 +1226,7 @@ def _mesh_check(ic, folder, board, parts, powered, study):
         check("error", "Mesh check stopped: a solve failed")
         return
     (folder / "meshcheck.json").write_text(json.dumps({
-        "schema": "pcb-thermal-ansys/meshcheck", "at": time.strftime("%Y-%m-%d %H:%M"), "ambientC": study["ambientC"],
+        "schema": "pcb-thermal-ansys/meshcheck", "at": time.strftime("%Y-%m-%d %H:%M"), "ambientC": a["ambientC"],
         "yours": {"mesh": study["mesh"], "local": local_a, "text": _mesh_text(study["mesh"]), "result": a},
         "finer": {"mesh": fine["mesh"], "local": local_b, "text": _mesh_text(fine["mesh"]), "result": b},
     }, indent=1), encoding="utf-8")
@@ -1196,6 +1249,11 @@ def _get(settings, key, default=None):
         return settings[key]
     except BaseException:  # noqa: BLE001  key absent in this mode
         return default
+
+
+def _gravity(ds):
+    """the gravity direction of the design settings: "-Z" and so on, as study["orientation"]"""
+    return f"{'-' if str(ds['GravityDir']) == 'Negative' else '+'}{str(ds['GravityVec'])[-1]}"
 
 
 def air_pad(ic, board, tree=None):
@@ -1263,7 +1321,7 @@ def read_state(ic, board):
         "project": ic.project_name, "path": str(ic.project_file),
         "ambientC": num(ds["AmbTemp"]),
         "radiationC": num(_get(ds, "AmbRadTemp")),
-        "gravity": f"{'-' if str(ds['GravityDir']) == 'Negative' else '+'}{str(ds['GravityVec'])[-1]}",
+        "gravity": _gravity(ds),
         "airMm": [round(reg[3] - reg[0], 1), round(reg[4] - reg[1], 1), round(reg[5] - reg[2], 1)] if reg else None,
         "padMm": pad,
         "setup": {"name": setup.name, "iterations": setup.props.get("Convergence Criteria - Max Iterations"),
@@ -1311,6 +1369,9 @@ def read_only(folder, board, project_file):
     if pid:   # a second gRPC client during a build made AEDT fail and once crash: keep the last state
         print(f"setup_study is running (process {pid}), AEDT not read")
         return 0
+    from ansys.aedt.core.generic.general_methods import is_grpc_session_active
+    if not is_grpc_session_active(PORT, version=VERSION):    # Desktop() would start a new AEDT on the port
+        return closed(f"AEDT {VERSION} runs without the page's port {PORT} (started outside start.bat?), so it cannot be read")
     desktop = Desktop(version=VERSION, new_desktop=False, port=PORT, non_graphical=False)
     try:
         if name not in list(desktop.odesktop.GetProjectList()):
@@ -1328,7 +1389,8 @@ def read_only(folder, board, project_file):
 
 
 def _busy_pid():
-    """process id of a running build/update/mesh/solve, else None. A file left by a killed run is ignored."""
+    """process id of a running build/update/mesh/solve (or the SO-8 benchmark), else None. A file left by a killed run
+    is ignored."""
     try:
         pid = int(BUSY.read_text())
     except (OSError, ValueError):
@@ -1337,15 +1399,37 @@ def _busy_pid():
     return pid if str(pid) in tasks else None
 
 
+def take_busy():
+    """mark AEDT as used by this process; returns the process id of another living user instead (another job, or the
+    SO-8 benchmark, which takes it too), and then marks nothing"""
+    pid = _busy_pid()
+    if pid and pid != os.getpid():
+        return pid
+    BUSY.write_text(str(os.getpid()))
+    return None
+
+
+def drop_busy():
+    """unmark, only when this process marked it: never another user's mark"""
+    try:
+        if int(BUSY.read_text()) == os.getpid():
+            BUSY.unlink()
+    except (OSError, ValueError):
+        pass
+
+
 if __name__ == "__main__":
     if len(sys.argv) not in (2, 3):
         raise SystemExit(__doc__)
     folder, mode = Path(sys.argv[1]).resolve(), sys.argv[2] if len(sys.argv) == 3 else "build"
     if mode == "read":
         sys.exit(main(folder, mode))
-    BUSY.write_text(str(os.getpid()))
+    other = take_busy()
+    if other:       # two gRPC clients at once made AEDT hang, and once crash
+        check("error", f"Another script (process {other}) is using AEDT, as the SO-8 benchmark does. Try again when it has ended.")
+        sys.exit(_finish(folder, 0))
     try:
         code = main(folder, mode)
     finally:
-        BUSY.unlink(missing_ok=True)
+        drop_busy()
     sys.exit(code)

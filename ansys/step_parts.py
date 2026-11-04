@@ -202,7 +202,9 @@ def tree(path):
     name_of_pd = {}         # PRODUCT_DEFINITION -> product name
     for i in by_type.get("PRODUCT_DEFINITION", []):
         pdf = ents[i]["PRODUCT_DEFINITION"][2]
-        name_of_pd[i] = ents[ents[pdf]["PRODUCT_DEFINITION_FORMATION"][2]]["PRODUCT"][0]
+        # PRODUCT_DEFINITION_FORMATION, or a subtype (SolidWorks and Creo: ..._WITH_SPECIFIED_SOURCE): its product is the 3rd
+        formation = next(v for k, v in ents[pdf].items() if k.startswith("PRODUCT_DEFINITION_FORMATION"))
+        name_of_pd[i] = ents[formation[2]]["PRODUCT"][0]
     rep_of_pd = {}          # PRODUCT_DEFINITION -> its shape representation
     for i in by_type.get("SHAPE_DEFINITION_REPRESENTATION", []):
         pds, rep = ents[i]["SHAPE_DEFINITION_REPRESENTATION"]
@@ -344,9 +346,20 @@ def for_board(path, board, report=None):
     o = board["outlineMm"]
     half = (o["xMax"] - o["xMin"]) * (o["yMax"] - o["yMin"]) / 2      # bigger than that is the board itself
     free = [b for _, b in comps if (b[3] - b[0]) * (b[4] - b[1]) < half and not any(b is h for h, _ in hits.values())]
+    # the board's mid-plane, so a body under the board is not taken for a top part above it: from the board body, else
+    # from the top-side parts found by name, else not known
+    slab = max((b for _, b in comps if (b[3] - b[0]) * (b[4] - b[1]) >= half), key=lambda b: (b[3] - b[0]) * (b[4] - b[1]), default=None)
+    named_tops = [round(b[2], 2) for r, b in named.items() if edb[r]["side"] == "top"]
+    if slab:
+        mid = (slab[2] + slab[5]) / 2
+    elif named_tops:
+        mid = max(set(named_tops), key=named_tops.count) - board["thicknessMm"] / 2
+    else:
+        mid = None
+    side_ok = lambda p, b: mid is None or ((b[2] + b[5]) / 2 >= mid) == (p["side"] == "top")  # noqa: E731
     for r, p in sorted(edb.items(), key=lambda rp: rp[1]["lMm"] * rp[1]["wMm"], reverse=True):
         if r not in hits:
-            fit = [b for b in free if near(p, b, 0.5)]        # centred on the pads; a connector may overhang them
+            fit = [b for b in free if near(p, b, 0.5) and side_ok(p, b)]    # centred on the pads; a connector may overhang them
             if fit:
                 pc = (p["xMinMm"] + p["lMm"] / 2 - off[0], p["yMinMm"] + p["wMm"] / 2 - off[1])
                 b = min(fit, key=lambda b: math.dist(centre(b), pc))
