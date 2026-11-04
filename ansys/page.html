@@ -375,7 +375,7 @@
       <dl class="hc-board" id="hcBoard"></dl>
       <div class="scroll"><table>
         <thead><tr><th>RefDes</th><th>Flag</th><th class="n">Power (W)</th><th class="n">R top (&deg;C/W)</th><th class="n">R board (&deg;C/W)</th><th class="n">Into board (W)</th>
-          <th class="n">Tj hand (&deg;C)</th><th>Ambient to Tj max</th><th class="n">Margin (K)</th><th>Status</th><th class="n" title="Hottest point of the part body in the last Icepak solve">Icepak (&deg;C)</th><th class="n">Hand &minus; Icepak</th></tr></thead>
+          <th class="n">Tj hand (&deg;C)</th><th>Ambient to Tj max</th><th class="n">Margin (K)</th><th>Status</th><th class="n" title="Hottest point of the part body in the last Icepak solve">Icepak (&deg;C)</th><th class="n" data-tip="Icepak minus the hand check, in degrees. The % is that gap as a share of the Icepak rise above ambient (Icepak minus ambient). Plus: Icepak is hotter.">Icepak &minus; hand</th></tr></thead>
         <tbody id="hcRows"></tbody>
       </table></div>
       <p class="hint" id="hcNone">No part has power yet. Type a power in Parts to see the hand check.</p>
@@ -981,11 +981,11 @@ function handCheck() {
   const worst = refs.slice().sort((a, z) => (isNum(pl[a].marginC) ? pl[a].marginC : 1e9) - (isNum(pl[z].marginC) ? pl[z].marginC : 1e9));
   if (!pl[hcSel]) hcSel = worst[0] ?? null;
   $("hcRows").innerHTML = refs.map(ref => {
-    const r = pl[ref], si = ice[ref], gap = isNum(r.tjC) && isNum(si) ? r.tjC - si : undefined;
+    const r = pl[ref], si = ice[ref], gap = isNum(r.tjC) && isNum(si) ? si - r.tjC : undefined, rise = si - b.ambientC;
     return `<tr class="pick fl-${r.flag}${ref === hcSel ? " sel" : ""}" data-hc-ref="${esc(ref)}" tabindex="0" aria-selected="${ref === hcSel}" title="Show the heat paths of ${esc(ref)}">
       <td><b>${esc(ref)}</b><small>${esc(r.model)}</small></td><td>${flagChip(r)}</td><td class="n">${fp(r.pdW)}</td><td class="n">${fp(r.rTopCW)}</td><td class="n">${fp(r.rBoardCW)}</td><td class="n">${fp(r.qBoardW)}</td>
       <td class="n"><b>${f1(r.tjC)}</b></td><td>${thermo(r, b.ambientC)}</td><td class="n${r.marginC < 0 ? " error" : ""}">${f1(r.marginC)}</td><td>${statusChip(r.status)}</td>
-      <td class="n">${f1(si)}</td><td class="n">${isNum(gap) ? (gap > 0 ? "+" : "") + f1(gap) : ""}</td></tr>`;
+      <td class="n">${f1(si)}</td><td class="n">${isNum(gap) ? (gap >= 0 ? "+" : "") + f1(gap) + " K" + (rise > 0 ? ` (${(gap / rise * 100).toFixed(0)} %)` : "") : ""}</td></tr>`;
   }).join("");
   drawDetail(hb);
   for (const tr of $("rows").children) {      // the same flag on the Parts table
