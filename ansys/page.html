@@ -1241,11 +1241,15 @@ function renderResult(r) {
   const hand = hcLast ? hcLast.parts : {};
   const rows = r.parts.map(p => {
     const over = p.tjMaxC != null && p.tempC != null && p.tempC > p.tjMaxC, h = hand[p.refDes]?.minor ? undefined : hand[p.refDes]?.tjC;
-    // margin as a share of the rise allowed above ambient (Tj max − ambient): °C ratios depend on where 0 is
-    const m = p.tempC != null && p.tjMaxC != null ? p.tjMaxC - p.tempC : null, room = p.tjMaxC - r.ambientC;
+    // margin in K only: degrees left before Tj max (negative = over by that much)
+    const m = p.tempC != null && p.tjMaxC != null ? p.tjMaxC - p.tempC : null;
+    // Icepak minus hand check, in K and as a share of the Icepak rise above ambient: °C ratios depend on where 0 is
+    const d = isNum(h) && p.tempC != null ? p.tempC - h : null, rise = p.tempC - r.ambientC;
+    const k = v => (v >= 0 ? "+" : "") + v.toFixed(1) + " K";
     return `<tr><td><b>${esc(p.refDes)}</b></td><td class="n">${p.tjMaxC != null ? p.tjMaxC + " &deg;C" : ""}</td><td class="n">${isNum(h) ? f(h) : ""}</td>
       <td class="n${over ? " error" : ""}"><b>${f(p.tempC)}</b></td>
-      <td class="n${over ? " error" : ""}">${m == null ? "" : room > 0 ? `${(m / room * 100).toFixed(0)} % (${m.toFixed(1)} K)` : `${m.toFixed(1)} K`}</td></tr>`;
+      <td class="n">${d == null ? "" : k(d) + (rise > 0 ? ` (${(d / rise * 100).toFixed(0)} %)` : "")}</td>
+      <td class="n${over ? " error" : ""}">${m == null ? "" : k(m)}</td></tr>`;
   }).join("");
   const c = r.converged, bad = c && c.items.filter(i => i.ok === false).map(i => i.name).join(", ");
   const it = c?.iterations, its = it === 1 ? "iteration" : "iterations";
@@ -1269,7 +1273,7 @@ function renderResult(r) {
   const b = r.balance, split = b && b.radiationW != null ? `, ${b.convectionW} W convection, ${b.radiationW} W radiation` : "";
   const bal = !b ? "" : b.radiation ? `<li class="warn">Energy balance not checked: radiation is on, and the monitors count only convection (${b.outW} W of ${b.inW} W). Solve again to check it.</li>` : `<li class="${Math.abs(b.errorPct) <= 1 ? "ok" : "error"}">Energy balance: ${b.inW} W in, ${b.outW} W out (${split.slice(2)}${split ? ", " : ""}${b.errorPct > 0 ? "+" : ""}${b.errorPct} %).${b.refFixW ? ` Corrected by ${b.refFixW} W for the solver's 25 &deg;C air reference (AEDT reports ${b.rawOutW} W out).` : ""}${Math.abs(b.errorPct) <= 1 ? "" : " Not balanced: do not trust these numbers."}</li>`;
   $("result").innerHTML = `<ul class="plain checks">${conv}${settle}${bal}${prof}</ul>${plots}<dl class="kv" style="margin-top:10px"><dt>Board hottest</dt><dd>${f(r.boardC)}</dd><dt>Board average</dt><dd>${f(r.boardMeanC)}</dd><dt>Hottest measured</dt><dd>${f(r.hottestC)}</dd><dt>Ambient</dt><dd>${r.ambientC} &deg;C</dd></dl>
-    <div class="scroll"><table><thead><tr><th>Heat source</th><th class="n">Tj max</th><th class="n">Hand check Tj</th><th class="n">Icepak</th><th class="n" data-tip="Tj max minus the Icepak temperature, as a share of the rise allowed above ambient (Tj max minus ambient), then in K">Margin</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    <div class="scroll"><table><thead><tr><th>Heat source</th><th class="n">Tj max</th><th class="n">Hand check Tj</th><th class="n">Icepak</th><th class="n" data-tip="Icepak minus the hand check, in degrees. The % is that gap as a share of the Icepak rise above ambient (Icepak minus ambient). Plus: Icepak is hotter.">Icepak &minus; hand</th><th class="n" data-tip="Tj max minus the Icepak temperature: degrees left before the limit. Negative: over the limit by that much.">Margin</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 /* ---- a small line plot of histories per iteration: [{name, pts: [[x, y]], limit?}] ---- */
