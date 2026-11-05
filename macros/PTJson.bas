@@ -117,6 +117,59 @@ bad:
            vbExclamation, macroName
 End Function
 
+' ---------------------------------------------------------------- Ansys page (ansys\page.html) board folder
+' Asks for study.json in a board folder of the Ansys page, the last one as the default. Sets PJ_Dir, PJ_Project
+' (the study) and PJ_Pre = "". False when the user cancels or the file cannot be used (the user has been told why).
+Public Function PJ_PickStudy(ByVal macroName As String) As Boolean
+    Dim lastF As String, f As String, ans As VbMsgBoxResult, opt As Long, cfg As String, disp As String
+    Dim fso As Object, d As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    PJ_Dir = "": PJ_WbPath = "": PJ_Pre = ""
+    Set PJ_Project = Nothing
+    lastF = GetSetting(PT_APP, "Common", "Study", "")
+    If lastF <> "" Then
+        If Not fso.FileExists(lastF) Then lastF = ""
+    End If
+    If lastF <> "" Then
+        ans = PT_Msg("Work on this board folder?" & vbCrLf & fso.GetParentFolderName(lastF) & vbCrLf & vbCrLf & _
+                     "Yes = use it." & vbCrLf & "No = pick study.json in another board folder.", vbYesNoCancel + vbQuestion, macroName)
+        If ans = vbCancel Then Exit Function
+        If ans = vbYes Then f = lastF
+    End If
+    If f = "" Then
+        f = swApp.GetOpenFileName("Pick study.json in the board folder (the Ansys page saves it there)", lastF, _
+                                  "Board study (study.json)|study.json|All files (*.*)|*.*||", opt, cfg, disp)
+        If f = "" Then Exit Function
+    End If
+    On Error GoTo bad
+    Set d = PJ_Parse(PJ_ReadFile(f))
+    On Error GoTo 0
+    If PJ_Str(d, "schema", "") <> "pcb-thermal-ansys/study" Then
+        PT_Msg macroName & " did not run. This is not the study.json of the Ansys page:" & vbCrLf & f, vbExclamation, macroName
+        Exit Function
+    End If
+    PJ_Dir = fso.GetParentFolderName(f)
+    Set PJ_Project = d
+    SaveSetting PT_APP, "Common", "Study", f
+    PT_Trace macroName & ": board folder " & PJ_Dir
+    PJ_PickStudy = True
+    Exit Function
+bad:
+    PT_Msg macroName & " did not run. study.json could not be read:" & vbCrLf & f & vbCrLf & vbCrLf & Err.Description, vbExclamation, macroName
+End Function
+
+' The board name in board.json next to study.json ("Board" when it cannot be read).
+Public Function PJ_BoardName() As String
+    On Error Resume Next
+    PJ_BoardName = PJ_Str(PJ_Parse(PJ_ReadFile(PJ_Dir & "\board.json")), "name", "Board")
+    If PJ_BoardName = "" Then PJ_BoardName = "Board"
+End Function
+
+' <folder>\solidworks\<board>_solution.sldasm: the assembly Build Solution makes and Send Solution reads.
+Public Function PJ_SolutionAsm() As String
+    PJ_SolutionAsm = PJ_Dir & "\solidworks\" & PT_SafeFile(PJ_BoardName()) & "_solution.sldasm"
+End Function
+
 ' ---------------------------------------------------------------- the macros' own files
 ' The project's cad or results file (fileName from PJ_File). A file that is not there yet gives a new one with only its header.
 ' Nothing when the file is there but cannot be read (reason in PT_LastErr): never overwrite it then.

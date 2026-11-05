@@ -30,6 +30,10 @@ Option Explicit
 ' (face height, thickness, covered chips with TIM and pedestal, clearance cuts), worked out by the page on Save.
 ' The outcome goes to <prefix>_cad.json spreaderBuild, the change records to its changes. Refuses while cad.json
 ' has change records not ticked on the page.
+' Ansys page (RunAnsys, the Build Solution button): the plates come from study.json solution.forSolidWorks of a board
+' folder of ansys\page.html, in the board STEP's frame. The assembly is <folder>\solidworks\<board>_solution.sldasm,
+' made from the board STEP on the first run; the plate parts are Spreader_Top / Spreader_Bottom there. The outcome goes
+' to solution_cad.json build. No cuts: tall parts in the way are the page's warning, cut them by hand.
 ' Needs modules PTCommon and PTJson in the same macro. Old workbooks: a copy of PCB_thermal_TEMPLATE.xlsx.
 ' =====================================================================================
 
@@ -61,6 +65,7 @@ Dim nFeatAdded As Long, nFeatChanged As Long, nFeatSupp As Long, nTimAdded As Lo
 Dim jsonMode As Boolean                                  ' project folder mode: the plate of the side comes from jPlate
 Dim jPlate As Object                                     ' forSolidWorks plates top or bottom of the side being built
 Dim sideRec(0 To 1) As Object                            ' cad.json spreaderBuild top and bottom of this run
+Dim ansysMode As Boolean                                 ' Ansys page mode (RunAnsys): jPlate is a plate of study.json solution.forSolidWorks
 
 Sub main()
     Set swApp = Application.SldWorks
@@ -69,7 +74,7 @@ Sub main()
     Set skipped = New Collection: Set failMsgs = New Collection: Set notes = New Collection
     nFeatAdded = 0: nFeatChanged = 0: nFeatSupp = 0: nTimAdded = 0: nTimChanged = 0: nTimSupp = 0
     nT = 0: rptBody = "": resMsg = ""
-    jsonMode = False: Set jPlate = Nothing: Set sideRec(0) = Nothing: Set sideRec(1) = Nothing
+    jsonMode = False: ansysMode = False: Set jPlate = Nothing: Set sideRec(0) = Nothing: Set sideRec(1) = Nothing
 
     ' ---------- project folder (page) or workbook ----------
     Select Case PJ_PickSource(MACRO_NAME)
@@ -317,10 +322,220 @@ swFail:
            vbExclamation, MACRO_NAME
 End Sub
 
+' ================================================================= Ansys page mode (Build Solution button)
+' study.json solution.forSolidWorks plates[]: side, tMm, undersideZMm, outlineMm [x0, y0, x1, y1] and chips[] (refDes,
+' boxMm [x0, y0, x1, y1], faceZMm, timTMm, pedestalMm), worked out by the page in the board STEP's frame (mm).
+' Makes <folder>\solidworks\<board>_solution.sldasm from the board STEP once, then builds or updates the plates and the
+' TIM parts in it as the project mode does: the Outline sketch and features you added are never touched.
+Public Sub RunAnsys()
+    Const ME_NAME As String = "BuildSolution"
+    Set swApp = Application.SldWorks
+    PT_Trace ME_NAME & ": started (VBA macro)."
+    PT_LogReset
+    PT_ShapeClear
+    Set skipped = New Collection: Set failMsgs = New Collection: Set notes = New Collection
+    nFeatAdded = 0: nFeatChanged = 0: nFeatSupp = 0: nTimAdded = 0: nTimChanged = 0: nTimSupp = 0
+    nT = 0: nCu = 0: rptBody = "": resMsg = ""
+    jsonMode = True: ansysMode = True: Set jPlate = Nothing: Set sideRec(0) = Nothing: Set sideRec(1) = Nothing
+    If Not PJ_PickStudy(ME_NAME) Then Exit Sub
+
+    Dim fs As Object, plates As Object, stepPath As String
+    If Not PJ_Bool(PJ_Project, "solution/on", False) Then
+        PT_Msg ME_NAME & " did not run. The thermal solution is off on the page (step 4). Turn it on, tick the parts and try again.", vbExclamation, ME_NAME
+        Exit Sub
+    End If
+    Set fs = PJ_Obj(PJ_Project, "solution/forSolidWorks")
+    If Not fs Is Nothing Then Set plates = PJ_Obj(fs, "plates")
+    If plates Is Nothing Then
+        PT_Msg ME_NAME & " did not run. study.json has no plate yet." & vbCrLf & vbCrLf & _
+               "On the page, tick the parts under the plate (step 4). If it says board.json has no STEP frame, press Read heights from the STEP (step 1).", _
+               vbExclamation, ME_NAME
+        Exit Sub
+    End If
+    If plates.Count = 0 Then
+        PT_Msg ME_NAME & " did not run. No ticked part has a body in the STEP, so there is no plate to build.", vbExclamation, ME_NAME
+        Exit Sub
+    End If
+    stepPath = PJ_Dir & "\" & PJ_Str(fs, "stepFile", "")
+
+    Dim asm As Object, asmPath As String, partTmpl As String, outDir As String
+    asmPath = PJ_SolutionAsm()
+    outDir = PJ_Dir & "\solidworks"
+    PT_MakeDirs outDir
+    outDir = outDir & "\"
+    partTmpl = swApp.GetUserPreferenceStringValue(swDefaultTemplatePart)
+    If partTmpl <> "" Then
+        If Dir(partTmpl) = "" Then partTmpl = ""
+    End If
+    If partTmpl = "" Then
+        PT_Msg ME_NAME & " did not run. The SolidWorks default part template was not found (Tools > Options > Default Templates).", vbExclamation, ME_NAME
+        Exit Sub
+    End If
+
+    Dim pl As Variant, res As Long, nBuilt As Long, errs As Long, warns As Long
+    On Error GoTo swFail
+    Set asm = PT_OpenAsm(asmPath)
+    If asm Is Nothing Then Set asm = NewSolutionAsm(stepPath, asmPath)
+    PT_ActivateDoc asm
+    asm.ResolveAllLightWeightComponents False
+    CheckStepFrame asm, fs
+    For Each pl In plates
+        Set jPlate = pl
+        bottomSide = (PJ_Str(jPlate, "side", "top") = "bottom")
+        res = DoSide(Nothing, asm, partTmpl, outDir, "", 0.01, 0.01, 0, 0)
+        If res < 0 Then Exit Sub
+        nBuilt = nBuilt + res
+    Next
+    SyncTims asm, partTmpl, outDir, "", 0.01, 0.01
+    PT_ActivateDoc asm
+    asm.ForceRebuild3 False
+    asm.Save3 PT_swSaveSilent + PT_swSaveReferenced, errs, warns
+    On Error GoTo 0
+
+    Dim rptPath As String, sc As Object, b As Object, k As Long
+    rptPath = outDir & "BuildSolution_report.txt"
+    WriteReport rptPath, asmPath
+    Set sc = PJ_ReadOwn("solution_cad.json", "pcb-thermal-ansys/solution-cad")
+    If sc Is Nothing Then
+        PT_Msg "The plates were saved, but " & PJ_Dir & "\solution_cad.json could not be read, so it was left as it is:" & vbCrLf & PT_LastErr, vbExclamation, ME_NAME
+        Exit Sub
+    End If
+    Set b = PJ_Dict()
+    PJ_Put b, "date", PJ_Now()
+    PJ_Put b, "assembly", asmPath
+    PJ_Put b, "pageSavedAt", PJ_Str(fs, "computedAt", "")
+    For k = 0 To 1
+        If Not sideRec(k) Is Nothing Then PJ_Put b, IIf(k = 1, "bottom", "top"), sideRec(k)
+    Next
+    PJ_Put b, "notes", notes
+    PJ_Put b, "report", rptPath
+    PJ_Put sc, "build", b
+    If Not PJ_SaveOwn(sc, "solution_cad.json", ME_NAME) Then
+        PT_Msg "The plates were saved, but solution_cad.json could not be written:" & vbCrLf & PT_LastErr, vbExclamation, ME_NAME
+        Exit Sub
+    End If
+
+    Dim s As String
+    s = "Built and saved:" & vbCrLf & asmPath & vbCrLf & vbCrLf & resMsg & _
+        "Pedestals: " & nFeatAdded & " added, " & nFeatChanged & " rebuilt, " & nFeatSupp & " suppressed." & vbCrLf & _
+        "TIM parts: " & nTimAdded & " added, " & nTimChanged & " changed, " & nTimSupp & " suppressed." & vbCrLf
+    If skipped.Count > 0 Then s = s & skipped.Count & " ticked parts skipped (listed in the report)." & vbCrLf
+    If notes.Count > 0 Then s = s & notes.Count & " notes (listed in the report)." & vbCrLf
+    If failMsgs.Count > 0 Then s = s & failMsgs.Count & " problems (listed in the report)." & vbCrLf
+    s = s & vbCrLf & "Finish the plates here (holes, shape, cuts around parts in the way), then press Send Solution." & vbCrLf & _
+        "A change of Lift, thickness or TIM on the page: let it save, then Build Solution again; your own features stay." & vbCrLf & vbCrLf & "Report: " & rptPath
+    PT_Msg s, IIf(failMsgs.Count > 0, vbExclamation, vbInformation), ME_NAME
+    Exit Sub
+
+swFail:
+    If Err.Number >= vbObjectError + 34 And Err.Number <= vbObjectError + 36 Then
+        PT_Msg ME_NAME & " did not run (" & IIf(bottomSide, "bottom", "top") & " plate): " & Err.Description, vbExclamation, ME_NAME
+        Exit Sub
+    End If
+    PT_Msg ME_NAME & " stopped in SolidWorks (" & IIf(bottomSide, "bottom", "top") & " plate): " & Err.Description & vbCrLf & _
+           "Nothing was saved and solution_cad.json was not changed. Close the plate part and the assembly without saving, send this message, and run again.", _
+           vbExclamation, ME_NAME
+End Sub
+
+' The board STEP opened as an assembly and saved as asmPath (its parts next to it).
+Function NewSolutionAsm(ByVal stepPath As String, ByVal asmPath As String) As Object
+    Dim impData As Object, errs As Long, warns As Long, md As Object
+    If Right(stepPath, 1) = "\" Or Dir(stepPath) = "" Then Err.Raise vbObjectError + 34, , "the board STEP is not in the board folder: " & stepPath & _
+                                                                   ". Put it there and press Read heights from the STEP on the page."
+    Set impData = swApp.GetImportFileData(stepPath)
+    Set md = swApp.LoadFile4(stepPath, "r", impData, errs)
+    If md Is Nothing Then Err.Raise vbObjectError + 34, , "SolidWorks could not open " & stepPath & " (error " & errs & ")"
+    If md.GetType <> PT_swDocASSEMBLY Then Err.Raise vbObjectError + 34, , "the board STEP opened as one part, not an assembly of parts. Export it again from Altium as an assembly."
+    If Not md.Extension.SaveAs(asmPath, 0, PT_swSaveSilent + PT_swSaveReferenced, Nothing, errs, warns) Then
+        Err.Raise vbObjectError + 34, , "could not save " & asmPath & " (error " & errs & ")"
+    End If
+    notes.Add "New assembly made from " & stepPath & "."
+    Set NewSolutionAsm = md
+End Function
+
+' The page placed the plates by the board's top face in the STEP (frame/topZMm). SolidWorks keeps the STEP's
+' coordinates on import; this checks it on the biggest flat component at any level, the board (of two the same size,
+' the thinner: a STEP often wraps everything in one sub-assembly).
+Sub CheckStepFrame(ByVal asm As Object, ByVal fs As Object)
+    Dim comps As Variant, i As Long, bx As Variant, best As Variant, bestA As Double, a As Double, want As Double
+    If Not PJ_IsNum(fs, "frame/topZMm") Then Exit Sub
+    want = PJ_Num(fs, "frame/topZMm", 0)
+    comps = asm.GetComponents(False)
+    If IsEmpty(comps) Then Exit Sub
+    For i = 0 To UBound(comps)
+        If PT_GetProp(comps(i).GetModelDoc2, "Role") = "" Then
+            bx = PT_CompBox(comps(i))
+            If Not IsEmpty(bx) Then
+                a = bx(3) * bx(4)
+                If bx(5) < 0.25 * Sqr(a) Then
+                    If a > bestA * 1.01 Then
+                        bestA = a: best = bx
+                    ElseIf a > bestA * 0.99 Then
+                        If bx(5) < best(5) Then bestA = a: best = bx
+                    End If
+                End If
+            End If
+        End If
+    Next
+    If bestA = 0 Then Exit Sub
+    If Abs(best(2) + best(5) - want) > 0.05 Then
+        notes.Add "The board's top face is at Z " & Round(best(2) + best(5), 3) & " mm here, the page expects " & Round(want, 3) & _
+                  " mm. The STEP may have been moved on import: check that the plates sit on the parts."
+    End If
+End Sub
+
+' Ticked chips of a study.json plate (Ansys page mode).
+Sub ReadChipsAnsys()
+    Dim cl As Object, it As Variant, bx As Object, refD As String, n As Long, seen As Object
+    Set seen = CreateObject("Scripting.Dictionary")
+    Set cl = PJ_Obj(jPlate, "chips")
+    nCh = 0
+    If Not cl Is Nothing Then n = cl.Count
+    ReDim chRef(n): ReDim chKey(n): ReDim chBox(n, 4): ReDim chPed(n): ReDim chTim(n): ReDim chBody(n)
+    If n = 0 Then Exit Sub
+    For Each it In cl
+        refD = PJ_Str(it, "refDes", "")
+        Set bx = PJ_Obj(it, "boxMm")
+        If refD = "" Then
+        ElseIf bx Is Nothing Then
+            skipped.Add refD & ": no box in study.json (save the page again)"
+        ElseIf bx.Count <> 4 Or seen.Exists(UCase(refD)) Then
+            skipped.Add refD & ": listed twice or with a broken box, ignored"
+        Else
+            seen.Add UCase(refD), 1
+            chRef(nCh) = refD
+            chKey(nCh) = refD
+            chBox(nCh, 0) = bx(1)
+            chBox(nCh, 1) = bx(2)
+            chBox(nCh, 2) = bx(3) - bx(1)
+            chBox(nCh, 3) = bx(4) - bx(2)
+            chBox(nCh, 4) = PJ_Num(it, "faceZMm", 0)
+            chPed(nCh) = PJ_Num(it, "pedestalMm", 0)
+            chTim(nCh) = PJ_Num(it, "timTMm", 0)
+            chBody(nCh) = True
+            nCh = nCh + 1
+        End If
+    Next
+End Sub
+
+' First plate of the Ansys page: the Outline sketch is the page's rectangle (outlineMm), on the Front Plane, so you can
+' edit it like one you drew; then the underside plane and the plate, as for a user-drawn outline.
+Sub MakeAnsysBase(ByVal md As Object, ByVal zu As Double, ByVal tPl As Double)
+    Dim front As Object, sk As Object, o As Object
+    Set o = PJ_Obj(jPlate, "outlineMm")
+    If o Is Nothing Then Err.Raise vbObjectError + 34, , "study.json has no plate outline (save the page again)"
+    Set front = PT_RefPlane(md, 1)
+    If front Is Nothing Then Err.Raise vbObjectError + 40, , "the part template has no reference plane"
+    Set sk = PT_SketchRect(md, front, o(1), o(2), o(3), o(4), 0)
+    sk.Name = "Outline"
+    MakeUserPlate md, zu, tPl
+End Sub
+
 ' Covered chips of jPlate. The chip box comes from forSolidWorks bodies (by key); the face toward the plate is
 ' the body top for the top plate and the body bottom for the bottom plate.
 Sub ReadChipsJson()
     Dim cl As Object, bl As Object, it As Variant, bx As Object, b As Variant, keyS As String, refD As String, n As Long, seen As Object
+    If ansysMode Then ReadChipsAnsys: Exit Sub
     Set seen = CreateObject("Scripting.Dictionary")
     Set cl = PJ_Obj(jPlate, "chips")
     Set bl = PJ_Obj(PJ_Project, "forSolidWorks/bodies")
@@ -414,7 +629,12 @@ Function DoSide(ByVal wb As Object, ByVal asm As Object, ByVal partTmpl As Strin
     sideTxt = IIf(bottomSide, "Bottom", "Top")
     Dim fail0 As Long
     fail0 = failMsgs.Count
-    If jsonMode Then
+    If ansysMode Then
+        zu = PJ_Num(jPlate, "undersideZMm", 0)
+        tPl = PJ_Num(jPlate, "tMm", 0)
+        ReadChipsJson
+        ReadCutsJson
+    ElseIf jsonMode Then
         zu = PJ_Num(jPlate, "faceZMm", 0)
         tPl = PJ_Num(jPlate, "thicknessMm", 0)
         ReadChipsJson
@@ -437,7 +657,7 @@ Function DoSide(ByVal wb As Object, ByVal asm As Object, ByVal partTmpl As Strin
         notes.Add "Bottom: no chip is covered on the Spreader bottom tab, so the bottom spreader part was left unchanged."
         Exit Function
     End If
-    If tPl <= 0 Or (Not bottomSide And zu <= 0) Or (bottomSide And nCh = 0 And zu = 0) Then
+    If tPl <= 0 Or (Not ansysMode And ((Not bottomSide And zu <= 0) Or (bottomSide And nCh = 0 And zu = 0))) Then
         PT_Msg "BuildSpreader did not run (" & LCase(sideTxt) & " spreader). On its tab the plate thickness (" & tPl & ") must be above 0 and " & _
                "the face height (" & zu & ") must be set." & vbCrLf & _
                "Mark at least one chip Covered = Yes, or set the face height to Manual.", vbExclamation, MACRO_NAME
@@ -445,7 +665,9 @@ Function DoSide(ByVal wb As Object, ByVal asm As Object, ByVal partTmpl As Strin
         Exit Function
     End If
     pOx = 0: pOy = 0: pOz = 0
-    If sprComp Is Nothing Then
+    If sprComp Is Nothing And ansysMode Then
+        newRev = True
+    ElseIf sprComp Is Nothing Then
         If bottomSide Then
             notes.Add "Bottom: " & nCh & " chips are covered but there is no spreader part with Spreader and Bottom in its name. Draw its outline and run again."
             Exit Function
@@ -468,11 +690,17 @@ Function DoSide(ByVal wb As Object, ByVal asm As Object, ByVal partTmpl As Strin
     If newRev Then
         doLog = False
         zuP = zu
-        sprPath = outDir & prefix & "Spreader_r" & Format(NextRev(outDir, prefix), "00") & ".sldprt"
+        If ansysMode Then                                   ' Spreader_Top / Spreader_Bottom; a stale file of that name is kept
+            sprPath = outDir & "Spreader_" & sideTxt & ".sldprt"
+            If Dir(sprPath) <> "" Then sprPath = outDir & "Spreader_" & sideTxt & "_" & Format(Now, "yyyymmdd_hhnnss") & ".sldprt"
+        Else
+            sprPath = outDir & prefix & "Spreader_r" & Format(NextRev(outDir, prefix), "00") & ".sldprt"
+        End If
         Set md = swApp.NewDocument(partTmpl, 0, 0, 0)
         If md Is Nothing Then Err.Raise vbObjectError + 30, , "SolidWorks could not make a new part from " & partTmpl
-        MakeBase md, zu, tPl, pcbL, pcbW
+        If ansysMode Then MakeAnsysBase md, zu, tPl Else MakeBase md, zu, tPl, pcbL, pcbW
         sprName = Mid(sprPath, InStrRev(sprPath, "\") + 1)
+        PT_SetProp md, "Side", sideTxt
         PT_SetProp md, "Role", "Spreader"
         PT_SetProp md, "Key", LCase(Left(sprName, Len(sprName) - 7))
         PT_SetProp md, "Name", "Spreader " & sprName
@@ -480,7 +708,7 @@ Function DoSide(ByVal wb As Object, ByVal asm As Object, ByVal partTmpl As Strin
         If Not md.Extension.SaveAs(sprPath, 0, PT_swSaveSilent, Nothing, errs, warns) Then
             Err.Raise vbObjectError + 31, , "could not save " & sprPath & " (error " & errs & ")"
         End If
-        sprMsg = "New rectangular spreader made from the PCB size."
+        sprMsg = IIf(ansysMode, "New " & LCase(sideTxt) & " plate made around the ticked parts.", "New rectangular spreader made from the PCB size.")
     Else
         If sprComp.IsVirtual Then Err.Raise vbObjectError + 34, , "the spreader is a virtual part inside the assembly. " & _
                                   "Right-click it in the tree, choose Save Part (in External File), and run again."

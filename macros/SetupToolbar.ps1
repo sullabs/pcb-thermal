@@ -43,6 +43,10 @@ $buttons = @(
       "Sets heat sources and ambient on your Flow Simulation project, solves it and writes the goals to the results file."),
     @("Read Results", "ReadResults", "8_ReadResults_32.bmp",
       "Reads the solved thermal study and writes the temperatures to the results file, tab 9 of the page."),
+    @("Build Solution", "BuildSolution", "9_BuildSolution_32.bmp",
+      "Ansys page: makes the solution assembly from the board STEP and builds or updates the spreader plates and TIM parts from step 4 of the page."),
+    @("Send Solution", "SendSolution", "10_SendSolution_32.bmp",
+      "Ansys page: sends the plates as they are now (STEP and measures) to the board folder, for the hand check and AEDT. Changes no CAD file."),
     @("Update Macros", "UpdateMacros", "0_UpdateMacros_32.bmp",
       "Imports every .bas file from this folder into PCBThermal.swp, compiles and saves it. Use it after you get new .bas files.")
 )
