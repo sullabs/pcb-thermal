@@ -2,3 +2,5 @@
 *.bmp binary
 *.xlsx binary
 *.swp binary
+*.vbs text eol=crlf
+*.cmd text eol=crlf

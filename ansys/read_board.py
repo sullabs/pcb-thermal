@@ -198,8 +198,10 @@ def read_board(edb_path: Path) -> dict:
 
 
 def add_step(folder: Path, board: dict):
-    """heights and body sizes from the board's STEP (Altium: File > Export > STEP 3D), the newest .step/.stp in the folder"""
-    steps = sorted((f for f in folder.iterdir() if f.suffix.lower() in (".step", ".stp")), key=lambda f: f.stat().st_mtime)
+    """heights and body sizes from the board's STEP (Altium: File > Export > STEP 3D), the newest .step/.stp in the folder
+    that is not a plate of the thermal solution (solution_<side>.step, written by Send Solution)"""
+    steps = sorted((f for f in folder.iterdir() if f.suffix.lower() in (".step", ".stp")
+                    and not f.name.lower().startswith("solution_")), key=lambda f: f.stat().st_mtime)
     if not steps:
         print("No .step or .stp in the folder: heights stay the EDB's placeholders", flush=True)
         return

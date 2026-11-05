@@ -79,7 +79,8 @@ copies the old file to `backup\`. The macros write only `AB_cad.json` and `AB_re
 ## Updating
 
 New `PCB_Thermal.html`: replace the file. New `.bas` files: put them in `macros\`, then press **Update Macros** on the
-PCB Thermal tab. New buttons: close SolidWorks and run `SetupToolbar.cmd` again.
+PCB Thermal tab, or run `macros\BuildMacros.cmd` (no clicks: it starts SolidWorks if needed, imports, compiles,
+saves, and prints the result; exit code 0 = OK). New buttons: close SolidWorks and run `SetupToolbar.cmd` again.
 
 ## For developers
 
@@ -87,6 +88,8 @@ This branch is the user package. Development happens on `addin-mvp`. Every chang
 in this package must also land here, in the same session:
 
 - Page: `npm run build` in `webapp\`, copy `webapp\dist\PCB_Thermal.html` here.
-- Macros: copy the changed `.bas` files to `macros\`, press **Update Macros** (or rebuild `PCBThermal.swp`), commit
-  the `.swp` too.
+- Macros: copy the changed `.bas` files to `macros\`, run `macros\BuildMacros.cmd -nopause` (or press **Update Macros**),
+  commit the `.swp` too. BuildMacros.cmd reaches SolidWorks through COM (`BuildMacros.vbs`), so it needs the desktop
+  session and a SolidWorks started normally (one started by COM is not found by the next script). A compile error
+  shows the VBA editor's message; after OK the log `%TEMP%\PCBThermal_build.log` names the module and line.
 - A new macro that works with the project files: add its `.bas`, button and icons here and to `README.md`.
