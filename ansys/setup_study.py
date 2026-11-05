@@ -15,7 +15,8 @@ meshcheck: solve with a finer mesh, then with the page's mesh again, and write m
 Input  : <folder>/<board>.aedb (or Altium's <board>.edb), <folder>/study.json (written by the page)
 Output : <folder>/board.json, state.json, checks.json, <board>_icepak.aedt; built.json (what Build used that only Build
          can change), meshed.json (the meshSig of state.json when the mesh was last generated, by mesh or a solve),
-         applied.json (the body sizes build or update made the blocks from)
+         applied.json (the body sizes build or update made the blocks from), solution_applied.json (which SolidWorks
+         export the SOL_ objects of the thermal solution were made from)
 """
 import hashlib
 import json
@@ -40,6 +41,10 @@ DESIGN = "Icepak"
 SETUP = "Study"
 PKG = "pkg_material"
 RJC_MAT = "rjc_"         # rjc_<refdes>: the material of a block with Rjc and no Rjb, its k gives Rjc through the height
+SOL = "SOL_"             # objects of the thermal solution: SOL_Spreader_Top, SOL_Spreader_Bottom, SOL_TIM_<RefDes>
+SOL_MAT = "sol_"         # their materials: sol_plate_top, sol_plate_bottom, sol_tim_<refdes>
+PLATE_MAT = {"Aluminium": (167, 2700, 896), "Copper": (390, 8933, 385)}    # k W/m.K, density kg/m3, heat capacity J/kg.K
+TIM_DENSITY_CP = (2500, 1000)
 # exists while a build/update/mesh/solve talks to the AEDT on PORT, for any board folder; mode read leaves AEDT alone then
 BUSY = Path(tempfile.gettempdir()) / f"pcb_thermal_aedt_{PORT}.busy"
 
@@ -196,7 +201,7 @@ def main(folder: Path, mode: str = "build") -> int:
         if mode == "update":
             step("materials", lambda: _thermal_defaults(ic, study, board))
         if mode in ("build", "update"):
-            if _apply(ic, board, by_ref, parts, study):
+            if _apply(ic, folder, board, by_ref, parts, study):
                 _applied(folder, parts)
             step("save project", lambda: ic.save_project())
             check("ok", f"Saved {project_file.name}")
@@ -267,7 +272,7 @@ def _thermal_defaults(app, study, board):
     export = {b["name"].lower(): b for b in board.get("materials", [])}
     fixed, own = {}, set()
     for name, m in app.materials.material_keys.items():
-        if name == PKG or name.startswith(RJC_MAT):     # the blocks' own materials, set by _blocks
+        if name == PKG or name.startswith(RJC_MAT) or name.startswith(SOL_MAT):     # the blocks' and plates' own materials
             continue
         try:
             t, e = typed.get(name.lower(), {}), export.get(name.lower())
@@ -328,9 +333,10 @@ def _build(Hfss3dLayout, Icepak, desktop, folder, board, study):
 
 # ---------------------------------------------------------------- apply (same for build and update)
 
-def _apply(ic, board, by_ref, parts, study):
+def _apply(ic, folder, board, by_ref, parts, study):
     """True when the part blocks were made or fixed"""
     rebuilt = step("parts", lambda: _blocks(ic, board, by_ref, parts, study))
+    step("thermal solution", lambda: _solution(ic, folder, board, study))
     step("air", lambda: _air(ic, study, board))
     step("environment", lambda: _environment(ic, study))
     step("setup", lambda: _setup(ic, study))
@@ -345,6 +351,138 @@ def _applied(folder, parts):
         "schema": "pcb-thermal-ansys/applied", "at": time.strftime("%Y-%m-%d %H:%M"),
         "bodies": {p["refDes"]: {k: p[k] for k in ("bodyXMm", "bodyYMm") if p.get(k)} for p in parts}}, indent=1),
         encoding="utf-8")
+
+
+# ---------------------------------------------------------------- thermal solution (SolidWorks plates)
+
+def _sol_material(ic, name, k, rho, cp):
+    """an own material of the solution; only what differs is written (a changed material voids the solution)"""
+    m = ic.materials.material_keys.get(name) or ic.materials.add_material(name)
+    if not m:
+        return None
+    for attr, v in (("thermal_conductivity", k), ("mass_density", rho), ("specific_heat", cp)):
+        try:
+            same = abs(float(getattr(m, attr).value) - v) <= 1e-9 * max(1, v)
+        except (TypeError, ValueError):
+            same = False
+        if not same:
+            setattr(m, attr, v)
+    return name
+
+
+def _solution(ic, folder, board, study):
+    """The plates SolidWorks sent (Send Solution: solution_cad.json, solution_<side>.step) and their TIMs as objects of
+    this design. A plate is imported again only when its STEP or its place changed; a TIM is a box of SolidWorks' size.
+    Turned off on the page (the whole solution, or one plate): its objects stay but are not in the model, so they are
+    out of the mesh and the solve. Coordinates: STEP point + (offXMm, offYMm), and the STEP's board top face on the PCB's"""
+    sol = study.get("solution") or {}
+    names = set(ic.modeler.object_names)
+    have = sorted(n for n in names if n.startswith(SOL))
+    cad_f = folder / "solution_cad.json"
+    cad = json.loads(cad_f.read_text(encoding="utf-8")) if cad_f.exists() else {}
+    if not cad.get("plates"):
+        for n in have:
+            if ic.modeler[n].is_model:
+                ic.modeler[n].is_model = False
+        if sol.get("on"):
+            check("warn", "Thermal solution: SolidWorks has not sent the plates yet (Build Solution, finish them, Send "
+                          "Solution). Nothing of it is in AEDT" + (", the old objects are out of the model." if have else "."))
+        return
+    fr = board.get("stepFrame") or cad.get("frame")
+    if not fr:
+        check("error", "Thermal solution: board.json has no STEP frame, so the plates cannot be placed. Press Read heights from the STEP.")
+        return
+    zlo, zhi = board_z(ic, board)
+    dx, dy, dz = fr["offXMm"], fr["offYMm"], zhi - fr["topZMm"]
+    plates_in = sol.get("plates") or {}
+    plan = {x["side"]: x for x in (sol.get("forSolidWorks") or {}).get("plates", [])}
+    on = {side: bool(sol.get("on")) and (plates_in.get(side) or {}).get("on", True) for side in ("top", "bottom")}
+    rec_f = folder / "solution_applied.json"
+    rec = json.loads(rec_f.read_text(encoding="utf-8")) if rec_f.exists() else {}
+    done = {}
+    for pl in cad["plates"]:
+        side = pl["side"]
+        stem = f"{SOL}Spreader_{side.title()}"
+        f = folder / pl.get("file", "")
+        if not pl.get("file") or not f.exists():
+            check("error", f"Thermal solution: {pl.get('file') or 'the plate STEP'} is not in the board folder. Press Send Solution again.")
+            continue
+        sig = hashlib.sha1(f.read_bytes() + json.dumps([pl.get("offsetMm"), dx, dy, dz]).encode()).hexdigest()[:16]
+        mine = [n for n in names if n == stem or n.startswith(stem + "_")]
+        if not mine or (rec.get("plates") or {}).get(side) != sig:
+            for n in mine:
+                ic.modeler.delete(n)
+            before = set(ic.modeler.object_names)
+            ic.modeler.import_3d_cad(str(f), create_group=False)
+            new = sorted(set(ic.modeler.object_names) - before)
+            if not new:
+                check("error", f"Thermal solution: {f.name} imported no solid. Open it in AEDT to see why.")
+                continue
+            mine = []
+            for i, n in enumerate(new):
+                o = ic.modeler[n]
+                o.name = stem if len(new) == 1 else f"{stem}_{i + 1}"
+                ox, oy, oz = pl.get("offsetMm") or (0, 0, 0)
+                o.move([ox + dx, oy + dy, oz + dz])
+                mine.append(o.name)
+            check("ok", f"Thermal solution: {side} plate imported from {f.name}" + (f" ({len(new)} bodies)" if len(new) > 1 else ""))
+        p_in = plates_in.get(side) or {}
+        mat = p_in.get("material") or "Aluminium"
+        k = (plan.get(side) or {}).get("kWmK") or p_in.get("kWmK") or PLATE_MAT.get(mat, PLATE_MAT["Aluminium"])[0]
+        _, rho, cp = PLATE_MAT.get(mat, PLATE_MAT["Aluminium"])
+        mname = _sol_material(ic, f"{SOL_MAT}plate_{side}", k, rho, cp)
+        for n in mine:
+            o = ic.modeler[n]
+            if mname and o.material_name.lower() != mname:
+                o.material_name = mname
+            if o.is_model != on[side]:
+                o.is_model = on[side]
+        done[side] = sig
+    # TIMs: a box each, SolidWorks' size, the page's k
+    parts_in = sol.get("parts") or {}
+    want = {}
+    for t in cad.get("tims", []):
+        ref, b = t.get("refDes"), t.get("boxMm")
+        if not ref or not b:
+            continue
+        box = [b[0] + dx, b[1] + dy, b[2] + dz, b[3] + dx, b[4] + dy, b[5] + dz]
+        want[f"{SOL}TIM_{ref}"] = (ref, t.get("side") or ("top" if box[2] >= zhi - 1e-3 else "bottom"), box)
+    for n in [n for n in names if n.startswith(f"{SOL}TIM_") and n not in want]:
+        ic.modeler.delete(n)
+    gaps = []
+    for n, (ref, side, box) in want.items():
+        if n in names and max(abs(a - c) for a, c in zip(ic.modeler[n].bounding_box, box)) > 1e-3:
+            ic.modeler.delete(n)
+        if n not in set(ic.modeler.object_names):
+            ic.modeler.create_box(box[:3], [box[3] - box[0], box[4] - box[1], box[5] - box[2]], name=n)
+        o = ic.modeler[n]
+        mname = _sol_material(ic, f"{SOL_MAT}tim_{ref}".lower(), (parts_in.get(ref) or {}).get("timK") or 3, *TIM_DENSITY_CP)
+        if mname and o.material_name.lower() != mname:
+            o.material_name = mname
+        if o.is_model != on[side]:
+            o.is_model = on[side]
+        if ref in names and on[side]:       # the TIM must sit on the part's block: a typed height moves the block, not the STEP
+            bb = ic.modeler[ref].bounding_box
+            g = box[2] - bb[5] if side == "top" else bb[2] - box[5]
+            if abs(g) > 0.02:
+                gaps.append(f"{ref} {g:+.2f} mm")
+    if gaps:
+        check("warn", f"Thermal solution: TIMs not on their part's block ({', '.join(gaps)}; + is a gap, - an overlap). "
+                      f"The block height on the page differs from the STEP: clear the typed height, or Build Solution again.")
+    rec_f.write_text(json.dumps({"schema": "pcb-thermal-ansys/solution-applied", "at": time.strftime("%Y-%m-%d %H:%M"),
+                                 "sentAt": cad.get("sentAt"), "plates": done}, indent=1), encoding="utf-8")
+    off = [s for s in done if not on[s]]
+    check("ok", f"Thermal solution: {len(done)} plate{'s' if len(done) != 1 else ''}, {len(want)} TIMs in AEDT"
+                + (f"; {' and '.join(off)} out of the model (off on the page)" if off else ""))
+
+
+def sol_objects(ic):
+    """the thermal solution in AEDT: [{name, model, box}] of the SOL_ objects"""
+    out = []
+    for n in sorted(o for o in ic.modeler.object_names if o.startswith(SOL)):
+        o = ic.modeler[n]
+        out.append({"name": n, "model": bool(o.is_model), "box": [round(v, 3) for v in o.bounding_box]})
+    return out
 
 
 def thermal(ic):
@@ -1182,13 +1320,15 @@ def _solve(ic, folder, board, powered, study, parts, write=True, label="Solve"):
     # not "AllObjects": hollow network blocks in it break the AEDT session. Ask every other object one by one.
     _, tree = thermal(ic)
     hollow = {n[2:] for n, d in tree.items() if d["type"] == "Network" and n.startswith("P_")}
-    rest = [o for o in ic.modeler.object_names if o not in hollow and o not in layers and o != "Region"]
+    rest = [o for o in ic.modeler.object_names if o not in hollow and o not in layers and o != "Region"
+            and not (o.startswith(SOL) and not ic.modeler[o].is_model)]
+    plates = [{"name": o, "maxC": _fmax(ic, o), "meanC": _fmax(ic, o, "Mean")} for o in rest if o.startswith(f"{SOL}Spreader_")]
     others = [v for v in (_fmax(ic, o) for o in rest) if v is not None]
     seen = [v for v in [board_max] + others + [r["tempC"] for r in rows] if v is not None]
     anywhere = max(seen) if seen else None
     res = {"schema": "pcb-thermal-ansys/results", "solvedAt": time.strftime("%H:%M:%S"), "seconds": round(secs),
            "ambientC": ambient, "converged": conv, "balance": bal, "monitors": mon, "profile": prof,
-           "boardC": board_max, "boardMeanC": board_mean, "hottestC": anywhere, "parts": rows}
+           "boardC": board_max, "boardMeanC": board_mean, "hottestC": anywhere, "parts": rows, "plates": plates}
     if write:
         (folder / "results.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
     rid = step("keep the run", lambda: _keep_run(folder, res, study, parts, powered, setup, label))
@@ -1315,6 +1455,8 @@ def read_state(ic, board):
         bb = ic.modeler[o].bounding_box
         geo.append([o, [round(v, 3) for v in bb]])
         blocks.append({"refDes": o, "kind": "Passive", "powerW": 0, "heightMm": round(bb[5] - bb[2], 4), "rjcCW": None, "rjbCW": None})
+    sol = sol_objects(ic)
+    geo += [[o["name"], o["box"], o["model"]] for o in sol]
     reg, pad = air_pad(ic, board, tree)
     keys = ic.materials.material_keys
     mats = [{"name": b["name"], **{f: num(getattr(m, attr).value) for f, attr, _ in MAT_F}}
@@ -1347,6 +1489,7 @@ def read_state(ic, board):
         "meshSig": _mesh_sig(sorted(geo), {**mesh, "level": str(mesh["level"])}, pad),
         "objects": len(names),
         "openings": [n for n, d in tree.items() if d["type"] == "Opening"],
+        "solution": sol,
     }
 
 

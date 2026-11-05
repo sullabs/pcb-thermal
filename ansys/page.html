@@ -837,6 +837,9 @@ function markDirty() {
     } else { est.textContent = ""; est.className = "n page"; }
   }
   for (const ref of Object.keys(bp)) if (!parts[ref] && built) n++;     // a part removed here will be removed in AEDT
+  readSol();
+  const solN = solPending().length;
+  $("solOn").closest("label").classList.toggle("dirty", solN > 0); n += solN;
   const bms = Object.fromEntries((board.materials || []).map(m => [m.name, m]));
   for (const tr of $("mats").children) {
     const name = tr.dataset.mat; if (!name) continue;
@@ -995,6 +998,21 @@ function drawPlates(sides) {      // one card per plate in use; drawn again only
       <dl class="kv sol-kv" data-plate="${side}"></dl>`;
   }).join("");
 }
+// What Apply would change in AEDT for the thermal solution: import what SolidWorks sent last, or turn objects in or
+// out of the model (the page's switches). Objects: SOL_Spreader_<Side>, SOL_TIM_<RefDes> (setup_study.py _solution)
+function solPending() {
+  if (!built || !state?.schema) return [];
+  const cad = srv.solutionCad, have = state.solution || [], out = [];
+  if (!cad?.plates?.length) return have.some(o => o.model) ? ["take the old solution out of the model"] : [];
+  if (srv.solutionApplied?.sentAt !== cad.sentAt || !have.length) out.push(`import what SolidWorks sent ${cad.sentAt}`);
+  const timSide = Object.fromEntries((cad.tims || []).map(t => [`SOL_TIM_${t.refDes}`, t.side]));
+  const flip = have.filter(o => {
+    const side = o.name.startsWith("SOL_Spreader_") ? o.name.slice(13).split("_")[0].toLowerCase() : timSide[o.name];
+    return side && o.model !== (sol.on && plateOf(side).on);
+  });
+  if (flip.length) out.push(`${flip.length} object${flip.length > 1 ? "s" : ""} ${sol.on ? "in or out of" : "out of"} the model`);
+  return out;
+}
 function solution() {
   if (!board) return;
   readSol();
@@ -1037,6 +1055,9 @@ function solution() {
   if (over.length) notes.push(`<li class="warn">Typed sizes differ from the STEP: ${over.join("; ")}. SolidWorks builds on the STEP bodies, but AEDT makes the block from the typed values, so the TIM may not touch the block there. Clear the typed value, or fix the STEP.</li>`);
   if (ticked.length && !board.stepFrame) notes.push(`<li class="warn">board.json has no STEP frame yet, so SolidWorks cannot place the plate. Press <b>Read heights from the STEP</b> in step 1.</li>`);
   for (const t of cad?.problems || []) notes.push(`<li class="warn">Send Solution: ${esc(t)}</li>`);
+  const inA = state?.solution || [], pend = solPending();
+  if (built && inA.length) notes.push(`<li class="mut">In AEDT: ${inA.filter(o => o.name.startsWith("SOL_Spreader")).map(o => `${esc(o.name)}${o.model ? "" : " (out of the model)"}`).join(", ") || "no plate"}, ${((n) => `${n} TIM${n === 1 ? "" : "s"}`)(inA.filter(o => o.name.startsWith("SOL_TIM_")).length)}.</li>`);
+  if (pend.length) notes.push(`<li class="warn">Apply will ${esc(pend.join(", and "))}.</li>`);
   if (!ticked.length) notes.push(`<li class="mut">Tick the parts the plate touches.</li>`);
   else if (pl.forSolidWorks?.plates.length && !cad?.build && !cad?.plates) notes.push(`<li class="mut">In SolidWorks, press <b>Build Solution</b> and pick this board folder. It reads the plate from <code>study.json</code> and makes <code>${esc(board.name)}_solution.sldasm</code> here.</li>`);
   $("solNotes").innerHTML = notes.join("");
@@ -1574,7 +1595,7 @@ function renderResult(r) {
     </div>` : "";
   const b = r.balance, split = b && b.radiationW != null ? `, ${b.convectionW} W convection, ${b.radiationW} W radiation` : "";
   const bal = !b ? "" : b.radiation ? `<li class="warn">Energy balance not checked: radiation is on, and the monitors count only convection (${b.outW} W of ${b.inW} W). Solve again to check it.</li>` : `<li class="${Math.abs(b.errorPct) <= 1 ? "ok" : "error"}">Energy balance: ${b.inW} W in, ${b.outW} W out (${split.slice(2)}${split ? ", " : ""}${b.errorPct > 0 ? "+" : ""}${b.errorPct} %).${b.refFixW ? ` Corrected by ${b.refFixW} W for the solver's 25 &deg;C air reference (AEDT reports ${b.rawOutW} W out).` : ""}${Math.abs(b.errorPct) <= 1 ? "" : " Not balanced: do not trust these numbers."}</li>`;
-  $("result").innerHTML = `<ul class="plain checks">${conv}${settle}${bal}${prof}</ul>${plots}<dl class="kv" style="margin-top:10px"><dt>Board hottest</dt><dd>${f(r.boardC)}</dd><dt>Board average</dt><dd>${f(r.boardMeanC)}</dd><dt>Hottest measured</dt><dd>${f(r.hottestC)}</dd><dt>Ambient</dt><dd>${r.ambientC} &deg;C</dd></dl>
+  $("result").innerHTML = `<ul class="plain checks">${conv}${settle}${bal}${prof}</ul>${plots}<dl class="kv" style="margin-top:10px"><dt>Board hottest</dt><dd>${f(r.boardC)}</dd><dt>Board average</dt><dd>${f(r.boardMeanC)}</dd><dt>Hottest measured</dt><dd>${f(r.hottestC)}</dd>${(r.plates || []).map(x => `<dt>${esc(x.name.slice(4).replace("_", " "))}</dt><dd>${f(x.maxC)} hottest, ${f(x.meanC)} average${hcLast?.board.plates.find(X => "SOL_Spreader_" + X.side[0].toUpperCase() + X.side.slice(1) === x.name)?.tempC != null ? `; hand ${f(hcLast.board.plates.find(X => "SOL_Spreader_" + X.side[0].toUpperCase() + X.side.slice(1) === x.name).tempC)}` : ""}</dd>`).join("")}<dt>Ambient</dt><dd>${r.ambientC} &deg;C</dd></dl>
     <div class="scroll"><table><thead><tr><th>Heat source</th><th class="n">Tj max</th><th class="n">Hand check Tj</th><th class="n">Icepak</th><th class="n" data-tip="Icepak minus the hand check, in degrees. The % is that gap as a share of the Icepak rise above ambient (Icepak minus ambient). Plus: Icepak is hotter.">Icepak &minus; hand</th><th class="n" data-tip="Tj max minus the Icepak temperature: degrees left before the limit. Negative: over the limit by that much.">Margin</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 

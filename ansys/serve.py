@@ -163,6 +163,7 @@ class H(BaseHTTPRequestHandler):
                   "checks": jread("checks.json"), "results": jread("results.json"), "meshcheck": jread("meshcheck.json"), "runs": runs(),
                   "built": jread("built.json"), "meshed": jread("meshed.json"), "applied": jread("applied.json"),
                   "solutionCad": jread("solution_cad.json"),
+                  "solutionApplied": jread("solution_applied.json"),
                   "projectFile": project_file(), "state": jread("state.json"), "job": job}
             if "boards" in parse_qs(query, keep_blank_values=True):      # the folder list: the page asks once
                 st["boards"] = boards()
