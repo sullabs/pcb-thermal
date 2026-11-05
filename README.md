@@ -11,7 +11,7 @@ studies). Nothing to install besides the toolbar step below.
 | File | What it is |
 |---|---|
 | `PCB_Thermal.html` | The page. Open it from disk in Chrome or Edge. Everything is inside this one file. |
-| `macros\PCBThermal.swp` | The SolidWorks macros: Import STEP, Build Board, Build Spreader, Sync CAD, Run Thermal Study, Run Flow Simulation, Read Results, Update Macros. |
+| `macros\PCBThermal.swp` | The SolidWorks macros: Import STEP, Build Board, Build Spreader, Sync CAD, Run Thermal Study, Run Flow Simulation, Read Results, Build Solution and Send Solution (for the Ansys page, `ansys\README.md`), Update Macros. |
 | `macros\SetupToolbar.cmd` | Makes the **PCB Thermal** tab in SolidWorks with one button per macro. |
 | `macros\*.bas`, `macros\icons\` | The macro source and the button icons (used by the two files above). |
 | `macros\PCBThermal_Flow.fwp` | The Flow Simulation template Run Flow Simulation builds its project from. |
@@ -52,6 +52,8 @@ Press **I pressed it** on the card and the page waits until the macro has writte
 | Run Thermal Study | 8 | Makes and solves a new thermal study; the run goes to `AB_results.json`. |
 | Run Flow Simulation | 8 | Builds the Flow project from `PCBThermal_Flow.fwp` with the mesh, convergence, environment, materials, surfaces and contacts of tab 8, solves it, reads its goals and the run health (tab 9). |
 | Read Results | 9 | Reads the solved study: temperatures per part, energy balance, plot picture. |
+| Build Solution | Ansys page, step 4 | Makes the solution assembly from the board STEP and builds or updates the spreader plates and TIM parts. |
+| Send Solution | Ansys page, step 4 | Sends the finished plates (STEP and measures) to the board folder, for the hand check and AEDT. |
 
 Flow materials: Flow takes a k or an emissivity only as a named item of its Engineering Database. Tab 8 (study type
 Flow) lists the user materials (`k ...`) and radiative surfaces (`e ...`) a project needs; make each once under

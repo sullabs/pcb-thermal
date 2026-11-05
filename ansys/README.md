@@ -9,7 +9,7 @@ No solving.** Owners of every piece of information are in [SOURCES.md](SOURCES.m
 Get from an Altium board to a first Icepak result set-up fast, then change the few things a mechanical engineer
 changes (power, ambient, board position, air, mesh) from the page, and do everything else in AEDT. The page is not
 meant to replace AEDT. The PCB designer owns power and rails; here you only type the parts that matter.
-No solve, no spreader, no other cooling solution for now.
+A spreader plate with TIMs (step 4, Thermal solution) is drawn in SolidWorks from the page and comes back to it; see below.
 
 ## Steps
 
@@ -20,6 +20,7 @@ No solve, no spreader, no other cooling solution for now.
 | 3 | You | "What the export is missing" lists the gaps. Fill them: heights and body sizes of the parts that matter, tall parts without power, material values. Then ambient, board position, air, power (or the designer's CSV: RefDes, W, height, body X, body Y), mesh. Press **Build** |
 | 4 | You | Look at the project in AEDT. Edit there if you want. **Read AEDT** shows what is there |
 | 5 | You | Change values on the page, press **Apply changes** (about 40 s), **Generate mesh** to see the mesh without solving |
+| 6 | You | Optional, a spreader: step 4 **Thermal solution** on, tick the parts, **Build Solution** in SolidWorks, finish the plate there, **Send Solution**, then **Apply changes** (below) |
 
 **AEDT is the source of truth.** The page asks the server every 15 s to read AEDT (the `read` mode: it never starts
 AEDT and never opens a project). Whatever changes in AEDT (ambient, board position, air, mesh, power, height, Rjc,
@@ -32,6 +33,41 @@ Build replaces the whole project and asks first. If AEDT is closed, the page sho
 Rja and Tj max are page-only (kept in `study.json`): the page shows Tj by Rja = ambient + power x Rja as a hand check.
 Rjc and Rjb together make a two-resistor junction model in AEDT (`P_<RefDes>`, type Network), the block then sits on
 the board surface so it can touch the PCB.
+
+### Thermal solution (spreader plate)
+
+Step 4 of the page, with its own On switch. You tick the parts the plate touches (only parts in Parts). Top-side parts
+make the top plate, bottom-side parts the bottom plate, so one or two plates follow. Per plate: material (aluminium 167,
+copper 390, or a typed k), thickness, margin, **Lift** and minimum pedestal; per part: TIM thickness and k. The page
+works out the first plate from the STEP bodies: underside = highest ticked part top + its TIM + Lift, a rectangle around
+the ticked parts plus the margin (inside the board outline), and per part a pedestal down to its TIM (none under the
+minimum pedestal: the TIM fills that gap). It warns about parts not ticked that reach above the underside (with the Lift
+that clears them by 0.5 mm), ticked parts with no STEP body, and typed heights or body sizes that differ from the STEP
+(SolidWorks builds on the STEP bodies, AEDT on the typed values, so the TIM may then not touch the block).
+It saves all of it in `study.json` `solution`, with `forSolidWorks`: the plates in the board STEP's frame.
+
+In SolidWorks (PCB Thermal tab, after **Update Macros** and `SetupToolbar.cmd` once):
+- **Build Solution** (`macros\BuildSolution.bas`, the work in `BuildSpreader.bas` `RunAnsys`): pick `study.json` of the
+  board folder. It opens the board STEP and saves it as `solidworks\<board>_solution.sldasm` in the board folder (first run
+  only), then makes `Spreader_Top` / `Spreader_Bottom` (an `Outline` sketch of the page's rectangle on the Front Plane,
+  the plate, `Ped_<RefDes>` pedestals; faces named Top, Underside, `Contact_<RefDes>`) and one `TIM_<RefDes>` part per
+  ticked part. Run it again after a change on the page: the plate moves, pedestals and TIMs follow, and the Outline sketch
+  and every feature you added (holes, cuts, fillets) stay. It writes `solution_cad.json` `build`.
+- Finish the plates: mounting holes, shape, cuts around parts in the way. Only move a plate, never turn it.
+- **Send Solution** (`macros\SendSolution.bas`) changes no CAD file. It writes each plate as `solution_<side>.step`
+  (part frame, with `offsetMm`) and `solution_cad.json` `sentAt`, `plates[]` (volume, area of all faces, box, underside
+  and top Z, thickness, area of the Top, Underside and `Contact_<RefDes>` faces) and `tims[]` (RefDes, side, box).
+
+Back on the page, step 4 shows what SolidWorks sent, and says when the page now wants another underside or thickness
+(Build and Send again). The hand check puts each plate in its network as one more node: a ticked part's top path is then
+R junction to top + TIM + pedestal + Lee spreading in its share of the plate (by power), and the plate loses heat from all
+its faces with h plate and the plate emissivity (Settings, default 8 W/m²K and 0.85). It uses SolidWorks' areas once
+sent, else the page's plan. **Apply** imports the plates into the same Icepak design as `SOL_Spreader_<Side>` (again
+only when the STEP or its place changed) and the TIMs as boxes `SOL_TIM_<RefDes>`, with their own materials
+(`sol_plate_<side>`, `sol_tim_<refdes>`: the page's k), placed by `board.json` `stepFrame`. It warns when a TIM does not
+sit on its part's block (over 0.02 mm). The switches: off takes the objects out of the model (out of the mesh and the
+solve), on puts them back; they are never deleted by the switch. Solve adds the plates' hottest and average temperature
+to `results.json` `plates`. A thin TIM may need a finer mesh: use **Check the mesh**.
 
 ### When something is missing
 
@@ -74,11 +110,14 @@ time made one of them hang. The page's own jobs never overlap, and a hung job is
 | `run.ps1` | Runs a script with Ansys' Python and `ansys\.venv` packages (the venv launcher itself is broken) |
 | `start.bat` | Starts AEDT (gRPC port 50051) if it is not running, then `serve.py`. If the page already runs, it just opens it |
 | `make_offline.ps1` | Writes `dist\pcb-thermal` (+ zip) to install on a PC without internet |
+| `..\macros\BuildSolution.bas`, `SendSolution.bas` | SolidWorks side of the thermal solution (above). Need `PTCommon`, `PTJson` and `BuildSpreader` in `PCBThermal.swp` |
 
 Folder contents: `<board>.aedb` (you), `board.json`, `study.json` (page), `state.json`, `checks.json`, `<board>_icepak.aedt`,
 `results.json` (Solve), `meshcheck.json` (Check the mesh), `built.json` (when and with which PCB mapping Build ran),
 `meshed.json` (the mesh signature of the last Generate mesh or solve), `applied.json` (the body sizes the last Build or
-Apply made the blocks from: the page compares Body X and Y with it),
+Apply made the blocks from: the page compares Body X and Y with it), `solution_cad.json` (Build and Send Solution),
+`solution_<side>.step` (Send Solution), `solidworks\` (the SolidWorks assembly and parts of the solution),
+`solution_applied.json` (which SolidWorks export the `SOL_` objects in AEDT were made from),
 `runs\<yyyymmdd-hhmmss>.json` (every solve, mesh check solves too: `at`, `label`, `note` typed on the page, `settings` it ran with
 (mesh, local mesh, iterations, flow and energy limits and radiation as AEDT held them, ambient, gravity, total Pd) and `result`
 as in `results.json`; the page's **Runs** table compares them, and Remove deletes the file).
@@ -99,7 +138,11 @@ mesh sub-region box no region uses (both stop the solver), says so in the checks
 `parts[{refDes, powerW?, heightMm?, bodyXMm?, bodyYMm?, meshMm?, rjcCW?, rjbCW?, rjaCW?, tjMaxC?, cls?, vinV?, iinA?, voutV?, ioutA?, efficiency?, rOhm?, pdMeasuredW?}]`
 (`powerW` is Pd, the heat given off; `cls` to `pdMeasuredW` are page only and give it as the SolidWorks register),
 `materials {name: {kWmK?, rhoKgM3?, cpJkgK?}}`, `handCheck {hTop?, hBottom?, hParts?, emissivity?, surfaceRiseK?, coverage?, kxy?, kParts?, critMargin?, critDensity?, critShare?, watchMargin?, watchDensity?, watchShare?, matched? {hPcb, run, powerW, ambientC, orientation, boardMeanC}}`
-(page only; empty means the SolidWorks template defaults 8, 5, 8 W/m²K, 0.9, 20 K, 0.6, from the stackup, 0.5, 15 K).
+(page only; empty means the SolidWorks template defaults 8, 5, 8 W/m²K, 0.9, 20 K, 0.6, from the stackup, 0.5, 15 K; `hPlate?`, `plateEps?` 8 W/m²K, 0.85),
+`solution {on, plates {top|bottom: {on?, material?, kWmK?, tMm?, marginMm?, liftMm?, minPedMm?}}, parts {RefDes: {on?, timTMm?, timK?}},
+forSolidWorks {stepFile, frame, computedAt, plates[{side, on, material, kWmK, tMm, dir, undersideZMm, outlineMm, chips[{refDes, boxMm, faceZMm, timTMm, timK, pedestalMm}]}]}}`
+(`forSolidWorks` is worked out by the page on every save, in the STEP's frame). `board.json` `stepFrame {offXMm, offYMm, topZMm}`:
+STEP point + offset = EDB point; topZMm is the board's top face in the STEP.
 
 Timings on the sample: build about 1.5 min, apply with a change 40 to 80 s, generate mesh 15 s.
 
@@ -134,7 +177,10 @@ Timings on the sample: build about 1.5 min, apply with a change 40 to 80 s, gene
   top to bottom as the hand check's "Block, Rjc"; read back from AEDT as H / (k x volume / H). Rjb without Rjc stays on
   the page only (a junction model needs both); the hand check still uses it as the SolidWorks route does
 - [x] Solve button and results card (temperatures per part, board hot spot, convergence, energy balance)
-- [ ] Radiation model name for S2S (the page uses discrete ordinates); TIM and spreader (with a cooling solution), per-surface emissivity
+- [x] Thermal solution: spreader plates and TIMs from the page, drawn and finished in SolidWorks, back to the hand check
+  and into AEDT. Page checked in the browser on a copy of the Bluetooth sample; the SolidWorks macros and the AEDT import
+  are not yet run
+- [ ] Radiation model name for S2S (the page uses discrete ordinates); per-surface emissivity; a heat sink
 - [ ] Mesh cell count in the page (Generate mesh reports time only)
 - [x] Minimal page: Settings holds the hand check values, flag limits, air box (air around, extra above), cells in gaps
   and on edges, PCB mapping and hover help; the Settings button turns yellow when one of them is not yet in AEDT. The

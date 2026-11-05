@@ -21,7 +21,9 @@ Owners:
 | Materials (k, density, cp) | AEDT library | script | Overrides only in project.json `materials` |
 | Ambient temperature, altitude, orientation, air speed | project.json `environment` | script, page | |
 | Emissivity per surface group | project.json `surfaces` | script | |
-| Heat sink / spreader / TIM | project.json `cooling` | script | |
+| Spreader: parts it touches, thickness, Lift, TIM thickness and k, plate k | study.json `solution` (page) | SolidWorks macros, script, page | The page works out the first plate (`forSolidWorks`) |
+| Spreader shape: outline, holes, cuts, pedestals as built | SolidWorks (`solidworks\<board>_solution.sldasm`) | page, script | Sent by Send Solution as `solution_<side>.step` and `solution_cad.json` |
+| Heat sink | not yet | | |
 | Mesh level, convergence limits | project.json `solver` | script | Defaults live in the script, written back to project.json once |
 | Icepak objects, boundaries, setup | AEDT | nobody | Derived. Script rebuilds or patches it from the rows above |
 | Last applied state (hash per section) | `applied.json` | script | Script-owned; lets a re-run patch only what changed |
