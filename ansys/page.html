@@ -238,6 +238,8 @@
         <label title="Fraction of each signal layer that is copper. Sets the in-plane k of the board">Copper coverage (0 to 1)<input type="number" data-hc="coverage" step="0.05" min="0" max="1"></label>
         <label title="Leave empty to use the value from the stackup">Board k in plane (W/m&middot;K)<input type="number" data-hc="kxy" step="1" min="0"></label>
         <label title="Block conductivity for parts without Rjc: Rjc = H / (k x L x W)">k of parts without Rjc (W/m&middot;K)<input type="number" data-hc="kParts" step="0.1" min="0.01"></label>
+        <label title="Convection coefficient on every face of a spreader plate (Thermal solution)">h, plate (W/m&sup2;K)<input type="number" data-hc="hPlate" step="0.5" min="0"></label>
+        <label title="Emissivity of the spreader plate: bare aluminium about 0.1, anodised 0.85, black paint 0.9. Ignored when Radiation is off">Plate emissivity<input type="number" data-hc="plateEps" step="0.05" min="0" max="1"></label>
       </div>
     <p class="hint" id="hcAir"></p>
     <h3 data-tip="A part gets a flag when any one of its numbers crosses a limit, as on the SolidWorks page. Margin is Tj max minus the hand Tj; density is power over the body footprint; share is the part's fraction of the total power. The CRITICAL margin also sets Tight in Status. Empty uses the grey default. Saved with the board folder.">Flag limits</h3>
@@ -1009,14 +1011,18 @@ function solution() {
     tr.querySelector("[data-ped]").textContent = c && isNum(c.pedMm) ? c.pedMm > 0 ? f1(c.pedMm, 2) : "none" : "";
     tr.querySelector("[data-why]").innerHTML = c && isNum(c.pedMm) && !c.pedMm && c.timUsedMm > c.timTMm + 1e-6 ? `<small class="warn">TIM fills ${f1(c.timUsedMm, 2)} mm</small>` : "";
   }
-  const notes = [], lst = a => esc(a.length > 1 ? a.slice(0, -1).join(", ") + " and " + a.at(-1) : a[0]);
+  const notes = [], lst = a => esc(a.length > 1 ? a.slice(0, -1).join(", ") + " and " + a.at(-1) : a[0]), cad = srv.solutionCad;
   for (const P of Object.values(pl.plates)) {
     const kv = $("solPlates").querySelector(`[data-plate=${P.side}]`);
     if (!isNum(P.faceMm)) { kv.innerHTML = `<dt>Plate</dt><dd class="error">no ticked part has a STEP body</dd>`; continue; }
     const [x0, y0, x1, y1] = P.outline;
+    const sw = (cad?.plates || []).find(x => x.side === P.side), want = pl.forSolidWorks?.plates.find(x => x.side === P.side);
+    const moved = sw && want && (Math.abs(sw.undersideZMm - want.undersideZMm) > 0.01 || Math.abs(sw.tMm - want.tMm) > 0.01);
     kv.innerHTML = `<dt>Underside</dt><dd>${f1(P.faceMm, 2)} mm from the board ${P.side} face</dd>
       <dt>First outline</dt><dd>${f1(x1 - x0)} × ${f1(y1 - y0)} mm at ${f1(x0)}, ${f1(y0)} (board X, Y)</dd>
-      <dt>k</dt><dd>${isNum(P.kWmK) ? `${P.kWmK} W/m·K` : `<span class="error">type k</span>`}</dd>`;
+      <dt>k</dt><dd>${isNum(P.kWmK) ? `${P.kWmK} W/m·K` : `<span class="error">type k</span>`}</dd>
+      <dt>SolidWorks</dt><dd>${sw ? `sent ${esc(cad.sentAt)}: ${f1(sw.boxMm[3] - sw.boxMm[0])} × ${f1(sw.boxMm[4] - sw.boxMm[1])} mm box, ${f1(sw.tMm, 2)} mm thick, ${f1(sw.areaMm2 / 100, 0)} cm² of faces, ${f1(sw.volumeMm3 / 1000, 1)} cm³${moved ? `<br><span class="warn">The page now wants the underside ${f1(want.undersideZMm - sw.undersideZMm, 2)} mm ${want.undersideZMm > sw.undersideZMm === (P.side === "top") ? "further from" : "closer to"} the board${Math.abs(sw.tMm - want.tMm) > 0.01 ? ` and ${f1(want.tMm, 2)} mm thick` : ""}: Build Solution, then Send Solution again.</span>` : ""}`
+        : cad?.build?.[P.side] ? `<span class="mut">built ${esc(cad.build.date)}, not sent yet: finish it, then press Send Solution</span>` : `<span class="mut">not built yet</span>`}</dd>`;
     if (P.hits.length) notes.push(`<li class="warn">${SIDES[P.side]}: ${P.hits.length} part${P.hits.length > 1 ? "s" : ""} not ticked under the plate reach${P.hits.length > 1 ? "" : "es"} above its underside: ${P.hits.slice(0, 8).map(h => `<b>${esc(h.refDes)}</b> ${f1(h.hMm, 2)} mm`).join(", ")}${P.hits.length > 8 ? ", …" : ""}. Lift +${f1(P.hits[0].hMm - P.faceMm + CLEAR_MM, 1)} mm clears ${P.hits.length > 1 ? "them" : "it"} by ${CLEAR_MM} mm, or cut around ${P.hits.length > 1 ? "them" : "it"} in SolidWorks.</li>`);
   }
   const ticked = order.filter(r => parts[r] && by[r] && sol.parts[r]?.on);
@@ -1030,8 +1036,9 @@ function solution() {
   }).filter(Boolean);
   if (over.length) notes.push(`<li class="warn">Typed sizes differ from the STEP: ${over.join("; ")}. SolidWorks builds on the STEP bodies, but AEDT makes the block from the typed values, so the TIM may not touch the block there. Clear the typed value, or fix the STEP.</li>`);
   if (ticked.length && !board.stepFrame) notes.push(`<li class="warn">board.json has no STEP frame yet, so SolidWorks cannot place the plate. Press <b>Read heights from the STEP</b> in step 1.</li>`);
+  for (const t of cad?.problems || []) notes.push(`<li class="warn">Send Solution: ${esc(t)}</li>`);
   if (!ticked.length) notes.push(`<li class="mut">Tick the parts the plate touches.</li>`);
-  else if (pl.forSolidWorks?.plates.length) notes.push(`<li class="mut">In SolidWorks, press <b>Build Solution</b> and pick this board folder. It reads the plate from <code>study.json</code> and makes <code>${esc(board.name)}_solution.sldasm</code> here.</li>`);
+  else if (pl.forSolidWorks?.plates.length && !cad?.build && !cad?.plates) notes.push(`<li class="mut">In SolidWorks, press <b>Build Solution</b> and pick this board folder. It reads the plate from <code>study.json</code> and makes <code>${esc(board.name)}_solution.sldasm</code> here.</li>`);
   $("solNotes").innerHTML = notes.join("");
 }
 
@@ -1040,7 +1047,7 @@ function solution() {
    of the PCB). All parts heat one shared board node; the board loses heat from both faces. ---- */
 const SIGMA = 5.67e-8;
 // as the SolidWorks template; the flag limits as its register (margin K, density W/cm², share %)
-const HC_DEFAULT = { hTop: 8, hBottom: 5, hParts: 8, emissivity: 0.9, surfaceRiseK: 20, coverage: 0.6, kParts: 0.5,
+const HC_DEFAULT = { hTop: 8, hBottom: 5, hParts: 8, emissivity: 0.9, surfaceRiseK: 20, coverage: 0.6, kParts: 0.5, hPlate: 8, plateEps: 0.85,
   critMargin: 15, critDensity: 2, critShare: 25, watchMargin: 30, watchDensity: 0.8, watchShare: 10 };
 const isNum = x => typeof x === "number" && isFinite(x);
 // a solve time: "45 s" under a minute, "5 min", "1 h 12 min" from an hour
@@ -1081,6 +1088,40 @@ function stackK() {      // in plane: layers in parallel; through plane: in seri
   return t > 0 ? { kxy: kt / t, kz: t / tk } : { kxy: undefined, kz: undefined };
 }
 
+// The spreader plates for the hand check: SolidWorks' measures once Send Solution ran (solution_cad.json), else the
+// page's plan. Each plate is one node at one temperature; it loses heat from all its faces to the air
+function solHand(ambient, rad) {
+  const out = {};
+  if (!sol.on || !solLast) return out;
+  const cad = srv.solutionCad, tims = Object.fromEntries((cad?.tims || []).map(t => [t.refDes, t]));
+  for (const P of Object.values(solLast.plates)) {
+    if (!P.on || !isNum(P.faceMm) || !(P.kWmK > 0)) continue;
+    const sw = (cad?.plates || []).find(x => x.side === P.side);
+    const [x0, y0, x1, y1] = P.outline, L = x1 - x0, W = y1 - y0;
+    const tMm = sw?.tMm > 0 ? sw.tMm : P.tMm, faceMm2 = sw?.undersideAreaMm2 > 0 ? sw.undersideAreaMm2 : L * W;
+    const airMm2 = sw?.areaMm2 > 0 ? sw.areaMm2 : 2 * L * W + 2 * (L + W) * tMm;
+    const hRad = rad ? hRadiation(hc.plateEps, ambient, hc.surfaceRiseK) : 0, h = hc.hPlate + hRad;
+    const X = out[P.side] = { side: P.side, name: SIDES[P.side], from: sw ? "SolidWorks" : "the page's plan", tMm, faceMm2, airMm2, k: P.kWmK,
+      h, hRad, hEff: h * airMm2 / faceMm2, rAirCW: h > 0 ? 1e6 / (h * airMm2) : undefined, chips: {} };
+    for (const c of P.chips) if (isNum(c.gapMm)) {
+      const t = tims[c.refDes], timT = t ? t.boxMm[5] - t.boxMm[2] : c.timUsedMm;
+      X.chips[c.refDes] = { timTMm: timT, timK: c.timK, pedMm: c.pedMm, envMm2: (c.env[2] - c.env[0]) * (c.env[3] - c.env[1]), contactMm2: sw?.contacts?.[c.refDes] };
+    }
+  }
+  return out;
+}
+function solveLin(A, y) {      // Gauss with partial pivoting; A is small (the board and up to two plates)
+  const n = y.length, M = A.map((row, i) => [...row, y[i]]);
+  for (let c = 0; c < n; c++) {
+    const piv = M.slice(c).reduce((best, row, i) => Math.abs(row[c]) > Math.abs(M[best][c]) ? c + i : best, c);
+    [M[c], M[piv]] = [M[piv], M[c]];
+    for (let r = c + 1; r < n; r++) { const f = M[r][c] / M[c][c]; for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k]; }
+  }
+  const x = Array(n).fill(0);
+  for (let r = n - 1; r >= 0; r--) x[r] = (M[r][n] - M.slice(r + 1, n).reduce((s, row, i) => s + M[r][r + 1 + i] * x[r + 1 + i], 0)) / M[r][r];
+  return x;
+}
+
 function bareBoard(opt = {}) {      // opt.hPcb: try this h of both PCB faces (used while matching)
   readHc();
   const ambient = N(getS("ambientC")), rad = !!getS("radiation");
@@ -1096,6 +1137,7 @@ function bareBoard(opt = {}) {      // opt.hPcb: try this h of both PCB faces (u
   b.hPcb = isNum(hFit) ? hFit : b.hPcbTextbook;     // a fitted h already holds the PCB's radiation
   b.hParts = hc.hParts + b.hRad;
   if (b.hPcb > 0) b.rBoardAirCW = 1e6 / (b.hPcb * b.areaMm2);
+  const plates = solHand(ambient, rad);
   const out = {};
   for (const ref of order.filter(r => parts[r]?.powerW > 0 && by[r])) {
     const p = parts[ref], e = by[ref];
@@ -1113,10 +1155,29 @@ function bareBoard(opt = {}) {      // opt.hPcb: try this h of both PCB faces (u
     if (isNum(r.rSurfaceAirCW)) r.rTopCW = r.rJTopCW + r.rSurfaceAirCW;
     r.footprintMm2 = L * W;
     r.tjMaxC = p.tjMaxC > 0 ? p.tjMaxC : undefined;
+    const sp = plates[e.side]?.chips[ref];
+    if (sp) {       // under a plate: its top path goes through the TIM and the pedestal into the plate, not to the air
+      r.plate = plates[e.side]; r.sp = sp;
+      r.model += ", " + r.plate.name.toLowerCase();
+      r.timMm2 = sp.contactMm2 > 0 ? Math.min(sp.contactMm2, r.footprintMm2) : r.footprintMm2;
+      if (sp.timK > 0) r.rTimCW = sp.timTMm * 1000 / (sp.timK * r.timMm2);
+      r.rPedCW = sp.pedMm > 0 ? sp.pedMm * 1000 / (r.plate.k * (sp.contactMm2 > 0 ? sp.contactMm2 : sp.envMm2)) : 0;
+      r.rSurfaceAirCW = r.rTopCW = undefined;
+    }
     out[ref] = r;
   }
   const pl = Object.values(out);
   b.totalPdW = sum(pl.map(r => r.pdW));
+  const nodes = Object.values(plates).filter(X => pl.some(r => r.plate === X));
+  for (const X of nodes) {        // each part owns a share of the plate by its power, as of the board
+    X.pdW = sum(pl.filter(r => r.plate === X).map(r => r.pdW));
+    for (const r of pl.filter(r => r.plate === X)) {
+      r.plateShareMm2 = X.faceMm2 * r.pdW / X.pdW;
+      if (X.k > 0 && X.hEff > 0 && X.tMm > 0) { r.pspread = leeSpreading(r.timMm2, r.plateShareMm2, X.tMm, X.k, X.hEff); r.rPlateSpreadCW = r.pspread.r; }
+      const st = [r.rJTopCW, r.rTimCW, r.rPedCW, r.rPlateSpreadCW];
+      if (st.every(isNum)) r.rTopCW = sum(st);
+    }
+  }
   for (const r of pl) {
     r.shareMm2 = b.areaMm2 * r.pdW / b.totalPdW;
     if (r.footprintMm2 > 0 && b.tMm > 0 && b.kxy > 0 && b.hPcb > 0) {
@@ -1128,16 +1189,30 @@ function bareBoard(opt = {}) {      // opt.hPcb: try this h of both PCB faces (u
       r.fPdW = r.f * r.pdW;
     }
   }
-  if (isNum(b.rBoardAirCW) && pl.length) {
+  b.plates = nodes;
+  if (isNum(b.rBoardAirCW) && pl.length && nodes.every(X => isNum(X.rAirCW))) {
     b.sumC = sum(pl.map(r => r.cWK)); b.sumFPd = sum(pl.map(r => r.fPdW));
-    b.riseC = b.sumFPd / (1 / b.rBoardAirCW + b.sumC);
+    // nodes: the board (0) and each plate. A part's top path ends in the air, or in its plate's node
+    const A = [...Array(nodes.length + 1)].map(() => Array(nodes.length + 1).fill(0)), y = Array(nodes.length + 1).fill(0);
+    A[0][0] = 1 / b.rBoardAirCW;
+    nodes.forEach((X, j) => { A[j + 1][j + 1] = 1 / X.rAirCW; });
+    for (const r of pl) {
+      if (!isNum(r.cWK)) continue;
+      const j = r.plate ? nodes.indexOf(r.plate) + 1 : 0;
+      A[0][0] += r.cWK; y[0] += N(r.fPdW);
+      if (j) { A[0][j] -= r.cWK; A[j][0] -= r.cWK; A[j][j] += r.cWK; y[j] += r.pdW - N(r.fPdW); }
+    }
+    const T = solveLin(A, y);
+    b.riseC = T[0];
     b.boardC = ambient + b.riseC;
+    nodes.forEach((X, j) => { X.riseC = T[j + 1]; X.tempC = ambient + X.riseC; X.qW = X.riseC / X.rAirCW; });
   }
   for (const r of pl) {
     if (isNum(r.f) && isNum(b.riseC)) {
-      r.qBoardW = r.f * r.pdW - r.cWK * b.riseC;
+      const tx = r.plate ? N(r.plate.riseC) : 0;      // the far end of the top path: the air, or the plate
+      r.qBoardW = r.f * r.pdW - r.cWK * b.riseC + r.cWK * tx;
       r.qTopW = r.pdW - r.qBoardW;
-      r.tjC = isNum(r.rTopCW) ? ambient + r.qTopW * r.rTopCW : b.boardC + r.qBoardW * r.rBoardCW;
+      r.tjC = isNum(r.rTopCW) ? ambient + tx + r.qTopW * r.rTopCW : b.boardC + r.qBoardW * r.rBoardCW;
       if (isNum(r.tjMaxC)) r.marginC = r.tjMaxC - r.tjC;
     }
     r.status = !isNum(r.tjC) ? "missing input" : !isNum(r.marginC) ? "no Tj max" : r.marginC < 0 ? "FAIL" : r.marginC < hc.critMargin ? "Tight" : "OK";
@@ -1188,7 +1263,9 @@ function handCheck() {
       : `textbook: convection ${hc.hTop} + ${hc.hBottom}${b.hRad ? `, radiation 2 × ${f1(b.hRad, 2)}` : ""}`)
     + cell("R board to air", `${fp(b.rBoardAirCW)} °C/W`, "1 / (h × board area)")
     + cell("Board average, hand", isNum(b.boardC) ? `${f1(b.boardC)} °C` : "n/a", `${isNum(b.riseC) ? `${f1(b.riseC)} K above ambient. ` : ""}Hot spots: see Icepak`)
-    + cell("Heat into the board", isNum(b.boardShare) ? `${Math.round(b.boardShare * 100)} %` : "n/a", isNum(b.qBoardW) ? `${fp(b.qBoardW)} W of ${fp(b.totalPdW)} W` : "");
+    + cell("Heat into the board", isNum(b.boardShare) ? `${Math.round(b.boardShare * 100)} %` : "n/a", isNum(b.qBoardW) ? `${fp(b.qBoardW)} W of ${fp(b.totalPdW)} W` : "")
+    + b.plates.map(X => cell(`${X.name}, hand`, isNum(X.tempC) ? `${f1(X.tempC)} °C` : "n/a",
+      `${isNum(X.qW) ? `${fp(X.qW)} W out, ` : ""}R to air ${fp(X.rAirCW)} °C/W; from ${X.from}`)).join("");
   $("hcNone").hidden = refs.length > 0;
   const ice = Object.fromEntries((results?.parts || []).map(p => [p.refDes, p.tempC]));
   const worst = refs.slice().sort((a, z) => (isNum(pl[a].marginC) ? pl[a].marginC : 1e9) - (isNum(pl[z].marginC) ? pl[z].marginC : 1e9));
@@ -1217,29 +1294,38 @@ function handCheck() {
 function drawDetail(hb) {
   const k = hcSel, r = hb.parts[k], b = hb.board;
   if (!r || !isNum(r.tjC)) { $("hcDetail").innerHTML = ""; return; }
-  const lee = r.spread || {};
+  const lee = r.spread || {}, X = r.plate, sp = r.sp, pl = r.pspread || {};
+  const top = !X ? [
+    ["exposed", "Exposed area", fp(r.exposedMm2, 4), "mm²", "L × W + 2 (L + W) H"],
+    ["rSurf", "R surface to air", fp(r.rSurfaceAirCW), "°C/W", `1e6 / (h parts × exposed), h parts =${f1(b.hParts, 2)}`],
+    ["rTop", "R top", fp(r.rTopCW), "°C/W", "R junction to top + R surface to air"]] : [
+    ["tim", "R TIM", fp(r.rTimCW), "°C/W", `t × 1000 / (k × area) = ${fp(sp.timTMm)} × 1000 / (${fp(sp.timK)} × ${fp(r.timMm2, 4)})`],
+    ["ped", "R pedestal", fp(r.rPedCW), "°C/W", sp.pedMm > 0 ? `h × 1000 / (k plate × area) = ${fp(sp.pedMm)} × 1000 / (${fp(X.k)} × ${fp(sp.contactMm2 > 0 ? sp.contactMm2 : sp.envMm2, 4)})` : "no pedestal"],
+    ["pshare", "Plate area it owns", fp(r.plateShareMm2, 4), "mm²", `plate face × Pd / plate Pd = ${fp(X.faceMm2, 4)} × ${fp(r.pdW)} / ${fp(X.pdW)}`],
+    ["pspread", "R spreading in the plate", fp(r.rPlateSpreadCW), "°C/W", `Lee 1995, t = ${fp(X.tMm)} mm, k = ${fp(X.k)}, h = ${f1(X.hEff, 1)} (all faces over the face toward the board)`],
+    ["rTop", "R top", fp(r.rTopCW), "°C/W", "R junction to top + TIM + pedestal + spreading in the plate"],
+    ["pair", "R plate to air", fp(X.rAirCW), "°C/W", `1e6 / (h × all faces) = 1e6 / (${f1(X.h, 2)} × ${fp(X.airMm2, 4)}); h plate ${hc.hPlate}${X.hRad ? ` + radiation ${f1(X.hRad, 2)}` : ""}; from ${X.from}`]];
   const rows = [
-    ["", "Top path: junction to case top to air"],
+    ["", X ? `Top path: junction to case top, TIM, ${X.name.toLowerCase()}` : "Top path: junction to case top to air"],
     ["model", "Junction model", r.model, "", r.twoR ? "Rjb given: Rjc up, Rjb down" : "no Rjb: Rjc split in two halves"],
     ["body", "Body L × W × H", `${fp(r.lMm)} × ${fp(r.wMm)} × ${fp(r.hMm)}`, "mm", `${r.bodyFrom}; height ${r.hFrom}`],
     ["rjc", "Rjc used", fp(r.rjcUsedCW), "°C/W", r.rjcTyped ? "datasheet Rjc" : `H × 1000 / (k parts × L × W), k parts = ${hc.kParts}`],
     ["rJTop", "R junction to top", fp(r.rJTopCW), "°C/W", r.twoR ? "= Rjc" : "= Rjc used / 2"],
-    ["exposed", "Exposed area", fp(r.exposedMm2, 4), "mm²", "L × W + 2 (L + W) H"],
-    ["rSurf", "R surface to air", fp(r.rSurfaceAirCW), "°C/W", `1e6 / (h parts × exposed), h parts =${f1(b.hParts, 2)}`],
-    ["rTop", "R top", fp(r.rTopCW), "°C/W", "R junction to top + R surface to air"],
+    ...top,
     ["", "Board path: junction to board, spreading into its share"],
     ["rJBoard", "R junction to board", fp(r.rJBoardCW), "°C/W", r.twoR ? "= Rjb" : "= Rjc used / 2"],
     ["share", "Board area it owns", fp(r.shareMm2, 4), "mm²", `board area × Pd / total Pd = ${fp(b.areaMm2, 4)} × ${fp(r.pdW)} / ${fp(b.totalPdW)}`],
     ["lee", "Lee terms ε, τ, Bi, λ, φ", [lee.eps, lee.tau, lee.bi, lee.lambda, lee.phi].map(x => fp(x, 3)).join(", "), "", "ε = √(footprint / share), τ = t / b, Bi = h b / k"],
     ["rSpread", "R spreading", fp(r.rSpreadCW), "°C/W", `Lee 1995, plate t = ${fp(b.tMm)} mm, k = ${fp(b.kxy)}, h = ${f1(b.hPcb, 1)}`],
     ["rBoard", "R board", fp(r.rBoardCW), "°C/W", "R junction to board + R spreading"],
-    ["", "Solve with the shared board node"],
-    ["f", "f, share down if the board were at ambient", fp(r.f), "", "R top / (R top + R board)"],
+    ["", X ? "Solve with the shared board and plate nodes" : "Solve with the shared board node"],
+    ["f", X ? "f, share down if the board and plate were at ambient" : "f, share down if the board were at ambient", fp(r.f), "", "R top / (R top + R board)"],
     ["c", "c", fp(r.cWK), "W/K", "1 / (R top + R board)"],
-    ["rise", "Board rise", f1(b.riseC, 2), "K", "Σ f·Pd / (1 / R board to air + Σ c), over all parts"],
-    ["qBoard", "Q into the board", fp(r.qBoardW), "W", `f × Pd − c × board rise${r.qBoardW < 0 ? "; negative: the board heats this part" : ""}`],
-    ["qTop", "Q out of the top", fp(r.qTopW), "W", "Pd − Q board"],
-    ["tj", "Tj", f1(r.tjC), "°C", "ambient + Q top × R top"],
+    ["rise", "Board rise", f1(b.riseC, 2), "K", b.plates.length ? "board and plate heat balances solved together, over all parts" : "Σ f·Pd / (1 / R board to air + Σ c), over all parts"],
+    ...(X ? [["prise", "Plate rise", f1(X.riseC, 2), "K", "heat in from its parts = plate rise / R plate to air"]] : []),
+    ["qBoard", "Q into the board", fp(r.qBoardW), "W", `f × Pd − c × board rise${X ? " + c × plate rise" : ""}${r.qBoardW < 0 ? "; negative: the board heats this part" : ""}`],
+    ["qTop", X ? "Q into the plate" : "Q out of the top", fp(r.qTopW), "W", "Pd − Q board"],
+    ["tj", "Tj", f1(r.tjC), "°C", X ? "ambient + plate rise + Q top × R top" : "ambient + Q top × R top"],
     ["margin", "Margin", f1(r.marginC), "K", isNum(r.tjMaxC) ? `Tj max ${r.tjMaxC} − Tj` : "type Tj max in Parts"],
   ];
   const rowsHtml = rows.map(([id, label, v, u, f]) => id === "" ? `<tr class="sub"><td colspan="3">${label}</td></tr>`
@@ -1260,9 +1346,9 @@ function netSvg(k, r, b) {
   const res = (x, y, label, v, fid) => `<rect class="res" x="${x - 8}" y="${y - 18}" width="16" height="36" rx="3" />
     <text class="lbl" x="${x - 16}" y="${y + 4}" text-anchor="end">${label}</text>${num(x + 16, y + 5, v + " °C/W", fid)}`;
   return `<svg class="net" viewBox="0 0 560 340" role="img" aria-label="Heat paths of ${esc(k)}">
-    <line class="node" x1="30" y1="28" x2="530" y2="28" /><text class="nl" x="30" y="18">Air</text>${num(64, 18, f1(b.ambientC) + " °C", "tj")}
+    <line class="node" x1="30" y1="28" x2="530" y2="28" /><text class="nl" x="30" y="18">${r.plate ? esc(r.plate.name) : "Air"}</text>${num(r.plate ? 112 : 64, 18, f1(r.plate ? r.plate.tempC : b.ambientC) + " °C", r.plate ? "prise" : "tj")}
     <line class="wire" x1="170" y1="28" x2="170" y2="300" /><line class="wire" x1="440" y1="28" x2="440" y2="300" />
-    ${res(170, 70, "R surface to air", fp(r.rSurfaceAirCW), "rSurf")}
+    ${r.plate ? res(170, 70, "R TIM, pedestal, plate", fp(r.rTopCW - r.rJTopCW), "rTop") : res(170, 70, "R surface to air", fp(r.rSurfaceAirCW), "rSurf")}
     ${res(170, 124, "R junction to top", fp(r.rJTopCW), "rJTop")}
     <text class="flow" x="186" y="100">↑ Q top</text>${num(244, 100, fp(r.qTopW) + " W", "qTop")}
     <circle class="tj" cx="170" cy="170" r="9" fill="${tjFill}" /><text class="nl" x="152" y="175" text-anchor="end">Junction</text>${num(186, 175, f1(r.tjC) + " °C", "tj")}
