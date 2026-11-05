@@ -178,8 +178,9 @@ Timings on the sample: build about 1.5 min, apply with a change 40 to 80 s, gene
   the page only (a junction model needs both); the hand check still uses it as the SolidWorks route does
 - [x] Solve button and results card (temperatures per part, board hot spot, convergence, energy balance)
 - [x] Thermal solution: spreader plates and TIMs from the page, drawn and finished in SolidWorks, back to the hand check
-  and into AEDT. Page checked in the browser on a copy of the Bluetooth sample; the SolidWorks macros and the AEDT import
-  are not yet run
+  and into AEDT. Run end to end on a copy of the Bluetooth sample (2026-11-05): Build Solution (plate, 1 pedestal, 2 TIMs),
+  Send Solution, Apply, off/on, Solve: U4 49.8 to 44.3 C, U1 48.7 to 44.4 C, plate 44.0 C. The hand check gives the
+  plate 32.6 C: it cools the whole plate to air and ignores the board heating the underside across the small gap
 - [ ] Radiation model name for S2S (the page uses discrete ordinates); per-surface emissivity; a heat sink
 - [ ] Mesh cell count in the page (Generate mesh reports time only)
 - [x] Minimal page: Settings holds the hand check values, flag limits, air box (air around, extra above), cells in gaps
