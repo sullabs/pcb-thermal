@@ -215,6 +215,7 @@ def add_step(folder: Path, board: dict):
             f = found[p["refDes"]]
             p.update(stepHMm=f["hMm"], stepXMm=f["xMm"], stepYMm=f["yMm"], stepAngleDeg=f["aDeg"])
     board["step"] = {"file": steps[-1].name, "parts": len(found), "byPosition": sum(f["by"] == "position" for f in found.values()), **rep}
+    board["stepFrame"] = board["step"].pop("frame")       # the SolidWorks solution is drawn in the STEP's frame
     print(f"{steps[-1].name}: {rep['components']} components besides the board, {len(found)} of them matched to a part"
           f" (the EDB has {len(board['parts'])} parts, many without a 3D body: test points, fiducials, holes)", flush=True)
     for a in rep["away"]:
@@ -230,6 +231,7 @@ def step_only(folder: Path) -> Path:
         raise SystemExit("No board.json yet: read the board first")
     board = json.loads(out.read_text(encoding="utf-8"))
     board.pop("step", None)
+    board.pop("stepFrame", None)
     for p in board["parts"]:
         for k in ("stepHMm", "stepXMm", "stepYMm", "stepAngleDeg"):
             p.pop(k, None)

@@ -383,6 +383,8 @@ def for_board(path, board, report=None):
     tops = [round(b[2], 2) for r, (b, _) in hits.items() if edb[r]["side"] == "top"]
     top = max(set(tops), key=tops.count) if tops else max(b[2] for b, _ in hits.values()) if hits else 0.0
     bottom = top - board["thicknessMm"]
+    if report is not None:      # STEP point + (offXMm, offYMm) = EDB point; topZMm is the board's top face in the STEP
+        report["frame"] = {"offXMm": round(off[0], 4) + 0.0, "offYMm": round(off[1], 4) + 0.0, "topZMm": round(top, 4) + 0.0}
     out = {}
     for r, (b, by) in hits.items():
         h = b[5] - b[2]                     # a part off the board faces (a rigid-flex strip): its own height
@@ -403,6 +405,7 @@ if __name__ == "__main__":
         rep = {}
         print(json.dumps(for_board(sys.argv[1], json.loads(Path(sys.argv[2]).read_text(encoding="utf-8")), rep), indent=1))
         print(f"{rep['components']} components in the STEP", file=sys.stderr)
+        print(f"frame: {rep['frame']}", file=sys.stderr)
         for a in rep["away"]:
             print(f"away from its pads: {a['refDes']} body at {a['atMm']}, pads at {a['padsMm']} ({a['distMm']} mm)", file=sys.stderr)
         for u in rep["unmatched"]:

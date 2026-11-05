@@ -115,6 +115,8 @@
   .kv { display:grid; grid-template-columns:max-content 1fr; gap:3px 18px; margin:0 0 12px; font-size:14.5px; } .kv dt { color:var(--mut); } .kv dd { margin:0; }
   .grow { flex:1; min-width:120px; }
   .total { font:600 17px var(--disp); font-variant-numeric:tabular-nums; }
+  label.sol-on { margin-left:6px; font:400 14px var(--body); }
+  .sol-kv { margin:12px 0 0; }
 
   /* ---- action bar ---- */
   .bar { position:fixed; left:0; right:0; bottom:0; background:var(--card); border-top:1px solid var(--line); padding:10px 20px; z-index:5; }
@@ -264,6 +266,7 @@
       <li><a href="#s-gaps"><span>Fill the gaps<small id="rGaps"></small></span><i class="dot" id="dGaps"></i></a></li>
       <li><a href="#s-env"><span>Environment<small id="rEnv"></small></span><i class="dot ok"></i></a></li>
       <li><a href="#s-parts"><span>Parts<small id="rParts"></small></span><i class="dot" id="dParts"></i></a></li>
+      <li><a href="#s-sol"><span>Thermal solution<small id="rSol"></small></span><i class="dot" id="dSol"></i></a></li>
       <li><a href="#s-mesh"><span>Mesh<small id="rMesh"></small></span><i class="dot ok"></i></a></li>
       <li><a href="#s-hand"><span>Hand check<small id="rHand"></small></span><i class="dot" id="dHand"></i></a></li>
       <li><a href="#s-aedt"><span>In AEDT<small id="rAedt"></small></span><i class="dot" id="dAedt"></i></a></li>
@@ -344,8 +347,21 @@
       </table></div>
     </section>
 
+    <section class="step" id="s-sol">
+      <h2 data-tip="A heat spreader plate over the parts you tick, with a TIM layer on each. Top-side parts make the top plate, bottom-side parts the bottom plate. The page works out the first plate; Build Solution in SolidWorks draws it around the board STEP; you finish it there (holes, shape); Send Solution brings it back here and to AEDT. Off: nothing of it is used, and Apply suppresses it in AEDT."><span class="n">4</span> Thermal solution <label class="inline sol-on"><input type="checkbox" id="solOn"> On</label></h2>
+      <div id="solBody">
+        <h3 data-tip="Only the parts in Parts can be ticked. The plate touches a ticked part through its TIM. Sizes and heights are the STEP's: SolidWorks builds on the STEP bodies.">Parts under the plate</h3>
+        <div class="scroll"><table>
+          <thead><tr><th class="n">Plate</th><th>RefDes</th><th>Side</th><th class="n" data-tip="Height of the part body from the board face, from the STEP">Height (mm)</th><th class="n">TIM (mm)</th><th class="n">TIM k (W/m&middot;K)</th><th class="n" data-tip="Plate underside minus the part top">Gap (mm)</th><th class="n" data-tip="The plate grows down to the part by this much; the TIM fills the rest. Under the minimum pedestal (Settings of the plate), no pedestal: the TIM fills the gap">Pedestal (mm)</th><th></th></tr></thead>
+          <tbody id="solRows"></tbody>
+        </table></div>
+        <div id="solPlates"></div>
+        <ul class="plain checks" id="solNotes"></ul>
+      </div>
+    </section>
+
     <section class="step" id="s-mesh">
-      <h2><span class="n">4</span> Mesh</h2>
+      <h2><span class="n">5</span> Mesh</h2>
       <div class="row" id="meshRow">
         <label>Mesh<select id="level" data-k="mesh.mode"><option value="1">Automatic, level 1</option><option value="2">Automatic, level 2</option>
           <option value="3">Automatic, level 3</option><option value="4">Automatic, level 4</option><option value="5">Automatic, level 5</option><option value="manual">Manual</option></select></label>
@@ -369,7 +385,7 @@
     </section>
 
     <section class="step" id="s-hand">
-      <h2 data-tip="Bare board resistor network, the same as the SolidWorks route. It uses the values on this page, so it updates as you type, before Apply. Its h, emissivity and k values and the flag limits are in Settings."><span class="n">5</span> Hand check</h2>
+      <h2 data-tip="Bare board resistor network, the same as the SolidWorks route. It uses the values on this page, so it updates as you type, before Apply. Its h, emissivity and k values and the flag limits are in Settings."><span class="n">6</span> Hand check</h2>
       <div class="row hc-match">
         <button id="matchBtn" title="Fit the h of the PCB faces so the hand board average equals the Icepak board average">Match to the last Icepak run</button>
         <button id="unmatchBtn" hidden>Back to textbook h</button>
@@ -387,22 +403,22 @@
     </section>
 
     <section class="step" id="s-aedt">
-      <h2><span class="n">6</span> In AEDT now <span class="mut" id="readAt"></span></h2>
+      <h2><span class="n">7</span> In AEDT now <span class="mut" id="readAt"></span></h2>
       <div id="aedt"><span class="mut">Nothing built yet. Press Build.</span></div>
     </section>
 
     <section class="step" id="s-result">
-      <h2 data-tip="The Icepak temperature is the hottest point in the part body; for a junction model it is the case surface. The junction temperature itself is not read, so expect the hand Tj to be a little above it. Full fields are in AEDT."><span class="n">7</span> Result <span class="mut" id="resAt"></span></h2>
+      <h2 data-tip="The Icepak temperature is the hottest point in the part body; for a junction model it is the case surface. The junction temperature itself is not read, so expect the hand Tj to be a little above it. Full fields are in AEDT."><span class="n">8</span> Result <span class="mut" id="resAt"></span></h2>
       <div id="result"><span class="mut">Not solved yet. Press Solve.</span></div>
     </section>
 
     <section class="step" id="s-runs">
-      <h2 data-tip="Every Solve and every mesh check solve is kept in the runs folder next to the project, with the settings it ran with. Newest first. A bold setting changed from the run below it. AEDT itself keeps only the last solution."><span class="n">8</span> Runs <span class="mut" id="runsN"></span></h2>
+      <h2 data-tip="Every Solve and every mesh check solve is kept in the runs folder next to the project, with the settings it ran with. Newest first. A bold setting changed from the run below it. AEDT itself keeps only the last solution."><span class="n">9</span> Runs <span class="mut" id="runsN"></span></h2>
       <div id="runs"><span class="mut">No run kept yet. Each Solve adds one.</span></div>
     </section>
 
     <section class="step" id="s-run">
-      <h2><span class="n">9</span> Last run</h2>
+      <h2><span class="n">10</span> Last run</h2>
       <div id="checks"><span class="mut">Not run yet.</span></div>
       <pre id="log" hidden></pre>
     </section>
@@ -769,6 +785,7 @@ function drawParts() {
     <td><select data-p="cls" aria-label="${esc(ref)} class"><option value="">none: Pd typed</option>${Object.keys(CLASS_METHOD).map(c => `<option${parts[ref].cls === c ? " selected" : ""}>${esc(c)}</option>`).join("")}</select></td>
     ${POWER_F.map(f => pcell(ref, f)).join("")}<td class="n" data-pd></td><td data-how></td></tr>`).join("");
   $("noheat").hidden = order.some(r => parts[r]);
+  drawSol();
 }
 function drawPd() {          // results of the Pd table, after readRows()
   for (const tr of $("pwr").children) {
@@ -833,6 +850,7 @@ function markDirty() {
   $("setBtn").classList.toggle("dirty", !!$("settings").querySelector(".dirty"));
   $("applyBtn").textContent = n > 0 ? `Apply ${n} change${n > 1 ? "s" : ""}` : "Apply changes";
   notes();
+  solution();
   renderMeshCheck();
   handCheck();
   gaps();
@@ -871,6 +889,150 @@ function notes() {
   if (noTj.length) out.push(`<li class="mut">${list(noTj)}: no Tj max, so no margin check.</li>`);
   if (noHeat.length) out.push(`<li class="mut">${list(noHeat)}: no power, so ${noHeat.length > 1 ? "blocks" : "a block"} without heat. ${noHeat.length > 1 ? "They shape" : "It shapes"} the air flow and spread${noHeat.length > 1 ? "" : "s"} heat.</li>`);
   $("notes").innerHTML = out.join("");
+}
+
+/* ---- thermal solution: a spreader plate over the ticked parts. The page works out the first plate in the STEP's
+   frame (study.json solution.forSolidWorks); BuildSolution.bas draws it in SolidWorks around the board STEP ---- */
+const PLATE_K = { Aluminium: 167, Copper: 390 };          // W/m·K: 6061-T6, C110
+const PLATE_DEFAULT = { on: true, material: "Aluminium", tMm: 2, marginMm: 5, liftMm: 0, minPedMm: 0.3 };
+const TIM_DEFAULT = { timTMm: 0.2, timK: 3 };
+const PLATE_F = ["tMm", "marginMm", "liftMm", "minPedMm", "kWmK"];
+const CLEAR_MM = 0.5;      // the Lift a hit suggests leaves this much air above the part
+const SIDES = { top: "Top plate", bottom: "Bottom plate" };
+let sol = { on: false, plates: {}, parts: {} };     // the inputs, as in study.json solution
+let solLast = null;        // the last solPlan()
+const plateOf = side => ({ ...PLATE_DEFAULT, ...Object.fromEntries(Object.entries(sol.plates[side] || {}).filter(([, v]) => v !== undefined)) });
+const plateK = p => p.material === "Other" ? p.kWmK : PLATE_K[p.material];
+// the axis-aligned box of a part body on the board, EDB frame: centred on its pads, the STEP body size turned by its angle
+function envOf(b) {
+  const a = (b.stepAngleDeg ?? b.angleDeg ?? 0) * Math.PI / 180, L = b.stepXMm ?? b.lMm, W = b.stepYMm ?? b.wMm;
+  const cx = b.xMinMm + b.lMm / 2, cy = b.yMinMm + b.wMm / 2;
+  const hx = (Math.abs(L * Math.cos(a)) + Math.abs(W * Math.sin(a))) / 2, hy = (Math.abs(L * Math.sin(a)) + Math.abs(W * Math.cos(a))) / 2;
+  return [cx - hx, cy - hy, cx + hx, cy + hy];
+}
+function readSol() {
+  for (const e of $("s-sol").querySelectorAll("[data-sr]")) {
+    const q = sol.parts[e.dataset.sr] ??= {}, f = e.dataset.sf;
+    if (f === "on") q.on = e.checked; else { const v = parseFloat(e.value); q[f] = v >= 0 ? v : undefined; }
+  }
+  for (const e of $("s-sol").querySelectorAll("[data-sp]")) {
+    const q = sol.plates[e.dataset.sp] ??= {}, f = e.dataset.sf;
+    if (f === "on") q.on = e.checked; else if (f === "material") q.material = e.value;
+    else { const v = parseFloat(e.value); q[f] = v >= 0 ? v : undefined; }
+  }
+  sol.on = $("solOn").checked;
+}
+// Plates from the ticked parts: heights from the board face outward. The underside sits Lift above the highest part
+// top + TIM; each part gets a pedestal down to its TIM, or none under the minimum pedestal (then the TIM fills the gap)
+function solPlan() {
+  const by = Object.fromEntries(board.parts.map(p => [p.refDes, p])), o = board.outlineMm, out = { plates: {}, notes: [] };
+  const ticked = order.filter(r => parts[r] && by[r] && sol.parts[r]?.on);
+  for (const side of Object.keys(SIDES)) {
+    const pl = plateOf(side);
+    const chips = ticked.filter(r => by[r].side === side).map(r => {
+      const b = by[r], q = { ...TIM_DEFAULT, ...Object.fromEntries(Object.entries(sol.parts[r]).filter(([, v]) => v !== undefined)) };
+      return { refDes: r, hMm: b.stepHMm > 0 ? b.stepHMm : undefined, env: envOf(b), timTMm: q.timTMm, timK: q.timK, b };
+    });
+    if (!chips.length) continue;
+    const ok = chips.filter(c => isNum(c.hMm));
+    const P = out.plates[side] = { side, chips, ...pl, kWmK: plateK(pl) };
+    if (!ok.length) continue;
+    P.faceMm = Math.max(...ok.map(c => c.hMm + c.timTMm)) + N(pl.liftMm);
+    for (const c of ok) {
+      c.gapMm = P.faceMm - c.hMm;
+      c.pedMm = c.gapMm - c.timTMm < pl.minPedMm ? 0 : c.gapMm - c.timTMm;
+      c.timUsedMm = c.gapMm - c.pedMm;
+    }
+    const m = N(pl.marginMm);
+    P.outline = [Math.max(o.xMin, Math.min(...ok.map(c => c.env[0])) - m), Math.max(o.yMin, Math.min(...ok.map(c => c.env[1])) - m),
+                 Math.min(o.xMax, Math.max(...ok.map(c => c.env[2])) + m), Math.min(o.yMax, Math.max(...ok.map(c => c.env[3])) + m)];
+    // a part not ticked, under the plate, taller than the underside: it hits the plate (STEP height, else typed, else EDB)
+    const [x0, y0, x1, y1] = P.outline;
+    P.hits = board.parts.filter(b => b.side === side && !chips.some(c => c.refDes === b.refDes)).map(b => {
+      const h = b.stepHMm > 0 ? b.stepHMm : parts[b.refDes]?.heightMm > 0 ? parts[b.refDes].heightMm : b.hMm, e = envOf(b);
+      return { refDes: b.refDes, hMm: h, inside: e[0] < x1 && e[2] > x0 && e[1] < y1 && e[3] > y0 };
+    }).filter(x => x.inside && x.hMm > P.faceMm).sort((a, z) => z.hMm - a.hMm);
+  }
+  // what SolidWorks gets: the STEP's frame (EDB point - offset; Z from the STEP's board top face), mm
+  const fr = board.stepFrame;
+  if (fr) {
+    const sx = x => +(x - fr.offXMm).toFixed(4), sy = y => +(y - fr.offYMm).toFixed(4);
+    const zAt = (side, d) => +(side === "top" ? fr.topZMm + d : fr.topZMm - board.thicknessMm - d).toFixed(4);   // d out of the board face
+    out.forSolidWorks = { stepFile: board.step?.file, plates: Object.values(out.plates).filter(P => isNum(P.faceMm)).map(P => ({
+      side: P.side, on: P.on, material: P.material, kWmK: P.kWmK, tMm: P.tMm, dir: P.side === "top" ? 1 : -1,
+      undersideZMm: zAt(P.side, P.faceMm), outlineMm: [sx(P.outline[0]), sy(P.outline[1]), sx(P.outline[2]), sy(P.outline[3])],
+      chips: P.chips.filter(c => isNum(c.hMm)).map(c => ({ refDes: c.refDes, boxMm: [sx(c.env[0]), sy(c.env[1]), sx(c.env[2]), sy(c.env[3])],
+        faceZMm: zAt(P.side, c.hMm), timTMm: +c.timUsedMm.toFixed(4), timK: c.timK, pedestalMm: +c.pedMm.toFixed(4) })) })) };
+  }
+  return out;
+}
+function drawSol() {
+  const by = Object.fromEntries(board.parts.map(p => [p.refDes, p]));
+  const refs = order.filter(r => parts[r] && by[r]);
+  const num = (ref, f, step) => `<td class="n"><input type="number" data-sr="${esc(ref)}" data-sf="${f}" min="0" step="${step}" placeholder="${TIM_DEFAULT[f]}" value="${sol.parts[ref]?.[f] ?? ""}" aria-label="${esc(ref)} ${f}"></td>`;
+  $("solRows").innerHTML = refs.map(ref => `<tr data-ref="${esc(ref)}"><td class="n"><input type="checkbox" data-sr="${esc(ref)}" data-sf="on"${sol.parts[ref]?.on ? " checked" : ""} aria-label="${esc(ref)} under the plate"></td>
+    <td><b>${esc(ref)}</b><small>${esc(by[ref].part)}</small></td><td>${by[ref].side}</td><td class="n" data-h></td>${num(ref, "timTMm", 0.05)}${num(ref, "timK", 0.5)}<td class="n" data-gap></td><td class="n" data-ped></td><td data-why></td></tr>`).join("")
+    || `<tr><td colspan="9" class="mut">No parts yet. Add them in Parts first.</td></tr>`;
+  $("solPlates").dataset.sides = "";
+}
+function drawPlates(sides) {      // one card per plate in use; drawn again only when the plates in use change
+  if ($("solPlates").dataset.sides === sides.join()) return;
+  $("solPlates").dataset.sides = sides.join();
+  const num = (side, f, label, step, tip) => `<label data-tip="${tip}">${label}<input type="number" data-sp="${side}" data-sf="${f}" min="0" step="${step}" placeholder="${PLATE_DEFAULT[f] ?? ""}" value="${sol.plates[side]?.[f] ?? ""}"></label>`;
+  $("solPlates").innerHTML = sides.map(side => {
+    const p = plateOf(side);
+    return `<h3>${SIDES[side]} <label class="inline sol-on"><input type="checkbox" data-sp="${side}" data-sf="on"${p.on ? " checked" : ""}> On</label></h3>
+      <div class="row">
+        <label>Material<select data-sp="${side}" data-sf="material">${[...Object.keys(PLATE_K), "Other"].map(m => `<option${p.material === m ? " selected" : ""}>${m}</option>`).join("")}</select></label>
+        ${num(side, "kWmK", "k (W/m&middot;K)", 1, "The plate's k when the material is Other")}
+        ${num(side, "tMm", "Thickness (mm)", 0.5, "Plate thickness, away from the board")}
+        ${num(side, "marginMm", "Margin (mm)", 1, "The first plate is a rectangle around the ticked parts plus this, kept inside the board outline. Change the shape in SolidWorks")}
+        ${num(side, "liftMm", "Lift (mm)", 0.5, "Raises the plate further from the parts, to clear a part it hits. Pedestals fill the gap down to the ticked parts")}
+        ${num(side, "minPedMm", "Min pedestal (mm)", 0.1, "Under this, no pedestal: the TIM fills the gap")}
+      </div>
+      <dl class="kv sol-kv" data-plate="${side}"></dl>`;
+  }).join("");
+}
+function solution() {
+  if (!board) return;
+  readSol();
+  $("solBody").hidden = !sol.on;
+  const pl = solLast = solPlan(), by = Object.fromEntries(board.parts.map(p => [p.refDes, p]));
+  drawPlates(Object.keys(pl.plates));
+  for (const e of $("solPlates").querySelectorAll("[data-sf=kWmK]")) e.closest("label").hidden = plateOf(e.dataset.sp).material !== "Other";
+  const chip = Object.fromEntries(Object.values(pl.plates).flatMap(P => P.chips.map(c => [c.refDes, c])));
+  for (const tr of $("solRows").querySelectorAll("tr[data-ref]")) {
+    const ref = tr.dataset.ref, b = by[ref], c = chip[ref];
+    tr.querySelector("[data-h]").textContent = b.stepHMm > 0 ? f1(b.stepHMm, 2) : "no STEP body";
+    tr.querySelector("[data-h]").className = "n" + (b.stepHMm > 0 ? "" : c ? " error" : " mut");
+    tr.querySelector("[data-gap]").textContent = c && isNum(c.gapMm) ? f1(c.gapMm, 2) : "";
+    tr.querySelector("[data-ped]").textContent = c && isNum(c.pedMm) ? c.pedMm > 0 ? f1(c.pedMm, 2) : "none" : "";
+    tr.querySelector("[data-why]").innerHTML = c && isNum(c.pedMm) && !c.pedMm && c.timUsedMm > c.timTMm + 1e-6 ? `<small class="warn">TIM fills ${f1(c.timUsedMm, 2)} mm</small>` : "";
+  }
+  const notes = [], lst = a => esc(a.length > 1 ? a.slice(0, -1).join(", ") + " and " + a.at(-1) : a[0]);
+  for (const P of Object.values(pl.plates)) {
+    const kv = $("solPlates").querySelector(`[data-plate=${P.side}]`);
+    if (!isNum(P.faceMm)) { kv.innerHTML = `<dt>Plate</dt><dd class="error">no ticked part has a STEP body</dd>`; continue; }
+    const [x0, y0, x1, y1] = P.outline;
+    kv.innerHTML = `<dt>Underside</dt><dd>${f1(P.faceMm, 2)} mm from the board ${P.side} face</dd>
+      <dt>First outline</dt><dd>${f1(x1 - x0)} × ${f1(y1 - y0)} mm at ${f1(x0)}, ${f1(y0)} (board X, Y)</dd>
+      <dt>k</dt><dd>${isNum(P.kWmK) ? `${P.kWmK} W/m·K` : `<span class="error">type k</span>`}</dd>`;
+    if (P.hits.length) notes.push(`<li class="warn">${SIDES[P.side]}: ${P.hits.length} part${P.hits.length > 1 ? "s" : ""} not ticked under the plate reach${P.hits.length > 1 ? "" : "es"} above its underside: ${P.hits.slice(0, 8).map(h => `<b>${esc(h.refDes)}</b> ${f1(h.hMm, 2)} mm`).join(", ")}${P.hits.length > 8 ? ", …" : ""}. Lift +${f1(P.hits[0].hMm - P.faceMm + CLEAR_MM, 1)} mm clears ${P.hits.length > 1 ? "them" : "it"} by ${CLEAR_MM} mm, or cut around ${P.hits.length > 1 ? "them" : "it"} in SolidWorks.</li>`);
+  }
+  const ticked = order.filter(r => parts[r] && by[r] && sol.parts[r]?.on);
+  const noBody = ticked.filter(r => !(by[r].stepHMm > 0));
+  if (noBody.length) notes.push(`<li class="error">${lst(noBody)}: no body in the STEP, so SolidWorks has nothing to put a TIM on. ${noBody.length > 1 ? "They are" : "It is"} left out of the plate.</li>`);
+  const over = ticked.filter(r => by[r].stepHMm > 0).map(r => {
+    const p = parts[r], b = by[r], d = [];
+    for (const [f, s, n] of [["heightMm", "stepHMm", "height"], ["bodyXMm", "stepXMm", "body X"], ["bodyYMm", "stepYMm", "body Y"]])
+      if (p[f] > 0 && isNum(b[s]) && Math.abs(p[f] - b[s]) > 0.01) d.push(`${n} ${f1(p[f], 2)} typed, ${f1(b[s], 2)} in the STEP`);
+    return d.length ? `<b>${esc(r)}</b> ${d.join(", ")}` : "";
+  }).filter(Boolean);
+  if (over.length) notes.push(`<li class="warn">Typed sizes differ from the STEP: ${over.join("; ")}. SolidWorks builds on the STEP bodies, but AEDT makes the block from the typed values, so the TIM may not touch the block there. Clear the typed value, or fix the STEP.</li>`);
+  if (ticked.length && !board.stepFrame) notes.push(`<li class="warn">board.json has no STEP frame yet, so SolidWorks cannot place the plate. Press <b>Read heights from the STEP</b> in step 1.</li>`);
+  if (!ticked.length) notes.push(`<li class="mut">Tick the parts the plate touches.</li>`);
+  else if (pl.forSolidWorks?.plates.length) notes.push(`<li class="mut">In SolidWorks, press <b>Build Solution</b> and pick this board folder. It reads the plate from <code>study.json</code> and makes <code>${esc(board.name)}_solution.sldasm</code> here.</li>`);
+  $("solNotes").innerHTML = notes.join("");
 }
 
 /* ---- hand check: the bare board network of the SolidWorks route (webapp/src/calc/network.js on addin-mvp).
@@ -1200,6 +1362,9 @@ function rail() {
   const c = results?.converged;
   $("rRes").textContent = !results?.parts ? "not solved" : c && c.read && !c.ok ? "not converged" : `solved ${results.solvedAt}`;
   dot("dRes", !results?.parts ? "" : c && c.read && !c.ok ? "error" : "ok");
+  const sp = solLast ? Object.values(solLast.plates) : [], hits = sp.reduce((n, P) => n + (P.hits?.length || 0), 0);
+  $("rSol").textContent = !sol.on ? "off" : !sp.length ? "no part ticked" : `${sp.length} plate${sp.length > 1 ? "s" : ""}${hits ? `, ${hits} part${hits > 1 ? "s" : ""} in the way` : ""}`;
+  dot("dSol", !sol.on || !sp.length ? "" : $("solNotes").querySelector(".error") ? "error" : hits || $("solNotes").querySelector(".warn") ? "warn" : "ok");
   const ch = lastChecks;
   $("rRun").textContent = job.running && !job.silent ? job.what : !ch ? "nothing yet" : ch.ready ? "ready" : "not ready";
   dot("dRun", !ch ? "" : ch.ready ? "ok" : "error");
@@ -1516,6 +1681,9 @@ function initForm() {          // first load: the page's last values, then AEDT 
   for (const e of document.querySelectorAll("[data-hc]")) e.value = study.handCheck?.[e.dataset.hc] ?? (e.dataset.hc === "critMargin" ? study.handCheck?.tightC : undefined) ?? "";   // tightC: the old name
   hcMatched = study.handCheck?.matched ?? null;
   hiddenNotes = { ...(study.hiddenNotes || {}) };
+  const so = study.solution || {};
+  sol = { on: !!so.on, plates: structuredClone(so.plates || {}), parts: structuredClone(so.parts || {}) };
+  $("solOn").checked = sol.on;
   firstBodies = Object.fromEntries((study.parts || []).map(p => [p.refDes, p]));
   drawParts(); drawMats();
 }
@@ -1536,7 +1704,16 @@ function collect() {
     materials: Object.fromEntries(typed),
     handCheck: { ...readHc(), ...(hcMatched ? { matched: hcMatched } : {}) },
     hiddenNotes,
+    solution: solOut(),
   };
+}
+function solOut() {        // the inputs, and the plates SolidWorks builds (worked out now)
+  solution();
+  const keep = o => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+  const fs = solLast?.forSolidWorks;
+  return { on: sol.on, plates: Object.fromEntries(Object.entries(sol.plates).map(([k, v]) => [k, keep(v)])),
+           parts: Object.fromEntries(Object.entries(sol.parts).filter(([r, v]) => parts[r] && (v.on || v.timTMm !== undefined || v.timK !== undefined)).map(([k, v]) => [k, keep(v)])),
+           ...(fs ? { forSolidWorks: { ...fs, frame: board.stepFrame, computedAt: new Date().toISOString().slice(0, 19) } } : {}) };
 }
 async function run(mode) {
   clearTimeout(hcSave);
@@ -1733,6 +1910,7 @@ $("form").addEventListener("input", markDirty);
 $("rotAxis").addEventListener("change", onTurn);
 $("rotDeg").addEventListener("change", onTurn);
 $("form").addEventListener("change", markDirty);
+for (const ev of ["input", "change"]) $("s-sol").addEventListener(ev, saveHcSoon);     // page-only until SolidWorks sends the plate
 for (const ev of ["input", "change"]) $("settings").addEventListener(ev, e => {     // outside the form
   if (e.target.id === "helpChk") return;
   if (board) markDirty();
