@@ -949,18 +949,24 @@ def _sources(ic, powered):
 def _monitors(ic, sources, board):
     """one point monitor T_<ref> per heat source, made fresh for each solve. A network block is hollow, so its
     monitor sits on the case side face (the face away from the board), a plain block gets it at its centre.
+    A plain block also gets C_<ref>: the case temperature, at the middle of that case face, a little inside the
+    block so it reads the block and not the air (a network's T_ is already its case).
     The Q_ heat flow face monitors older versions made go too."""
-    for n in [n for n in ic.get_oo_name(ic.odesign, "Monitor") if n.startswith(("T_", "Q_"))]:
+    for n in [n for n in ic.get_oo_name(ic.odesign, "Monitor") if n.startswith(("T_", "C_", "Q_"))]:
         ic.monitor.delete_monitor(n)
     _, zhi = board_z(ic, board)
     for s in sources:
         ref = s["refDes"]
         bb = ic.modeler[ref].bounding_box
+        top = bb[2] >= zhi - 1e-6       # on the top side: the case face is the block's top
         if s["network"]:
-            pos = [(bb[0] + bb[3]) / 2, (bb[1] + bb[4]) / 2, bb[5] if bb[2] >= zhi - 1e-6 else bb[2]]
+            pos = [(bb[0] + bb[3]) / 2, (bb[1] + bb[4]) / 2, bb[5] if top else bb[2]]
             ic.monitor.assign_point_monitor(pos, monitor_quantity="Temperature", monitor_name=f"T_{ref}")
         else:
             ic.monitor.assign_point_monitor_in_object(ref, monitor_quantity="Temperature", monitor_name=f"T_{ref}")
+            dz = min(0.02, (bb[5] - bb[2]) / 10)
+            pos = [(bb[0] + bb[3]) / 2, (bb[1] + bb[4]) / 2, bb[5] - dz if top else bb[2] + dz]
+            ic.monitor.assign_point_monitor(pos, monitor_quantity="Temperature", monitor_name=f"C_{ref}")
 
 
 def _fmax(ic, obj, op="Maximum"):
@@ -999,6 +1005,17 @@ def _temp(ic, ref, hollow, monitor=None):
         return round(monitor, 2)
     try:
         return round(_final(ic, f"T_{ref}.Temperature", "Monitor"), 2)
+    except BaseException:  # noqa: BLE001  one missing value must not stop the others
+        return None
+
+
+def _case(ic, ref, hollow, temp):
+    """case temperature of a heat source: the middle of its case face (the face away from the board). For a network
+    block that is its T_ monitor, already read as `temp`; a plain block has its own C_ monitor"""
+    if hollow:
+        return temp
+    try:
+        return round(_final(ic, f"C_{ref}.Temperature", "Monitor"), 2)
     except BaseException:  # noqa: BLE001  one missing value must not stop the others
         return None
 
@@ -1309,6 +1326,8 @@ def _solve(ic, folder, board, powered, study, parts, write=True, label="Solve"):
                           f"25 C air reference and may be off by a few % for that reason alone.")
     rows = [{"refDes": p["refDes"], "powerW": p["powerW"], "tempC": _temp(ic, p["refDes"], p["network"], finals.get(p["refDes"])),
              "rjaCW": p["rjaCW"], "tjMaxC": p["tjMaxC"]} for p in powered]
+    for r, p in zip(rows, powered):
+        r["caseC"] = _case(ic, r["refDes"], p["network"], r["tempC"])
     if any(r["tempC"] is None for r in rows):
         check("warn", "Some temperatures could not be read. Look at the result in AEDT.")
     layers = ic.modeler.get_3d_component_object_list(name=PCB)

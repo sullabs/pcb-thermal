@@ -101,6 +101,7 @@
   td small { display:block; color:var(--mut); font-size:12px; }
   th.group { border-bottom:none; padding-bottom:0; color:var(--ink); font:600 12.5px var(--disp); }
   th.page, td.page { background:var(--soft); }
+  th.cs, td.cs { border-left:1px solid var(--line); }
   tr.sel td { background:var(--sel); }
   tbody tr.pick { cursor:pointer; } tbody tr.pick:hover td { background:var(--soft); } tbody tr.pick.sel:hover td { background:var(--sel); }
   .hint { color:var(--mut); font-size:13.5px; margin:10px 0 0; max-width:78ch; }
@@ -397,7 +398,7 @@
       <dl class="hc-board" id="hcBoard"></dl>
       <div class="scroll"><table>
         <thead><tr><th>RefDes</th><th>Flag</th><th class="n">Power (W)</th><th class="n">R top (&deg;C/W)</th><th class="n">R board (&deg;C/W)</th><th class="n">Into board (W)</th>
-          <th class="n">Tj hand (&deg;C)</th><th>Ambient to Tj max</th><th class="n">Margin (K)</th><th>Status</th><th class="n" title="Hottest point of the part body in the last Icepak solve">Icepak (&deg;C)</th><th class="n" data-tip="Icepak minus the hand check, in degrees. The % is that gap as a share of the Icepak rise above ambient (Icepak minus ambient). Plus: Icepak is hotter.">Icepak &minus; hand</th></tr></thead>
+          <th class="n">Tj hand (&deg;C)</th><th class="n">Case hand (&deg;C)</th><th>Ambient to Tj max</th><th class="n">Margin (K)</th><th>Status</th><th class="n" title="Hottest point of the part body in the last Icepak solve">Icepak (&deg;C)</th><th class="n" data-tip="Icepak minus the hand check, in degrees. The % is that gap as a share of the Icepak rise above ambient (Icepak minus ambient). Plus: Icepak is hotter.">Icepak &minus; hand</th></tr></thead>
         <tbody id="hcRows"></tbody>
       </table></div>
       <p class="hint" id="hcNone">No part has power yet. Type a power in Parts to see the hand check.</p>
@@ -1234,6 +1235,8 @@ function bareBoard(opt = {}) {      // opt.hPcb: try this h of both PCB faces (u
       r.qBoardW = r.f * r.pdW - r.cWK * b.riseC + r.cWK * tx;
       r.qTopW = r.pdW - r.qBoardW;
       r.tjC = isNum(r.rTopCW) ? ambient + tx + r.qTopW * r.rTopCW : b.boardC + r.qBoardW * r.rBoardCW;
+      // case top: one step up the top path from the junction (what a thermocouple on the part reads)
+      r.tcaseC = r.tjC - (isNum(r.rTopCW) ? r.qTopW * r.rJTopCW : 0);
       if (isNum(r.tjMaxC)) r.marginC = r.tjMaxC - r.tjC;
     }
     r.status = !isNum(r.tjC) ? "missing input" : !isNum(r.marginC) ? "no Tj max" : r.marginC < 0 ? "FAIL" : r.marginC < hc.critMargin ? "Tight" : "OK";
@@ -1295,7 +1298,7 @@ function handCheck() {
     const r = pl[ref], si = ice[ref], gap = isNum(r.tjC) && isNum(si) ? si - r.tjC : undefined, rise = si - b.ambientC;
     return `<tr class="pick fl-${r.flag}${ref === hcSel ? " sel" : ""}" data-hc-ref="${esc(ref)}" tabindex="0" aria-selected="${ref === hcSel}" title="Show the heat paths of ${esc(ref)}">
       <td><b>${esc(ref)}</b><small>${esc(r.model)}</small></td><td>${flagChip(r)}</td><td class="n">${fp(r.pdW)}</td><td class="n">${fp(r.rTopCW)}</td><td class="n">${fp(r.rBoardCW)}</td><td class="n">${fp(r.qBoardW)}</td>
-      <td class="n"><b>${f1(r.tjC)}</b></td><td>${thermo(r, b.ambientC)}</td><td class="n${r.marginC < 0 ? " error" : ""}">${f1(r.marginC)}</td><td>${statusChip(r.status)}</td>
+      <td class="n"><b>${f1(r.tjC)}</b></td><td class="n">${f1(r.tcaseC)}</td><td>${thermo(r, b.ambientC)}</td><td class="n${r.marginC < 0 ? " error" : ""}">${f1(r.marginC)}</td><td>${statusChip(r.status)}</td>
       <td class="n">${f1(si)}</td><td class="n">${isNum(gap) ? (gap >= 0 ? "+" : "") + f1(gap) + " K" + (rise > 0 ? ` (${(gap / rise * 100).toFixed(0)} %)` : "") : ""}</td></tr>`;
   }).join("");
   drawDetail(hb);
@@ -1347,6 +1350,7 @@ function drawDetail(hb) {
     ["qBoard", "Q into the board", fp(r.qBoardW), "W", `f × Pd − c × board rise${X ? " + c × plate rise" : ""}${r.qBoardW < 0 ? "; negative: the board heats this part" : ""}`],
     ["qTop", X ? "Q into the plate" : "Q out of the top", fp(r.qTopW), "W", "Pd − Q board"],
     ["tj", "Tj", f1(r.tjC), "°C", X ? "ambient + plate rise + Q top × R top" : "ambient + Q top × R top"],
+    ["tcase", "T case", f1(r.tcaseC), "°C", "Tj − Q top × R junction to top: the middle of the case top, where a thermocouple goes"],
     ["margin", "Margin", f1(r.marginC), "K", isNum(r.tjMaxC) ? `Tj max ${r.tjMaxC} − Tj` : "type Tj max in Parts"],
   ];
   const rowsHtml = rows.map(([id, label, v, u, f]) => id === "" ? `<tr class="sub"><td colspan="3">${label}</td></tr>`
@@ -1372,6 +1376,7 @@ function netSvg(k, r, b) {
     ${r.plate ? res(170, 70, "R TIM, pedestal, plate", fp(r.rTopCW - r.rJTopCW), "rTop") : res(170, 70, "R surface to air", fp(r.rSurfaceAirCW), "rSurf")}
     ${res(170, 124, "R junction to top", fp(r.rJTopCW), "rJTop")}
     <text class="flow" x="186" y="100">↑ Q top</text>${num(244, 100, fp(r.qTopW) + " W", "qTop")}
+    <circle class="tj" cx="170" cy="97" r="5" fill="var(--mild)" />${num(156, 101, "Case " + f1(r.tcaseC) + " °C", "tcase", "end")}
     <circle class="tj" cx="170" cy="170" r="9" fill="${tjFill}" /><text class="nl" x="152" y="175" text-anchor="end">Junction</text>${num(186, 175, f1(r.tjC) + " °C", "tj")}
     ${res(170, 214, "R junction to board", fp(r.rJBoardCW), "rJBoard")}
     <text class="flow" x="186" y="246">↓ Q board</text>${num(258, 246, fp(r.qBoardW) + " W", "qBoard")}
@@ -1555,9 +1560,14 @@ async function checkMesh() {
 }
 const changesText = () => `${pendingN} change${pendingN > 1 ? "s" : ""} on the page ${pendingN > 1 ? "are" : "is"} not in AEDT yet.`;
 
+let resultSig = null;
 function renderResult(r) {
   results = r;
-  if (!r || !r.parts) { $("fIce").textContent = "not solved"; return; }
+  if (!r || !r.parts) { $("fIce").textContent = "not solved"; resultSig = null; return; }
+  // the page polls every 5 s: draw again only when something shown changed, so a measured value being typed keeps focus
+  const sig = JSON.stringify([r, hcLast && Object.entries(hcLast.parts).map(([k, x]) => [k, x.tjC, x.tcaseC, x.minor])]);
+  if (sig === resultSig && $("result").querySelector("table")) return;
+  resultSig = sig;
   $("resAt").textContent = `solved ${r.solvedAt}, took ${dur(r.seconds)}`;
   $("fIce").textContent = r.hottestC != null ? `${r.hottestC.toFixed(1)} °C` : "n/a";
   const f = v => v == null ? "n/a" : v.toFixed(1) + " &deg;C";
@@ -1569,10 +1579,14 @@ function renderResult(r) {
     // Icepak minus hand check, in K and as a share of the Icepak rise above ambient: °C ratios depend on where 0 is
     const d = isNum(h) && p.tempC != null ? p.tempC - h : null, rise = p.tempC - r.ambientC;
     const k = v => (v >= 0 ? "+" : "") + v.toFixed(1) + " K";
-    return `<tr><td><b>${esc(p.refDes)}</b></td><td class="n">${p.tjMaxC != null ? p.tjMaxC + " &deg;C" : ""}</td><td class="n">${isNum(h) ? f(h) : ""}</td>
+    const hc = hand[p.refDes]?.tcaseC, meas = parts[p.refDes]?.tcMeasC;
+    return `<tr data-case="${esc(p.refDes)}"><td><b>${esc(p.refDes)}</b></td><td class="n">${p.tjMaxC != null ? p.tjMaxC + " &deg;C" : ""}</td><td class="n">${isNum(h) ? f(h) : ""}</td>
       <td class="n${over ? " error" : ""}"><b>${f(p.tempC)}</b></td>
       <td class="n">${d == null ? "" : k(d) + (rise > 0 ? ` (${(d / rise * 100).toFixed(0)} %)` : "")}</td>
-      <td class="n${over ? " error" : ""}">${m == null ? "" : k(m)}</td></tr>`;
+      <td class="n${over ? " error" : ""}">${m == null ? "" : k(m)}</td>
+      <td class="n cs">${isNum(hc) ? f(hc) : ""}</td><td class="n"><b>${p.caseC != null ? f(p.caseC) : '<span class="mut" title="Solve again to read the case">n/a</span>'}</b></td>
+      <td class="n"><input type="number" step="0.1" data-tcm="${esc(p.refDes)}" value="${meas ?? ""}" placeholder="&deg;C" aria-label="${esc(p.refDes)} case measured"></td>
+      <td class="n" data-gap="ice"></td><td class="n" data-gap="hand"></td></tr>`;
   }).join("");
   const c = r.converged, bad = c && c.items.filter(i => i.ok === false).map(i => i.name).join(", ");
   const it = c?.iterations, its = it === 1 ? "iteration" : "iterations";
@@ -1596,7 +1610,20 @@ function renderResult(r) {
   const b = r.balance, split = b && b.radiationW != null ? `, ${b.convectionW} W convection, ${b.radiationW} W radiation` : "";
   const bal = !b ? "" : b.radiation ? `<li class="warn">Energy balance not checked: radiation is on, and the monitors count only convection (${b.outW} W of ${b.inW} W). Solve again to check it.</li>` : `<li class="${Math.abs(b.errorPct) <= 1 ? "ok" : "error"}">Energy balance: ${b.inW} W in, ${b.outW} W out (${split.slice(2)}${split ? ", " : ""}${b.errorPct > 0 ? "+" : ""}${b.errorPct} %).${b.refFixW ? ` Corrected by ${b.refFixW} W for the solver's 25 &deg;C air reference (AEDT reports ${b.rawOutW} W out).` : ""}${Math.abs(b.errorPct) <= 1 ? "" : " Not balanced: do not trust these numbers."}</li>`;
   $("result").innerHTML = `<ul class="plain checks">${conv}${settle}${bal}${prof}</ul>${plots}<dl class="kv" style="margin-top:10px"><dt>Board hottest</dt><dd>${f(r.boardC)}</dd><dt>Board average</dt><dd>${f(r.boardMeanC)}</dd><dt>Hottest measured</dt><dd>${f(r.hottestC)}</dd>${(r.plates || []).map(x => `<dt>${esc(x.name.slice(4).replace("_", " "))}</dt><dd>${f(x.maxC)} hottest, ${f(x.meanC)} average${hcLast?.board.plates.find(X => "SOL_Spreader_" + X.side[0].toUpperCase() + X.side.slice(1) === x.name)?.tempC != null ? `; hand ${f(hcLast.board.plates.find(X => "SOL_Spreader_" + X.side[0].toUpperCase() + X.side.slice(1) === x.name).tempC)}` : ""}</dd>`).join("")}<dt>Ambient</dt><dd>${r.ambientC} &deg;C</dd></dl>
-    <div class="scroll"><table><thead><tr><th>Heat source</th><th class="n">Tj max</th><th class="n">Hand check Tj</th><th class="n">Icepak</th><th class="n" data-tip="Icepak minus the hand check, in degrees. The % is that gap as a share of the Icepak rise above ambient (Icepak minus ambient). Plus: Icepak is hotter.">Icepak &minus; hand</th><th class="n" data-tip="Tj max minus the Icepak temperature: degrees left before the limit. Negative: over the limit by that much.">Margin</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    <div class="scroll"><table><thead><tr><th></th><th class="group n" colspan="5">Junction, hottest point</th><th class="group n cs" colspan="5" data-tip="The middle of the case top (the face away from the board), where a thermocouple goes. Hand: Tj minus Q top × R junction to top. Icepak: a point there (for a junction model, its case node). Measured: type your reading; it is kept with the board folder. A gap is that one minus measured: plus means it reads hotter than the real part.">Case top</th></tr>
+      <tr><th>Heat source</th><th class="n">Tj max</th><th class="n">Hand check Tj</th><th class="n">Icepak</th><th class="n" data-tip="Icepak minus the hand check, in degrees. The % is that gap as a share of the Icepak rise above ambient (Icepak minus ambient). Plus: Icepak is hotter.">Icepak &minus; hand</th><th class="n" data-tip="Tj max minus the Icepak temperature: degrees left before the limit. Negative: over the limit by that much.">Margin</th>
+      <th class="n cs">Hand</th><th class="n">Icepak</th><th class="n">Measured</th><th class="n">Icepak &minus; meas.</th><th class="n">Hand &minus; meas.</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  caseGaps();
+}
+// the case gaps against the measured value, per row. Typing a measurement updates only these cells, so focus stays
+function caseGaps() {
+  const hand = hcLast ? hcLast.parts : {};
+  for (const tr of $("result").querySelectorAll("tr[data-case]")) {
+    const ref = tr.dataset.case, meas = parts[ref]?.tcMeasC, p = (results?.parts || []).find(x => x.refDes === ref);
+    const g = v => isNum(v) && isNum(meas) ? (v - meas >= 0 ? "+" : "") + (v - meas).toFixed(1) + " K" : "";
+    tr.querySelector('[data-gap="ice"]').textContent = g(p?.caseC);
+    tr.querySelector('[data-gap="hand"]').textContent = g(hand[ref]?.tcaseC);
+  }
 }
 
 /* ---- a small line plot of histories per iteration: [{name, pts: [[x, y]], limit?}] ---- */
@@ -2014,6 +2041,11 @@ $("addRef").onkeydown = e => { if (e.key === "Enter") $("addBtn").click(); };
 for (const k of MESH_F) el(k).addEventListener("input", meshTyped);     // before the form's markDirty
 $("level").addEventListener("change", levelPicked);
 $("form").addEventListener("input", markDirty);
+$("result").addEventListener("input", e => {      // the measured case temperature: page only, kept in study.json
+  const ref = e.target.dataset.tcm; if (!ref || !parts[ref]) return;
+  const v = parseFloat(e.target.value); parts[ref].tcMeasC = isFinite(v) ? v : undefined;
+  caseGaps(); saveHcSoon();
+});
 $("rotAxis").addEventListener("change", onTurn);
 $("rotDeg").addEventListener("change", onTurn);
 $("form").addEventListener("change", markDirty);
@@ -2105,6 +2137,7 @@ const TH_TERMS = { "Power (W)": "powerW", "Pd (W)": "powerW",
   "R board (°C/W)": ["R board", "Resistance from the junction down into the board and out through the board's faces to the air."],
   "Into board (W)": ["Into board", "The share of the part's power that goes down into the board rather than out of its top."],
   "Tj hand (°C)": ["Tj hand", "Junction temperature from the hand network: ambient + power through the two paths in parallel."],
+  "Case hand (°C)": ["Case hand", "Case top temperature from the hand network: Tj minus Q top × R junction to top. This is what a thermocouple on the middle of the part reads."],
   "Margin (K)": ["Margin", "Tj max minus the hand Tj. Below the Tight value of the inputs above, the part is Tight; below zero it fails."],
   "Ambient to Tj max": ["Ambient to Tj max", "Where the hand Tj sits between the ambient (left) and Tj max (the end of the bar)."],
   "Hand − Icepak": ["Hand − Icepak", "Hand Tj minus the hottest Icepak point of the part. Expect a few degrees above zero: Icepak reads the body, not the junction."],

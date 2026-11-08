@@ -34,6 +34,13 @@ Rja and Tj max are page-only (kept in `study.json`): the page shows Tj by Rja = 
 Rjc and Rjb together make a two-resistor junction model in AEDT (`P_<RefDes>`, type Network), the block then sits on
 the board surface so it can touch the PCB.
 
+Case temperature (the middle of the case top, where a thermocouple goes) for comparing with a measurement: the hand
+check gives Tj minus Q top x R junction to top; Solve reads `caseC` per part in `results.json` (a network block: its
+case node, the `T_` monitor; a plain block: a `C_<RefDes>` point monitor just inside its top face). The Result table
+shows hand, Icepak and a **Measured** field you type (page-only, `tcMeasC` in `study.json`), with both gaps to it.
+Hand and Icepak case are not the same number, even with the same junction model: the model is the same, but the hand
+check uses textbook h and Lee spreading where Icepak solves the air and the copper.
+
 ### Thermal solution (spreader plate)
 
 Step 4 of the page, with its own On switch. You tick the parts the plate touches (only parts in Parts). Top-side parts
